@@ -16,8 +16,21 @@ clqn stands for **clan**. Each clan has a **leader** who invites members and reg
 
 Requires Node.js 22+. Code workflows also need Git and an authenticated GitHub CLI (`gh`).
 
+clqn is not yet published to npm. Install it from a clone:
+
 ```sh
-npm install -g clqn
+git clone https://github.com/rli8145/clqn.git
+cd clqn
+npm ci
+npm run build
+npm link -w packages/cli
+```
+
+This puts `clqn` on your `PATH`. To update, run `git pull`, `npm ci`, and `npm run build`; the link stays in place. Remove it with `npm rm -g @clqn/cli`.
+
+Then point the CLI at your clan's API and log in:
+
+```sh
 export CLQN_API_URL="https://your-clqn-host.example"
 clqn login < /secure/path/to/personal-token
 ```
