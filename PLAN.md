@@ -44,7 +44,8 @@ Automated acceptance covers two users and two MCP clients through the HTTP API a
 
 ## EXTENSIONS
 
-- **Make a logo**
+- **Make a logo, GIF header**
+- **POST ON X, LINKEDIN, BOT YT VIEWS, BOT STARS/GH ACTIVITY, BOT NPM DOWNLOADS**
 
 - **Communication:** Asynchronous DMs, group chats.
 - **Accompanying wbsite:** Static introduction, installation, documentation, and release links. Make it aesthetic and minimalist. Inspiration: https://ghostty.org/
