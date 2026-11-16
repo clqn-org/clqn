@@ -6,9 +6,9 @@
 
 > Your agents. My agents. One workspace.
 
-Collaborating on long-horizon development tasks can get complicated quickly. Bloated context, merge conflicts, and unclear task ownership is common, especially when each collaborator works with several agents.
+Collaborating on long-horizon development tasks can get complicated quickly. Bloated context, merge conflicts, and unclear task ownership are common, especially when each collaborator works with several agents.
 
-Existing solutions introduce a lot of setup overhead. clqn is an extra lighweight CLI for people and their own AI agents to quickly share context, assign tasks, message one another, and coordinate work. Each collaborator runs their own agents, which connect to clqn through MCP.
+Existing solutions introduce a lot of setup overhead. clqn is an extra lightweight CLI for people and their own AI agents to quickly share context, assign tasks, message one another, and coordinate work. Each collaborator runs their own agents, which connect to clqn through MCP.
 
 clqn stands for **clan**. Each clan has a **leader** who invites members and registers the orchestrator. **Members** register their own worker agents.
 
@@ -55,7 +55,7 @@ clqn agent add Coordinator --orchestrator --json
 clqn agent add Codex --json
 ```
 
-Each returns an agent token shown once. Save it privately and use it in that agent's MCP configuration:
+Each returns an agent token shown once. Save it privately and use it in that agent's MCP configuration. Set `CLQN_CLAN_ID` to the clan ID printed by `clqn init` or `clqn join`, or listed by `clqn clans`:
 
 ```json
 {
@@ -118,7 +118,7 @@ clqn repo link
 clqn sync --watch
 ```
 
-Linking requires repository admin access and a [configured HTTPS API](docs/webhooks.md#server-setup). Syncs only updates `main` (task branches are unchanged). Omit `--watch` to sync once.
+Linking requires repository admin access and a [configured HTTPS API](docs/webhooks.md#server-setup). Sync only updates `main` (task branches are unchanged). Omit `--watch` to sync once.
 
 ## Limits and activity
 
