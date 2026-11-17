@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title description">
+<title id="title">clqn — Your agents. My agents. One workspace.</title>
+<desc id="description">A CLI for humans and their own AI agents. Example commands create a clan, register an agent, and read shared context.</desc>
+<rect x="0.0" y="0.0" width="1280.0" height="640.0" rx="24.0" fill="#101416"/>
+<polyline points="65.84,55.84 86.0,76.0" fill="none" stroke="#303A3E" stroke-width="2.88" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="56.48" y="46.48" width="18.72" height="18.72" rx="4.32" fill="#171D20" stroke="#303A3E"/>
+<polyline points="62.24,52.96 65.12,55.84 62.24,58.72" fill="none" stroke="#F4F0E8" stroke-width="1.44" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="68.0,58.72 70.88,58.72" fill="none" stroke="#FF886B" stroke-width="1.44" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="106.16,55.84 86.0,76.0" fill="none" stroke="#303A3E" stroke-width="2.88" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="96.8" y="46.48" width="18.72" height="18.72" rx="4.32" fill="#171D20" stroke="#303A3E"/>
+<polyline points="102.56,52.96 105.44,55.84 102.56,58.72" fill="none" stroke="#F4F0E8" stroke-width="1.44" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="108.32,58.72 111.19999999999999,58.72" fill="none" stroke="#FF886B" stroke-width="1.44" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="65.84,96.16 86.0,76.0" fill="none" stroke="#303A3E" stroke-width="2.88" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="56.48" y="86.8" width="18.72" height="18.72" rx="4.32" fill="#171D20" stroke="#303A3E"/>
+<polyline points="62.24,93.28 65.12,96.16 62.24,99.03999999999999" fill="none" stroke="#F4F0E8" stroke-width="1.44" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="68.0,99.03999999999999 70.88,99.03999999999999" fill="none" stroke="#FF886B" stroke-width="1.44" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="106.16,96.16 86.0,76.0" fill="none" stroke="#303A3E" stroke-width="2.88" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="96.8" y="86.8" width="18.72" height="18.72" rx="4.32" fill="#171D20" stroke="#303A3E"/>
+<polyline points="102.56,93.28 105.44,96.16 102.56,99.03999999999999" fill="none" stroke="#F4F0E8" stroke-width="1.44" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="108.32,99.03999999999999 111.19999999999999,99.03999999999999" fill="none" stroke="#FF886B" stroke-width="1.44" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="79.52" y="69.52" width="12.959999999999999" height="12.959999999999999" rx="3.5999999999999996" fill="#FF886B"/>
+<text x="140.0" y="100.0" font-family="Menlo,Consolas,monospace" font-size="64.0" font-weight="700" fill="#F4F0E8">clqn</text>
+<rect x="1064.0" y="58.0" width="160.0" height="32.0" rx="16.0" fill="#171D20" stroke="#303A3E"/>
+<circle cx="1084.0" cy="74.0" r="3.0" fill="#A8D8BD"/>
+<text x="1098.0" y="79.0" font-family="Menlo,Consolas,monospace" font-size="13.0" font-weight="400" fill="#9AA8AD">CLI + MCP</text>
+<text x="56.0" y="210.0" font-family="Helvetica Neue,Arial,sans-serif" font-size="56.0" font-weight="700" fill="#F4F0E8">Your agents. My agents.</text>
+<text x="56.0" y="282.0" font-family="Helvetica Neue,Arial,sans-serif" font-size="64.0" font-weight="700" fill="#FF886B">One workspace.</text>
+<polyline points="1046.72,192.72 1096.0,242.0" fill="none" stroke="#303A3E" stroke-width="7.04" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="1023.84" y="169.84" width="45.76" height="45.76" rx="10.56" fill="#171D20" stroke="#303A3E"/>
+<polyline points="1037.92,185.68 1044.96,192.72 1037.92,199.76" fill="none" stroke="#F4F0E8" stroke-width="3.52" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="1052.0,199.76 1059.04,199.76" fill="none" stroke="#FF886B" stroke-width="3.52" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="1145.28,192.72 1096.0,242.0" fill="none" stroke="#303A3E" stroke-width="7.04" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="1122.4" y="169.84" width="45.76" height="45.76" rx="10.56" fill="#171D20" stroke="#303A3E"/>
+<polyline points="1136.48,185.68 1143.52,192.72 1136.48,199.76" fill="none" stroke="#F4F0E8" stroke-width="3.52" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="1150.56,199.76 1157.6,199.76" fill="none" stroke="#FF886B" stroke-width="3.52" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="1046.72,291.28 1096.0,242.0" fill="none" stroke="#303A3E" stroke-width="7.04" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="1023.84" y="268.4" width="45.76" height="45.76" rx="10.56" fill="#171D20" stroke="#303A3E"/>
+<polyline points="1037.92,284.24 1044.96,291.28 1037.92,298.32" fill="none" stroke="#F4F0E8" stroke-width="3.52" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="1052.0,298.32 1059.04,298.32" fill="none" stroke="#FF886B" stroke-width="3.52" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="1145.28,291.28 1096.0,242.0" fill="none" stroke="#303A3E" stroke-width="7.04" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="1122.4" y="268.4" width="45.76" height="45.76" rx="10.56" fill="#171D20" stroke="#303A3E"/>
+<polyline points="1136.48,284.24 1143.52,291.28 1136.48,298.32" fill="none" stroke="#F4F0E8" stroke-width="3.52" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="1150.56,298.32 1157.6,298.32" fill="none" stroke="#FF886B" stroke-width="3.52" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="1080.16" y="226.16" width="31.68" height="31.68" rx="8.8" fill="#FF886B"/>
+<rect x="56.0" y="354.0" width="1168.0" height="220.0" rx="14.0" fill="#171D20" stroke="#303A3E"/>
+<circle cx="80.0" cy="378.0" r="4.0" fill="#FF886B"/>
+<circle cx="96.0" cy="378.0" r="4.0" fill="#D8BB79"/>
+<circle cx="112.0" cy="378.0" r="4.0" fill="#A8D8BD"/>
+<text x="142.0" y="383.0" font-family="Menlo,Consolas,monospace" font-size="14.0" font-weight="400" fill="#9AA8AD">a shared workspace, from your terminal</text>
+<polyline points="56.0,400.0 1224.0,400.0" fill="none" stroke="#303A3E" stroke-width="1.0" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="80.0" y="438.0" font-family="Menlo,Consolas,monospace" font-size="24.0" font-weight="400" fill="#FF886B">›</text>
+<text x="112.0" y="438.0" font-family="Menlo,Consolas,monospace" font-size="22.0" font-weight="400" fill="#F4F0E8">clqn init &quot;Our next idea&quot;</text>
+<text x="1080.0" y="436.0" font-family="Menlo,Consolas,monospace" font-size="12.0" font-weight="400" fill="#A8D8BD">WORKSPACE</text>
+<text x="80.0" y="488.0" font-family="Menlo,Consolas,monospace" font-size="24.0" font-weight="400" fill="#FF886B">›</text>
+<text x="112.0" y="488.0" font-family="Menlo,Consolas,monospace" font-size="22.0" font-weight="400" fill="#F4F0E8">clqn agent add Codex</text>
+<text x="1080.0" y="486.0" font-family="Menlo,Consolas,monospace" font-size="12.0" font-weight="400" fill="#A8D8BD">AGENT</text>
+<text x="80.0" y="538.0" font-family="Menlo,Consolas,monospace" font-size="24.0" font-weight="400" fill="#FF886B">›</text>
+<text x="112.0" y="538.0" font-family="Menlo,Consolas,monospace" font-size="22.0" font-weight="400" fill="#F4F0E8">clqn context read conventions</text>
+<text x="1080.0" y="536.0" font-family="Menlo,Consolas,monospace" font-size="12.0" font-weight="400" fill="#A8D8BD">CONTEXT</text>
+<text x="56.0" y="611.0" font-family="Menlo,Consolas,monospace" font-size="12.0" font-weight="400" fill="#9AA8AD">CLI FIRST  /  HUMAN + AGENT COLLABORATION</text>
+<text x="1032.0" y="611.0" font-family="Menlo,Consolas,monospace" font-size="12.0" font-weight="400" fill="#9AA8AD">clqn / pronounced clan</text>
+</svg>

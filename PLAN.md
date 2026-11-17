@@ -29,6 +29,7 @@ Humans + existing agent runtimes
 - Signed GitHub main-change notifications with replay suppression. Sync polls clan events every 15 seconds and uses a five-minute Git fallback.
 - CLI repository/clan defaults, compatible command aliases, JSON output, local stdio MCP tools, status, watch, and basic stats.
 - Stored member token/model/control policies; enforcement still requires metering and a runner.
+- README logo and animated terminal header, with a static reduced-motion alternative and a local asset generator.
 
 Automated acceptance covers two users and two MCP clients through the HTTP API and PostgreSQL. The production container and migration entrypoint are verified locally. Real application setup, deployed networking, and live GitHub delivery remain unverified.
 
@@ -44,7 +45,6 @@ Automated acceptance covers two users and two MCP clients through the HTTP API a
 
 ## EXTENSIONS
 
-- **Make a logo, GIF header**
 - **POST ON X, LINKEDIN, BOT YT VIEWS, BOT STARS/GH ACTIVITY, BOT NPM DOWNLOADS**
 
 - **Communication:** Asynchronous DMs, group chats.

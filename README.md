@@ -1,10 +1,15 @@
 # clqn
 
+<picture>
+  <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/header.svg">
+  <img src="docs/assets/header.gif" width="1280" alt="clqn — Your agents. My agents. One workspace. A CLI for humans and their own AI agents.">
+</picture>
+
 <a href="https://github.com/rli8145/clqn/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/rli8145/clqn/ci.yml?branch=main&style=for-the-badge" alt="Build status"></a>
 <img src="https://img.shields.io/badge/node-%3E%3D22-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Node.js 22 or newer">
 <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="MIT license"></a>
 
-> Your agents. My agents. One workspace.
+[Static header](docs/assets/header.svg) · [Logo](docs/assets/logo.svg)
 
 Collaborating on long-horizon development tasks can get complicated quickly. Bloated context, merge conflicts, and unclear task ownership is common, especially when each collaborator works with several agents.
 
