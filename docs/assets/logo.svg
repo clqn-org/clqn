@@ -1,22 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-labelledby="title description">
-<title id="title">clqn logo</title>
-<desc id="description">Four terminals connected to one shared workspace.</desc>
-<rect x="0.0" y="0.0" width="128.0" height="128.0" rx="28.0" fill="#101416"/>
-<polyline points="32.64,32.64 64.0,64.0" fill="none" stroke="#303A3E" stroke-width="4.48" stroke-linecap="round" stroke-linejoin="round"/>
-<rect x="18.080000000000002" y="18.080000000000002" width="29.120000000000005" height="29.120000000000005" rx="6.720000000000001" fill="#171D20" stroke="#303A3E"/>
-<polyline points="27.040000000000003,28.160000000000004 31.520000000000003,32.64 27.040000000000003,37.120000000000005" fill="none" stroke="#F4F0E8" stroke-width="2.24" stroke-linecap="round" stroke-linejoin="round"/>
-<polyline points="36.0,37.120000000000005 40.480000000000004,37.120000000000005" fill="none" stroke="#FF886B" stroke-width="2.24" stroke-linecap="round" stroke-linejoin="round"/>
-<polyline points="95.36000000000001,32.64 64.0,64.0" fill="none" stroke="#303A3E" stroke-width="4.48" stroke-linecap="round" stroke-linejoin="round"/>
-<rect x="80.80000000000001" y="18.080000000000002" width="29.120000000000005" height="29.120000000000005" rx="6.720000000000001" fill="#171D20" stroke="#303A3E"/>
-<polyline points="89.76,28.160000000000004 94.24000000000001,32.64 89.76,37.120000000000005" fill="none" stroke="#F4F0E8" stroke-width="2.24" stroke-linecap="round" stroke-linejoin="round"/>
-<polyline points="98.72000000000001,37.120000000000005 103.2,37.120000000000005" fill="none" stroke="#FF886B" stroke-width="2.24" stroke-linecap="round" stroke-linejoin="round"/>
-<polyline points="32.64,95.36000000000001 64.0,64.0" fill="none" stroke="#303A3E" stroke-width="4.48" stroke-linecap="round" stroke-linejoin="round"/>
-<rect x="18.080000000000002" y="80.80000000000001" width="29.120000000000005" height="29.120000000000005" rx="6.720000000000001" fill="#171D20" stroke="#303A3E"/>
-<polyline points="27.040000000000003,90.88000000000001 31.520000000000003,95.36000000000001 27.040000000000003,99.84" fill="none" stroke="#F4F0E8" stroke-width="2.24" stroke-linecap="round" stroke-linejoin="round"/>
-<polyline points="36.0,99.84 40.480000000000004,99.84" fill="none" stroke="#FF886B" stroke-width="2.24" stroke-linecap="round" stroke-linejoin="round"/>
-<polyline points="95.36000000000001,95.36000000000001 64.0,64.0" fill="none" stroke="#303A3E" stroke-width="4.48" stroke-linecap="round" stroke-linejoin="round"/>
-<rect x="80.80000000000001" y="80.80000000000001" width="29.120000000000005" height="29.120000000000005" rx="6.720000000000001" fill="#171D20" stroke="#303A3E"/>
-<polyline points="89.76,90.88000000000001 94.24000000000001,95.36000000000001 89.76,99.84" fill="none" stroke="#F4F0E8" stroke-width="2.24" stroke-linecap="round" stroke-linejoin="round"/>
-<polyline points="98.72000000000001,99.84 103.2,99.84" fill="none" stroke="#FF886B" stroke-width="2.24" stroke-linecap="round" stroke-linejoin="round"/>
-<rect x="53.92" y="53.92" width="20.160000000000004" height="20.160000000000004" rx="5.6000000000000005" fill="#FF886B"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-labelledby="title desc">
+  <title id="title">clqn</title>
+  <desc id="desc">A forward-leaning lowercase q with a command prompt cut into its bowl.</desc>
+  <rect width="160" height="160" fill="#EAF49A"/>
+  <g transform="matrix(1 0 -.17 1 36 13)" fill="#123C36">
+    <path id="q" fill-rule="evenodd" d="M76 11h27v94q0 8 8 8h12l-13 20H91q-23 0-23-24v-11q-10 8-25 8C17 106 1 87 1 61 1 30 20 8 48 8q17 0 26 11z
+      M33 39l18 18-18 18h22l18-18-18-18z"/>
+  </g>
 </svg>

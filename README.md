@@ -2,7 +2,7 @@
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/header.svg">
-  <img src="docs/assets/header.gif" width="1280" alt="clqn — Your agents. My agents. One workspace. A CLI for humans and their own AI agents.">
+  <img src="docs/assets/header.gif" width="1040" alt="clqn">
 </picture>
 
 <a href="https://github.com/rli8145/clqn/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/rli8145/clqn/ci.yml?branch=main&style=for-the-badge" alt="Build status"></a>
