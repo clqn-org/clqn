@@ -1,10 +1,10 @@
 # clqn artwork
 
-[logo.svg](logo.svg) is the standalone `q`. The cutout in its bowl is the terminal prompt. The [README header](header.svg) uses the same outline in the full wordmark. In the [GIF](header.gif), the `q` dips once like a keypress and settles.
+The [mark](logo.svg) is a three-key macropad. Two dark keys carry a prompt and a cursor. They share a switch plate with the orange return key. The [wordmark](wordmark.svg) uses four lowercase glyphs drawn on the same pixel grid. Both SVGs have transparent backgrounds.
 
-Edit the mark in `logo.svg` and the other three letter outlines in `scripts/generate-brand.py`. To rebuild the headers, run these commands from the repository root in a Python environment with Pillow and PyMuPDF.
+The README has a [static header](header.svg) and a [GIF](header.gif) that presses Return once. Edit the key geometry, colors and letter patterns in `scripts/generate-brand.py`. Rebuild the artwork from the repository root with Python and Pillow.
 
 ```sh
-python -m pip install Pillow PyMuPDF
+python -m pip install Pillow
 python scripts/generate-brand.py
 ```
