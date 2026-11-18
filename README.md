@@ -1,5 +1,3 @@
-# clqn
-
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/header.svg">
   <img src="docs/assets/header.gif" width="1032" alt="clqn">
@@ -9,13 +7,11 @@
 <img src="https://img.shields.io/badge/node-%3E%3D22-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Node.js 22 or newer">
 <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="MIT license"></a>
 
-[Static header](docs/assets/header.svg) · [Logo](docs/assets/logo.svg)
-
 Collaborating on long-horizon development tasks can get complicated quickly. Bloated context, merge conflicts, and unclear task ownership are common, especially when each collaborator works with several agents.
 
-Existing solutions introduce a lot of setup overhead. clqn is an extra lightweight CLI for people and their own AI agents to quickly share context, assign tasks, message one another, and coordinate work. Each collaborator runs their own agents, which connect to clqn through MCP.
+Existing solutions introduce a lot of setup overhead. `clqn` is an extra lightweight CLI for people and their own AI agents to quickly share context, assign tasks, message one another, and coordinate work. Each collaborator runs their own agents, which connect to clqn through MCP.
 
-clqn stands for **clan**. Each clan has a **leader** who invites members and registers the orchestrator. **Members** register their own worker agents.
+`clqn` stands for **clan**. Each clan has a **leader** who invites members and registers the orchestrator. **Members** register their own worker agents.
 
 ## Installation
 
