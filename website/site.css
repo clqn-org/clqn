@@ -34,6 +34,7 @@ a:focus-visible, pre:focus-visible { outline: 2px solid var(--accent); outline-o
 .path span { color: var(--accent); }
 .art { display: grid; justify-items: center; gap: 22px; padding: clamp(36px, 6vw, 64px) 12px; }
 .keycaps { display: block; width: min(92%, 475px); height: auto; }
+.keycaps img { display: block; width: 100%; height: auto; }
 .art h1 { margin: 0; line-height: 0; }
 .wordmark { width: clamp(66px, 10vw, 99px); height: auto; filter: brightness(0) invert(.93); }
 .about { margin: 24px auto 17px; max-width: 62ch; color: var(--muted); text-wrap: balance; }
@@ -61,6 +62,34 @@ article p:last-child { margin-bottom: 0; }
 article p a { color: var(--text); white-space: nowrap; }
 pre { overflow-x: auto; padding: 14px 16px; background: var(--page); border: 1px solid var(--line); border-radius: 4px; font: .87rem/1.7 var(--mono); }
 code { font: inherit; }
+
+.docs-body { display: block; }
+.docs { width: min(100%, 1040px); margin-inline: auto; }
+.docs .bar { padding-inline: 0; }
+.reader { display: grid; grid-template-columns: 196px minmax(0, 1fr); gap: clamp(24px, 5vw, 68px); padding: 30px 0; }
+.reader nav { position: sticky; top: 24px; align-self: start; }
+.reader nav p { margin: 0 0 12px; font: 600 .95rem var(--mono); }
+.reader nav ul { list-style: none; padding: 0; margin: 0; }
+.reader nav a { display: block; padding: 5px 0; font-size: .9rem; color: var(--muted); text-decoration: none; }
+.reader nav a:hover { text-decoration: underline; }
+.reader nav [aria-current="page"] { color: var(--accent); }
+.reader article { padding: 0; overflow-wrap: anywhere; }
+.reader article h1 { margin-bottom: 1rem; font-size: clamp(1.6rem, 4vw, 2rem); }
+.reader article h2 { margin-top: 2.2rem; font-size: 1.22rem; }
+.reader article p a { white-space: normal; }
+.reader article :is(ul, ol) { padding-left: 1.4rem; color: var(--muted); }
+.reader article :not(pre) > code { font: .88em var(--mono); color: var(--text); background: #25272c; padding: .1em .25em; border-radius: 3px; }
+.reader pre { background: var(--surface); }
+.reader table { display: block; overflow-x: auto; border-collapse: collapse; font-size: .9rem; }
+.reader th, .reader td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.skip-docs { position: absolute; left: 12px; top: 0; transform: translateY(-130%); padding: 6px 12px; background: var(--surface); }
+.skip-docs:focus { transform: none; }
+
+@media (max-width: 740px) {
+  .reader { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-top: 18px; }
+  .reader nav { position: static; border-bottom: 1px solid var(--line); padding-bottom: 14px; }
+  .reader nav ul { display: flex; flex-wrap: wrap; column-gap: 18px; }
+}
 
 @media (max-width: 480px) {
   body { padding: 24px 14px; }

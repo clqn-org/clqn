@@ -15,5 +15,5 @@
     "db:migrate": "npm run db:migrate --workspace @clqn/api",
     "user": "npm run user --workspace @clqn/api --"
   },
-  "devDependencies": { "@types/node": "^22.0.0", "typescript": "^5.9.0" }
+  "devDependencies": { "@types/node": "^22.0.0", "marked": "18.2.1", "typescript": "^5.9.0" }
 }

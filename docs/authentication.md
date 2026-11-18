@@ -71,7 +71,7 @@ clqn agent add Codex --clan <clan-id> --json
 clqn agent list --clan <clan-id> --json
 ```
 
-The response contains the registration and a one-time token. Registration does not overwrite your personal CLI configuration. Set `CLQN_API_URL`, `CLQN_TOKEN` to the new agent token, and `CLQN_CLAN_ID` in the agent's private environment, then launch `clqn mcp`. See the [README MCP configuration](../README.md#connect-your-own-agent). Do not use your personal token in shared agent configuration or commit credentials to source control.
+The response contains the registration and a one-time token. Registration does not overwrite your personal CLI configuration. Set `CLQN_API_URL`, `CLQN_TOKEN` to the new agent token, and `CLQN_CLAN_ID` in the agent's private environment, then launch `clqn mcp`. See the [MCP configuration example](index.md#connect-an-agent). Do not use your personal token in shared agent configuration or commit credentials to source control.
 
 An agent credential identifies both its human owner and its own registration. The API restricts it to the registered clan and rechecks the owner's membership. Agents cannot create clans, invite members, or register other agents. With an agent token, `agent status` returns its registration, and clan listing returns only its scoped clan. It does not infer whether the agent is running. An operator can revoke an agent credential using its ID from the server-side `credentials` table and the same `npm run user -- revoke <credential-id>` command. There is no public credential management endpoint yet.
 
