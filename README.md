@@ -139,8 +139,9 @@ Linking requires repository admin access and a [configured HTTPS API](docs/webho
 ```sh
 clqn limits --tokens 100000 --models provider/model --control approve
 clqn limits       # Saved preferences; limits and approvals are not enforced yet.
-clqn status       # Clan and task counts.
-clqn stats        # Member, agent, and task counts.
+clqn status       # Task charts and recent clan activity.
+clqn stats        # Workspace counts and task distribution.
+clqn usage        # Same as stats; metrics is also an alias.
 clqn watch        # Activity feed; does not sync Git.
 ```
 

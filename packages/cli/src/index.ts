@@ -4,6 +4,7 @@ import { ApiError, ClqnClient, VERSION, updatePolicySchema, type UpdatePolicy, r
 import { serveMcp } from '@clqn/mcp';
 import { readConfig, removeConfig, writeConfig } from './config.js';
 import { runSyncWatch } from './sync-watch.js';
+import { renderMetrics } from './metrics.js';
 import { configureGithubWebhook, removeGithubWebhook } from './github-hooks.js';
 import { prepareWorktree, publishWorktree, inspectPullRequest, mergePullRequest, syncMain, localRepository, repositoryForNewTask, taskWorktreeLocation, openTaskWorktree } from './git.js';
 
@@ -438,11 +439,14 @@ for (const action of ['claim', 'release', 'complete'] as const) {
   });
 }
 for (const action of ['status', 'stats'] as const) {
-  program.command(action).option('--clan <id>', 'clan ID').action(async (options: { clan?: string }) => {
+  const command = program.command(action).description(action === 'status'
+    ? 'Show clan metrics, task charts, and recent activity'
+    : 'Show workspace usage and task distribution charts');
+  if (action === 'stats') command.aliases(['metrics', 'metric', 'usage']);
+  command.option('--clan <id>', 'clan ID').action(async (options: { clan?: string }) => {
     const api = await client(); const clanId = await selectedClan(options);
     const result = action === 'status' ? await api.status(clanId) : await api.stats(clanId);
-    const stats = 'stats' in result ? result.stats : result;
-    output(result, `${'clan' in result ? result.clan.name + '\n' : ''}${stats.members} members, ${stats.agents} agents\nTasks: ${stats.tasks.open} open, ${stats.tasks.claimed} claimed, ${stats.tasks.completed} completed`);
+    output(result, program.opts().json ? '' : renderMetrics(result, process.stdout.columns));
   });
 }
 program.command('watch').description('Poll activity; JSON mode emits one JSON object per event')
