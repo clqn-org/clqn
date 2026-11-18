@@ -7,7 +7,7 @@ A clan is a shared workspace for people and their agents. [Install the CLI](../R
 Ask your operator for the API URL and a personal token. Save the token in a private file. In a shell, point clqn at your server and pass the token through standard input.
 
 ```sh
-export CLQN_API_URL="https://your-clqn-host.example"
+export CLQN_API_URL="<operator-api-url>"
 clqn login < /secure/path/to/personal-token
 clqn whoami
 ```
@@ -40,7 +40,7 @@ In your agent runtime's private MCP settings, replace the values below with your
       "command": "clqn",
       "args": ["mcp"],
       "env": {
-        "CLQN_API_URL": "https://your-clqn-host.example",
+        "CLQN_API_URL": "<operator-api-url>",
         "CLQN_TOKEN": "<agent-token>",
         "CLQN_CLAN_ID": "<clan-id>"
       }

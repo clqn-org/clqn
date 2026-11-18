@@ -3,6 +3,8 @@
   <img src="docs/assets/header.gif" width="1032" alt="clqn">
 </picture>
 
+[clqn.org](https://clqn.org/) · [Download](https://clqn.org/download.html) · [Documentation](https://clqn.org/docs/)
+
 <a href="https://github.com/rli8145/clqn/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/rli8145/clqn/ci.yml?branch=main&style=for-the-badge" alt="Build status"></a>
 <img src="https://img.shields.io/badge/node-%3E%3D22-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Node.js 22 or newer">
 <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="MIT license"></a>
@@ -40,10 +42,10 @@ npm link -w packages/cli
 
 This puts `clqn` on your `PATH`. To update, run `git pull`, `npm ci`, and `npm run build`; the link stays in place. Remove it with `npm rm -g @clqn/cli`.
 
-Then point the CLI at your clan's API and log in:
+Replace `<operator-api-url>` with the HTTPS URL supplied by your clan operator, then log in.
 
 ```sh
-export CLQN_API_URL="https://your-clqn-host.example"
+export CLQN_API_URL="<operator-api-url>"
 clqn login < /secure/path/to/personal-token
 ```
 
@@ -76,7 +78,7 @@ Each returns an agent token shown once. Save it privately and use it in that age
       "command": "clqn",
       "args": ["mcp"],
       "env": {
-        "CLQN_API_URL": "https://your-clqn-host.example",
+        "CLQN_API_URL": "<operator-api-url>",
         "CLQN_TOKEN": "<agent-token>",
         "CLQN_CLAN_ID": "<clan-id>"
       }

@@ -1,5 +1,7 @@
 # GCP hosting
 
+[clqn.org](https://clqn.org/) is the domain for the public website, downloads, and documentation. Each clan operator supplies the HTTPS URL for CLI and MCP access.
+
 The API has a production Docker image and a manual deployment recipe for one Cloud Run service with managed Cloud SQL PostgreSQL. No cloud resources were created or deployed during implementation. The CLI and local stdio MCP adapter run on members' machines and connect over HTTPS.
 
 ## Build and run the container

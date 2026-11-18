@@ -35,7 +35,7 @@ clqn members --clan <clan-id> --json
 clqn logout
 ```
 
-Use `--api-url https://your-api.example` or `CLQN_API_URL` for your server. Authenticated requests require HTTPS except on loopback. The client refuses redirects.
+Set `--api-url` or `CLQN_API_URL` to the API URL supplied by your clan operator. Authenticated requests require HTTPS except on loopback. The client refuses redirects.
 
 Credentials and the clan selected by `init` or `join` are stored per API origin under `~/.config/clqn` (override with `CLQN_CONFIG_DIR`). The directory is private (`0700`) and credential files are `0600`. A successful login clears the previous clan selection. `CLQN_TOKEN` overrides the saved token for automation; manage that environment variable as a secret. `logout` removes local credentials and selection, but does not revoke the server credential or unset `CLQN_TOKEN`.
 

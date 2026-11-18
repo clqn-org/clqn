@@ -32,6 +32,7 @@ export async function buildDocs(source, output) {
   await mkdir(output, { recursive: true });
   for (const [slug, title] of guides) {
     const sourceText = await readFile(new URL(slug + '.md', source), 'utf8');
+    const canonicalPath = slug === 'index' ? '/docs/' : `/docs/${slug}.html`;
     const links = guides.map(([page, name]) => {
       const current = page === slug ? ' aria-current="page"' : '';
       return `<li><a href="${page}.html"${current}>${name}</a></li>`;
@@ -43,6 +44,7 @@ export async function buildDocs(source, output) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#151619">
   <title>${title} · clqn docs</title>
+  <link rel="canonical" href="https://clqn.org${canonicalPath}">
   <link rel="icon" href="../assets/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="../site.css">
 </head>
