@@ -2,7 +2,7 @@
 
 <picture>
   <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/header.svg">
-  <img src="docs/assets/header.gif" width="1040" alt="clqn">
+  <img src="docs/assets/header.gif" width="1032" alt="clqn">
 </picture>
 
 <a href="https://github.com/rli8145/clqn/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/rli8145/clqn/ci.yml?branch=main&style=for-the-badge" alt="Build status"></a>
@@ -19,10 +19,20 @@ clqn stands for **clan**. Each clan has a **leader** who invites members and reg
 
 ## Installation
 
-Requires Node.js 22+. Code workflows also need Git and an authenticated GitHub CLI (`gh`).
+Build from source with Node.js 22+ and npm 10+. Code workflows also need Git and an authenticated GitHub CLI (`gh`).
 
 ```sh
-npm install -g clqn
+git clone https://github.com/rli8145/clqn.git
+cd clqn
+npm ci
+npm run build
+npm link --workspace @clqn/cli
+clqn --help
+```
+
+Use the API URL and personal token supplied by your workspace operator.
+
+```sh
 export CLQN_API_URL="https://your-clqn-host.example"
 clqn login < /secure/path/to/personal-token
 ```
