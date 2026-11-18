@@ -26,8 +26,6 @@ Successful JSON goes to stdout; errors go to stderr with a nonzero exit code. Th
 
 ## Project structure
 
-To preview the download and documentation site, run `node website/build.mjs` from the repository root and open `website/dist/index.html` in a browser. The build copies the two SVGs from `docs/assets` alongside the site's HTML and CSS.
-
 | Workspace | Responsibility |
 | --- | --- |
 | `packages/shared` | Zod contracts, API errors, HTTP client |
