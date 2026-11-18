@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#151619">
+  <meta name="description" content="Download clqn and build the CLI from source.">
+  <title>Download · clqn</title>
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="site.css">
+</head>
+<body>
+  <main class="manual">
+    <header class="bar">
+      <a class="path" href="index.html" aria-label="clqn home"><span aria-hidden="true">~/</span>clqn</a>
+      <a href="https://github.com/rli8145/clqn#documentation">Documentation</a>
+    </header>
+    <article>
+      <h1>Download clqn</h1>
+      <p>Build the CLI from source with Node.js 22+ and npm 10+.</p>
+      <a class="primary zip" href="https://codeload.github.com/rli8145/clqn/zip/refs/heads/main">Download source (.zip)</a>
+      <h2>Install</h2>
+      <p>Extract the ZIP, then run these commands from the extracted folder.</p>
+      <pre tabindex="0" aria-label="Installation commands"><code>npm ci
+npm run build
+npm link --workspace @clqn/cli
+clqn --help</code></pre>
+      <p>To join a clan, ask its operator for the API URL and a personal token. <a href="https://github.com/rli8145/clqn/blob/main/docs/authentication.md#log-in-and-create-a-clan">Sign-in guide</a></p>
+    </article>
+  </main>
+</body>
+</html>
