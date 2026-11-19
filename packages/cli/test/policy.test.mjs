@@ -54,13 +54,13 @@ async function fixture(t, { conflict = false } = {}) {
   return { call, requests, token, initial: { ...policy } };
 }
 
-test('policy show returns JSON and states the lack of runtime enforcement in human output', async (t) => {
+test('limits returns JSON and states the lack of runtime enforcement in human output', async (t) => {
   const f = await fixture(t);
-  const result = await f.call(['policy', 'show', '--json']);
+  const result = await f.call(['limits', '--json']);
   assert.deepEqual(JSON.parse(result.stdout), f.initial);
   assert.equal(result.stderr, '');
   assert.equal(f.requests[0].authorization, `Bearer ${f.token}`);
-  const human = await f.call(['policy', 'show', '--clan', clanId], { CLQN_CLAN_ID: userId });
+  const human = await f.call(['limits', '--clan', clanId], { CLQN_CLAN_ID: userId });
   assert.match(human.stdout, /Token limit: none/);
   assert.match(human.stdout, /Allowed models: any/);
   assert.match(human.stdout, /Leader control: manual/);
@@ -69,9 +69,9 @@ test('policy show returns JSON and states the lack of runtime enforcement in hum
   assert.ok(f.requests.every((request) => request.path === `/v1/clans/${clanId}/policy`));
 });
 
-test('policy set sends the selected settings and latest revision without replacing unspecified settings', async (t) => {
+test('limits sends the selected settings and latest revision without replacing unspecified settings', async (t) => {
   const f = await fixture(t);
-  const result = await f.call(['policy', 'set', '--token-limit', '50000', '--models', 'provider/model-a', 'provider/model-b', '--control', 'approve', '--json']);
+  const result = await f.call(['limits', '--tokens', '50000', '--models', 'provider/model-a', 'provider/model-b', '--control', 'approve', '--json']);
   assert.deepEqual(f.requests.map((request) => request.method), ['GET', 'POST']);
   assert.deepEqual(f.requests[1].body, {
     tokenLimit: 50000, allowedModels: ['provider/model-a', 'provider/model-b'], control: 'approve', expectedRevision: 7,
@@ -80,23 +80,23 @@ test('policy set sends the selected settings and latest revision without replaci
     allowedModels: ['provider/model-a', 'provider/model-b'], control: 'approve', revision: 8 });
 });
 
-test('policy set supports zero budget, unrestricted models, and removal of a token cap', async (t) => {
+test('limits supports zero budget, unrestricted models, and removal of a token cap', async (t) => {
   const f = await fixture(t);
-  const zero = JSON.parse((await f.call(['policy', 'set', '--token-limit', '0', '--control', 'automatic', '--json'])).stdout);
+  const zero = JSON.parse((await f.call(['limits', '--tokens', '0', '--control', 'automatic', '--json'])).stdout);
   assert.equal(zero.tokenLimit, 0);
   assert.equal(zero.control, 'automatic');
-  await f.call(['policy', 'set', '--token-limit', 'none', '--models', 'any', '--json']);
+  await f.call(['limits', '--tokens', 'none', '--models', 'any', '--json']);
   assert.deepEqual(f.requests.at(-1).body, { tokenLimit: null, allowedModels: null, expectedRevision: 8 });
 });
 
-test('policy set rejects malformed limits, model lists, control levels, and empty updates before HTTP access', async (t) => {
+test('limits rejects malformed limits, model lists, control levels before HTTP access', async (t) => {
   const f = await fixture(t);
   for (const args of [
-    [], ['--token-limit', '-1'], ['--token-limit', '1.5'], ['--token-limit', '1e6'],
-    ['--token-limit', '9007199254740992'], ['--token-limit', 'NaN'],
+    ['--tokens', '-1'], ['--tokens', '1.5'], ['--tokens', '1e6'],
+    ['--tokens', '9007199254740992'], ['--tokens', 'NaN'],
     ['--models', 'same', 'same'], ['--models', 'model with spaces'], ['--control', 'full'],
   ]) {
-    await assert.rejects(f.call(['policy', 'set', ...args, '--json']), (error) => {
+    await assert.rejects(f.call(['limits', ...args, '--json']), (error) => {
       assert.equal(error.code, 1);
       assert.equal(error.stdout, '');
       assert.equal(JSON.parse(error.stderr).error.code, 'COMMAND_FAILED');
@@ -106,9 +106,9 @@ test('policy set rejects malformed limits, model lists, control levels, and empt
   assert.equal(f.requests.length, 0);
 });
 
-test('policy set surfaces revision conflicts without retrying or reporting success', async (t) => {
+test('limits surfaces revision conflicts without retrying or reporting success', async (t) => {
   const f = await fixture(t, { conflict: true });
-  await assert.rejects(f.call(['policy', 'set', '--control', 'manual', '--json']), (error) => {
+  await assert.rejects(f.call(['limits', '--control', 'manual', '--json']), (error) => {
     assert.equal(error.code, 1);
     assert.equal(error.stdout, '');
     assert.equal(JSON.parse(error.stderr).error.code, 'REVISION_CONFLICT');

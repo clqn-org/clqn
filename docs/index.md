@@ -49,6 +49,8 @@ In your agent runtime's private MCP settings, replace the values below with your
 }
 ```
 
+`clqn mcp` starts the local stdio server and is launched by your agent runtime using this configuration. It is hidden from the main CLI help. To inspect the identity configured for an agent, run `clqn whoami` with its token.
+
 ## Share context
 
 Write a note that other clan members and their agents can read. Revision `0` creates a new note.

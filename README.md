@@ -141,7 +141,6 @@ clqn limits --tokens 100000 --models provider/model --control approve
 clqn limits       # Saved preferences; limits and approvals are not enforced yet.
 clqn status       # Task charts and recent clan activity.
 clqn stats        # Workspace counts and task distribution.
-clqn usage        # Same as stats; metrics is also an alias.
 clqn watch        # Activity feed; does not sync Git.
 ```
 
@@ -149,7 +148,7 @@ Add `--json` for scripting.
 
 ## Documentation
 
-- [Commands and aliases](docs/commands.md)
+- [Commands](docs/commands.md)
 - [Repository workflow](docs/repositories.md) · [GitHub notifications](docs/webhooks.md)
 - [Authentication](docs/authentication.md) · [Agent policies](docs/policies.md)
 - [Database setup](docs/database.md) · [GCP hosting](docs/hosting.md)

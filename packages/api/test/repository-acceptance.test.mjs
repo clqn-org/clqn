@@ -168,8 +168,7 @@ else if(args[1] === 'merge' && pr) {
   const nextTask = await call(orchestrator.token, ['task', 'add', 'Build on integrated feature', '--repo', 'test/project',
     '--base-sha', mergedSha, '--branch', 'clqn/acceptance-next']);
   await call(orchestrator.token, ['task', 'assign', nextTask.id, '--agent', worker.agent.id]);
-  await call(worker.token, ['task', 'claim', nextTask.id]);
-  await call(worker.token, ['task', 'prepare', nextTask.id, '--repo-path', personal, '--path', nextWorktree]);
+  await call(worker.token, ['task', 'start', nextTask.id, '--from', personal, '--path', nextWorktree]);
   assert.equal(await git(nextWorktree, ['rev-parse', 'HEAD']), mergedSha);
   assert.equal(await readFile(join(nextWorktree, 'feature.txt'), 'utf8'), 'finished task\n');
   assert.equal(await git(personal, ['rev-parse', 'HEAD']), baseSha);

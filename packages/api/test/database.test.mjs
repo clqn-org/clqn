@@ -145,13 +145,13 @@ test('PostgreSQL: identity, clan isolation, concurrent creation, and credential 
     command.child.stdin.end(input);
     return command.then(({ stdout }) => JSON.parse(stdout));
   };
-  assert.deepEqual(await runCli(['login', '--token-stdin'], alice.token), alice.user);
+  assert.deepEqual(await runCli(['login'], alice.token), alice.user);
   const cliClan = await runCli(['init', 'CLI project']);
   assert.equal(cliClan.createdBy, alice.user.id);
   assert.equal((await runCli(['members'])).members[0].role, 'leader');
   const cliInvite = await runCli(['invite', bob.user.email]);
   await runCli(['logout']);
-  await runCli(['login', '--token-stdin'], bob.token);
+  await runCli(['login'], bob.token);
   assert.equal((await runCli(['join', cliInvite.code])).id, cliClan.id);
   assert.equal((await runCli(['members'])).members.length, 2);
   assert.equal((await runCli(['logout'])).credentialsRemoved, true);

@@ -46,13 +46,13 @@ clqn join <invite-code>
 clqn limits
 clqn limits --tokens 100000 --models provider/model --control approve
 clqn status
-clqn usage
+clqn stats
 clqn watch
 ```
 
 `limits` shows saved preferences with no options, or updates the fields you specify. `--tokens none` removes a cap; `--models any` removes the allowlist. These settings are not yet enforced by a model runner. `watch` observes clan events; `sync --watch` polls clan notifications and only fast-forwards clean main. Git is fetched at startup, after main notifications, and on a five-minute fallback. Without a clan login it uses the slower local Git fallback.
 
-`stats` (also `metrics`, `metric`, or `usage`) shows member and agent counts, task distribution bars, and completion percentage. `status` adds the clan name and latest ten activity events, with timestamps in UTC. These are workspace metrics; token usage and cost are not collected yet. Charts adapt to terminal width and remain readable when piped. Use `--clan <id>` to select another clan or `--json` for the unchanged API response without charts.
+`stats` shows member and agent counts, task distribution bars, and completion percentage. `status` adds the clan name and latest ten activity events, with timestamps in UTC. These are workspace metrics; token usage and cost are not collected yet. Charts adapt to terminal width and remain readable when piped. Use `--clan <id>` to select another clan or `--json` for the unchanged API response without charts.
 
 ```text
 TASKS / 20 total
@@ -97,20 +97,10 @@ clqn sync --watch --fallback 600
 
 `repo link owner/project` and `repo unlink owner/project` work without choosing a local clone. Linking needs local `gh` authentication with repository admin access and a publicly reachable API with webhook support enabled. Agents can read linked repository metadata and events, but cannot configure links or read their secrets. See [webhook setup](webhooks.md).
 
-## Compatibility
+## Identity
 
-Earlier commands remain supported. The default help and README show the shorter forms.
+`clqn whoami` shows the current human or agent identity. With an agent token, it includes the agent's name, role, clan, and human owner; JSON output adds an `agent` registration object to the identity. It does not indicate whether an agent is running.
 
-| Earlier command | Preferred command |
-| --- | --- |
-| `clqn repo sync --repo owner/project --repo-path . --watch` | `clqn sync --watch` |
-| `clqn agent connect --name Codex` | `clqn agent add Codex` |
-| `clqn policy show` | `clqn limits` |
-| `clqn policy set --token-limit 100000` | `clqn limits --tokens 100000` |
-| `clqn task claim <id>` then `clqn task prepare <id> --path <directory>` | `clqn task start <id>` |
-| `clqn task publish <id> --path <directory>` | `clqn task submit <id>` from the task directory |
-| `clqn task complete <id>` | `clqn task done <id>` |
-| `clqn task integrate <id>` | `clqn task merge <id>` again after GitHub confirms the merge |
-| `clqn login --token-stdin < <file>` | `clqn login < <file>` |
+Use the [agent setup instructions](index.md#connect-an-agent) to configure the MCP connection.
 
-Explicit `task claim` and `task prepare` still work independently. The earlier repo sync/policy forms and lower-level task commands remain available even when omitted from the default help. API route names, MCP tool names, authorization, ownership, and JSON task contracts are unchanged. `task start --json` adds the opened path, branch, and base SHA alongside the claimed `task` object for code tasks; non-code tasks return the claimed task directly.
+`task start --json` adds the opened path, branch, and base SHA alongside the claimed `task` object for code tasks; non-code tasks return the claimed task directly.

@@ -105,7 +105,7 @@ async function workspaceFixture(t) {
 
 test('CLI invitations normalize email, support an explicit clan, and joining selects the clan', async (t) => {
   const f = await workspaceFixture(t);
-  await f.call(['login', '--token-stdin'], { input: f.token });
+  await f.call(['login'], { input: f.token });
   assert.deepEqual(JSON.parse((await f.call(['invite', ' Bob@Example.com ', '--clan', f.clan.id, '--json'])).stdout), f.invitation);
   assert.deepEqual(JSON.parse((await f.call(['join', f.invitation.code, '--json'])).stdout), f.clan);
   assert.deepEqual(JSON.parse((await f.call(['members', '--json'])).stdout), f.members);
@@ -127,7 +127,7 @@ test('CLI login, clan creation, membership, and logout persist API-scoped privat
   const { readdir, readFile, stat } = await import('node:fs/promises');
   const { join } = await import('node:path');
   const f = await workspaceFixture(t);
-  const loggedIn = await f.call(['login', '--token-stdin', '--json'], { input: `${f.token}\n` });
+  const loggedIn = await f.call(['login', '--json'], { input: `${f.token}\n` });
   assert.deepEqual(JSON.parse(loggedIn.stdout), f.user);
   assert.equal(loggedIn.stderr, '');
   assert.ok(!loggedIn.stdout.includes(f.token));
@@ -155,8 +155,8 @@ test('CLI login, clan creation, membership, and logout persist API-scoped privat
 
 test('failed login preserves credentials, environment override works, and another API receives no saved token', async (t) => {
   const f = await workspaceFixture(t);
-  await f.call(['login', '--token-stdin'], { input: f.token });
-  await assert.rejects(f.call(['login', '--token-stdin', '--json'], { input: 'invalid_token' }), (error) => {
+  await f.call(['login'], { input: f.token });
+  await assert.rejects(f.call(['login', '--json'], { input: 'invalid_token' }), (error) => {
     assert.equal(JSON.parse(error.stderr).error.code, 'UNAUTHENTICATED');
     assert.ok(!error.stderr.includes('invalid_token'));
     return true;
@@ -178,7 +178,7 @@ test('failed login preserves credentials, environment override works, and anothe
 
 test('login requires token input and members requires a selected clan', async (t) => {
   const f = await workspaceFixture(t);
-  for (const args of [['login'], ['login', '--token-stdin'], ['members']]) {
+  for (const args of [['login'], ['members']]) {
     await assert.rejects(f.call([...args, '--json']), (error) => {
       assert.equal(JSON.parse(error.stderr).error.code, 'COMMAND_FAILED');
       return true;

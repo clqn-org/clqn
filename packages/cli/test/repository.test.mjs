@@ -111,19 +111,19 @@ test('partial or unsafe repository arguments fail before API or Git access', asy
   await f.assertNoExecutions();
 });
 
-test('agent connect forwards an explicit orchestrator role and defaults to worker', async (t) => {
+test('agent add forwards an explicit orchestrator role and defaults to worker', async (t) => {
   const f = await fixture(t);
-  const orchestrator = JSON.parse((await f.call(['agent', 'connect', '--name', 'Coordinator', '--orchestrator', '--json'])).stdout);
+  const orchestrator = JSON.parse((await f.call(['agent', 'add', 'Coordinator', '--orchestrator', '--json'])).stdout);
   assert.deepEqual(f.requests[0].body, { name: 'Coordinator', role: 'orchestrator' });
   assert.equal(orchestrator.agent.role, 'orchestrator');
-  const worker = JSON.parse((await f.call(['agent', 'connect', '--name', 'Worker', '--json'])).stdout);
+  const worker = JSON.parse((await f.call(['agent', 'add', 'Worker', '--json'])).stdout);
   assert.deepEqual(f.requests[1].body, { name: 'Worker', role: 'worker' });
   assert.equal(worker.agent.role, 'worker');
 });
 
-test('prepare and publish reject another owner before invoking Git or GitHub', async (t) => {
+test('start and submit reject another owner before invoking Git or GitHub', async (t) => {
   const f = await fixture(t, { task: { ...initialTask, status: 'claimed', ownerId: otherUserId, repository } });
-  for (const action of ['prepare', 'publish']) await assert.rejects(f.call(['task', action, taskId,
+  for (const action of ['start', 'submit']) await assert.rejects(f.call(['task', action, taskId,
     '--path', join(f.directory, 'worktree'), '--json']), (error) => {
     assert.equal(error.code, 1); assert.equal(error.stdout, '');
     assert.match(JSON.parse(error.stderr).error.message, /same credential/);
@@ -133,20 +133,20 @@ test('prepare and publish reject another owner before invoking Git or GitHub', a
   await f.assertNoExecutions();
 });
 
-test('a human owner cannot prepare work claimed by their agent', async (t) => {
+test('a human owner cannot start work claimed by their agent', async (t) => {
   const f = await fixture(t, { task: { ...initialTask, status: 'claimed', ownerId: userId,
     ownerAgentId: agentId, assignedAgentId: agentId, repository } });
-  await assert.rejects(f.call(['task', 'prepare', taskId, '--path', join(f.directory, 'worktree'), '--json']), (error) => {
+  await assert.rejects(f.call(['task', 'start', taskId, '--path', join(f.directory, 'worktree'), '--json']), (error) => {
     assert.match(JSON.parse(error.stderr).error.message, /same credential/); return true;
   });
   await f.assertNoExecutions();
 });
 
-test('merge and integrate reject a non-leader before invoking GitHub or changing task state', async (t) => {
+test('merge rejects a non-leader before invoking GitHub or changing task state', async (t) => {
   for (const actor of [{ id: userId, email: 'member@example.com' },
     { id: userId, email: 'member@example.com', agentId: otherAgentId, clanId }]) {
     const f = await fixture(t, { actor, task: { ...initialTask, status: 'claimed', ownerId: userId, repository } });
-    for (const action of ['merge', 'integrate']) await assert.rejects(f.call(['task', action, taskId, '--json']), (error) => {
+    await assert.rejects(f.call(['task', 'merge', taskId, '--json']), (error) => {
       assert.equal(error.code, 1); assert.equal(error.stdout, '');
       assert.match(JSON.parse(error.stderr).error.message, /Only the clan leader/);
       return true;
@@ -155,4 +155,21 @@ test('merge and integrate reject a non-leader before invoking GitHub or changing
     assert.ok(!f.requests.some((request) => request.path.includes('/tasks/')));
     await f.assertNoExecutions();
   }
+});
+
+test('whoami keeps human identity and includes agent registration for agent credentials', async (t) => {
+  const human = { id: userId, email: 'member@example.com' };
+  const personal = await fixture(t, { actor: human });
+  assert.deepEqual(JSON.parse((await personal.call(['whoami', '--json'])).stdout), human);
+  assert.deepEqual(personal.requests.map((request) => request.path), ['/v1/me']);
+  const actor = { ...human, agentId, clanId };
+  const scoped = await fixture(t, { actor });
+  const identity = JSON.parse((await scoped.call(['whoami', '--json'])).stdout);
+  assert.deepEqual(identity, { ...actor, agent: { id: agentId, ownerId: userId, clanId,
+    name: 'Worker', role: 'worker', createdAt: initialTask.createdAt } });
+  const output = (await scoped.call(['whoami'])).stdout;
+  for (const value of ['Worker', agentId, 'role=worker', `clan=${clanId}`, `owner=${userId}`, human.email]) {
+    assert.ok(output.includes(value));
+  }
+  assert.deepEqual(scoped.requests.map((request) => request.path), ['/v1/me', '/v1/agent', '/v1/me', '/v1/agent']);
 });

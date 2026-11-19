@@ -45,7 +45,7 @@ test('status fits charts to narrow terminals and neutralizes control characters'
   assert.match(output, /resource:/);
 });
 
-test('stats aliases use the selected clan endpoint and preserve JSON contracts', async (t) => {
+test('stats and status use the selected clan endpoint and preserve JSON contracts', async (t) => {
   const requests = [];
   const server = createServer((request, response) => {
     requests.push(request.url);
@@ -59,7 +59,7 @@ test('stats aliases use the selected clan endpoint and preserve JSON contracts',
   const run = promisify(execFile);
   const call = (command, json) => run(process.execPath, [cli, '--api-url', `http://127.0.0.1:${server.address().port}`,
     command, '--clan', clan.id, ...(json ? ['--json'] : [])]);
-  for (const command of ['stats', 'metrics', 'metric', 'usage', 'status']) {
+  for (const command of ['stats', 'status']) {
     const human = await call(command, false);
     assert.match(human.stdout, /TASKS \/ 20 total/);
     assert.equal(human.stderr, '');
@@ -68,6 +68,6 @@ test('stats aliases use the selected clan endpoint and preserve JSON contracts',
     assert.deepEqual(JSON.parse(json.stdout), command === 'status' ? status : stats);
     assert.equal(json.stderr, '');
   }
-  assert.deepEqual(requests, ['stats', 'stats', 'stats', 'stats', 'stats', 'stats', 'stats', 'stats', 'status', 'status']
+  assert.deepEqual(requests, ['stats', 'stats', 'status', 'status']
     .map((route) => `/v1/clans/${clan.id}/${route}`));
 });

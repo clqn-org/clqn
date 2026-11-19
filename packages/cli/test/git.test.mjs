@@ -305,32 +305,32 @@ test('main sync refuses to overwrite ignored local files that become tracked rem
 });
 
 const cli = fileURLToPath(new URL('../dist/index.js', import.meta.url));
-test('repo sync CLI runs without the clan API and emits structured main-only results', async (t) => {
+test('sync CLI runs without the clan API and emits structured main-only results', async (t) => {
   const f = await fixture(t);
   const remoteSha = await advanceMain(f);
-  const { stdout, stderr } = await execute(process.execPath, [cli, 'repo', 'sync', '--repo', 'test/project',
-    '--repo-path', f.repoPath, '--json'], { env: { ...process.env, CLQN_API_URL: 'http://127.0.0.1:1' } });
+  const { stdout, stderr } = await execute(process.execPath, [cli, 'sync', '--repo', 'test/project',
+    '--path', f.repoPath, '--json'], { env: { ...process.env, CLQN_API_URL: 'http://127.0.0.1:1' } });
   assert.equal(JSON.parse(stdout).headSha, remoteSha);
   assert.equal(JSON.parse(stdout).branch, 'main');
   assert.equal(JSON.parse(stdout).status, 'updated');
   assert.equal(stderr, '');
   for (const interval of ['0', 'NaN', '3601']) {
-    await assert.rejects(execute(process.execPath, [cli, 'repo', 'sync', '--repo', 'test/project',
-      '--repo-path', f.repoPath, '--interval', interval, '--json']), (error) => {
+    await assert.rejects(execute(process.execPath, [cli, 'sync', '--repo', 'test/project',
+      '--path', f.repoPath, '--interval', interval, '--json']), (error) => {
       assert.match(JSON.parse(error.stderr).error.message, /interval/); return true;
     });
   }
-  await assert.rejects(execute(process.execPath, [cli, 'repo', 'sync', '--repo', 'test/project',
-    '--repo-path', f.repoPath, '--branch', 'feature']), (error) => {
+  await assert.rejects(execute(process.execPath, [cli, 'sync', '--repo', 'test/project',
+    '--path', f.repoPath, '--branch', 'feature']), (error) => {
     assert.match(error.stderr, /unknown option/); return true;
   });
 });
 
-test('repo sync watcher recovers from fetch errors, picks up later main commits, and stops on SIGTERM', { timeout: 20_000 }, async (t) => {
+test('sync watcher recovers from fetch errors, picks up later main commits, and stops on SIGTERM', { timeout: 20_000 }, async (t) => {
   const f = await fixture(t);
   const failFetch = join(f.root, 'fail-fetch');
-  const child = spawn(process.execPath, [cli, 'repo', 'sync', '--repo', 'test/project', '--repo-path', f.repoPath,
-    '--watch', '--interval', '1', '--json'], { env: { ...process.env, CLQN_TEST_FAIL_FETCH: failFetch }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [cli, 'sync', '--repo', 'test/project', '--path', f.repoPath,
+    '--watch', '--fallback', '1', '--json'], { env: { ...process.env, CLQN_TEST_FAIL_FETCH: failFetch }, stdio: ['ignore', 'pipe', 'pipe'] });
   const closed = once(child, 'close');
   t.after(async () => { if (child.exitCode === null) child.kill('SIGTERM'); await closed; });
   let buffer = '';
@@ -370,7 +370,7 @@ test('repo sync watcher recovers from fetch errors, picks up later main commits,
 });
 
 
-test('short sync infers origin and current directory while keeping the old repo sync form', async (t) => {
+test('sync infers origin and current directory', async (t) => {
   const f = await fixture(t);
   const remoteSha = await advanceMain(f);
   const inferred = await localRepository(f.repoPath);
@@ -380,7 +380,6 @@ test('short sync infers origin and current directory while keeping the old repo 
   assert.equal(result.status, 'updated');
   assert.equal(result.headSha, remoteSha);
   assert.equal(JSON.parse((await call(['sync', '--path', f.repoPath], f.root)).stdout).status, 'unchanged');
-  assert.equal(JSON.parse((await call(['repo', 'sync', '--repo-path', f.repoPath], f.root)).stdout).status, 'unchanged');
 });
 
 test('code task defaults use the latest origin/main and a unique branch without modifying the checkout', async (t) => {

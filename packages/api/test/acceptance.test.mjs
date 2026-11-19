@@ -74,23 +74,23 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
     return (await command).stdout;
   };
   const run = async (env, args, input) => JSON.parse(await runRaw(env, args, input));
-  await run(aliceEnv, ['login', '--token-stdin'], alice.token);
-  await run(bobEnv, ['login', '--token-stdin'], bob.token);
+  await run(aliceEnv, ['login'], alice.token);
+  await run(bobEnv, ['login'], bob.token);
   const clan = await run(aliceEnv, ['init', 'Two-agent acceptance']);
   clanIds.push(clan.id);
   const invitation = await run(aliceEnv, ['invite', bob.user.email]);
   assert.equal((await run(bobEnv, ['join', invitation.code])).id, clan.id);
-  const codex = await run(aliceEnv, ['agent', 'connect', '--name', 'Codex']);
-  const claude = await run(bobEnv, ['agent', 'connect', '--name', 'Claude Code']);
+  const codex = await run(aliceEnv, ['agent', 'add', 'Codex']);
+  const claude = await run(bobEnv, ['agent', 'add', 'Claude Code']);
   assert.equal(codex.agent.ownerId, alice.user.id);
   assert.equal(claude.agent.ownerId, bob.user.id);
   const codexEnv = { ...aliceEnv, CLQN_TOKEN: codex.token, CLQN_CLAN_ID: clan.id };
   const claudeEnv = { ...bobEnv, CLQN_TOKEN: claude.token, CLQN_CLAN_ID: clan.id };
-  assert.equal((await run(codexEnv, ['agent', 'status'])).id, codex.agent.id);
+  assert.equal((await run(codexEnv, ['whoami'])).agent.id, codex.agent.id);
   assert.equal((await run(bobEnv, ['agent', 'list'])).agents.length, 2);
   // An agent's scope wins over an unrelated clan saved by its human owner.
   const otherEnv = { ...baseEnv, CLQN_CONFIG_DIR: join(directory, 'other-human-clan') };
-  await run(otherEnv, ['login', '--token-stdin'], alice.token);
+  await run(otherEnv, ['login'], alice.token);
   const otherClan = await run(otherEnv, ['init', 'Unrelated personal selection']);
   clanIds.push(otherClan.id);
   const scopedCodexEnv = { ...otherEnv, CLQN_TOKEN: codex.token };
@@ -132,7 +132,7 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
   const denied = await aliceMcp.callTool({ name: 'clqn_complete_task', arguments: { taskId: task.id } });
   assert.equal(denied.isError, true);
   assert.equal((await run(claudeEnv, ['task', 'release', task.id])).status, 'open');
-  assert.equal((await run(codexEnv, ['task', 'claim', task.id])).ownerAgentId, codex.agent.id);
+  assert.equal((await run(codexEnv, ['task', 'start', task.id])).ownerAgentId, codex.agent.id);
   assert.equal((await call(aliceMcp, 'clqn_complete_task', { taskId: task.id })).status, 'completed');
   const secondTask = await run(bobEnv, ['task', 'add', 'Confirm acceptance']);
   await call(bobMcp, 'clqn_claim_task', { taskId: secondTask.id });

@@ -128,7 +128,7 @@ After GitHub confirms the merge, clqn records its merge commit and emits `task.i
 clqn task merge <task-id>
 ```
 
-`merge` detects an already merged PR and verifies its exact head before recording it. It does not issue another merge request or require current check results to remain available after merging. The earlier `task integrate` command is still supported. An identical integration report is safe to repeat.
+`merge` detects an already merged PR and verifies its exact head before recording it. It does not issue another merge request or require current check results to remain available after merging. An identical integration report is safe to repeat.
 
 The worker then completes the task:
 

@@ -74,20 +74,18 @@ async function fixture(t) {
   return { call, requests, directory, token, user, executions };
 }
 
-test('agent add accepts a positional name and keeps connect --name compatible', async (t) => {
+test('agent add registers workers and orchestrators with positional names', async (t) => {
   const f = await fixture(t);
   const worker = JSON.parse((await f.call(['agent', 'add', 'Codex', '--json'])).stdout);
   const orchestrator = JSON.parse((await f.call(['agent', 'add', 'Coordinator', '--orchestrator', '--json'])).stdout);
-  const legacy = JSON.parse((await f.call(['agent', 'connect', '--name', 'Legacy', '--json'])).stdout);
   assert.equal(worker.agent.name, 'Codex');
   assert.equal(orchestrator.agent.role, 'orchestrator');
-  assert.equal(legacy.agent.name, 'Legacy');
   assert.deepEqual(f.requests.map((request) => request.body), [
-    { name: 'Codex', role: 'worker' }, { name: 'Coordinator', role: 'orchestrator' }, { name: 'Legacy', role: 'worker' },
+    { name: 'Codex', role: 'worker' }, { name: 'Coordinator', role: 'orchestrator' },
   ]);
 });
 
-test('limits shows current settings or updates them directly; legacy policy commands still work', async (t) => {
+test('limits shows current settings or updates them directly', async (t) => {
   const f = await fixture(t);
   const initial = JSON.parse((await f.call(['limits', '--json'])).stdout);
   assert.equal(initial.revision, 3);
@@ -97,10 +95,6 @@ test('limits shows current settings or updates them directly; legacy policy comm
   assert.equal(updated.revision, 4);
   assert.deepEqual(f.requests.map((request) => request.method), ['GET', 'GET', 'POST']);
   assert.deepEqual(f.requests[2].body, { tokenLimit: 100000, allowedModels: ['provider/model'], control: 'approve', expectedRevision: 3 });
-  assert.deepEqual(JSON.parse((await f.call(['policy', 'show', '--json'])).stdout), updated);
-  const legacy = JSON.parse((await f.call(['policy', 'set', '--token-limit', 'none', '--json'])).stdout);
-  assert.equal(legacy.tokenLimit, null);
-  assert.deepEqual(f.requests.at(-1).body, { tokenLimit: null, expectedRevision: 4 });
 });
 
 test('simple commands reject invalid names and limit values before HTTP access', async (t) => {
@@ -117,15 +111,13 @@ test('simple commands reject invalid names and limit values before HTTP access',
   assert.equal(f.requests.length, 0);
 });
 
-test('task done and complete use the same completion endpoint and JSON contract', async (t) => {
+test('task done uses the completion endpoint and JSON contract', async (t) => {
   const f = await fixture(t);
   const done = JSON.parse((await f.call(['task', 'done', taskId, '--json'])).stdout);
-  const complete = JSON.parse((await f.call(['task', 'complete', taskId, '--json'])).stdout);
-  assert.deepEqual(done, complete);
   assert.equal(done.status, 'completed');
   assert.ok(f.requests.every((request) => request.method === 'POST'
     && request.path === `/v1/clans/${clanId}/tasks/${taskId}/complete`));
-  assert.deepEqual(f.requests.map((request) => request.body), [{}, {}]);
+  assert.deepEqual(f.requests.map((request) => request.body), [{}]);
 });
 
 test('task submit defaults to the current directory but preserves the ownership preflight', async (t) => {
@@ -141,11 +133,35 @@ test('task submit defaults to the current directory but preserves the ownership 
   await assert.rejects(readFile(f.executions), { code: 'ENOENT' });
 });
 
-test('login accepts piped input without the old flag and preserves flag compatibility', async (t) => {
+test('login accepts piped input', async (t) => {
   const f = await fixture(t);
   const login = JSON.parse((await f.call(['login', '--json'], { input: `${f.token}\n`, savedLogin: true })).stdout);
   assert.deepEqual(login, f.user);
-  const legacy = JSON.parse((await f.call(['login', '--token-stdin', '--json'], { input: f.token, savedLogin: true })).stdout);
-  assert.deepEqual(legacy, f.user);
   assert.ok(f.requests.every((request) => request.path === '/v1/me' && request.authorization === `Bearer ${f.token}`));
+});
+
+test('removed commands and flags fail before API or Git access', async (t) => {
+  const f = await fixture(t);
+  for (const args of [
+    ['agent', 'status'], ['agent', 'connect', '--name', 'Legacy'], ['agent', 'add', '--name', 'Legacy'],
+    ['repo', 'sync'], ['policy', 'show'], ['policy', 'set', '--tokens', '10'],
+    ...['claim', 'prepare', 'publish', 'complete', 'integrate'].map((action) => ['task', action, taskId]),
+    ...['metrics', 'metric', 'usage'].map((action) => [action]),
+    ['login', '--token-stdin'], ['limits', '--token-limit', '10'], ['sync', '--repo-path', '.'],
+  ]) await assert.rejects(f.call(args), (error) => {
+    assert.equal(error.code, 1);
+    assert.match(error.stderr, /unknown (command|option)/);
+    return true;
+  });
+  assert.equal(f.requests.length, 0);
+  await assert.rejects(readFile(f.executions), { code: 'ENOENT' });
+});
+
+test('main help hides mcp while explicit mcp help remains available', async (t) => {
+  const f = await fixture(t);
+  const main = await f.call(['--help']);
+  assert.doesNotMatch(main.stdout, /\bmcp\b|\bpolicy\b/);
+  assert.match((await f.call(['mcp', '--help'])).stdout, /Start the local stdio MCP server/);
+  assert.doesNotMatch((await f.call(['agent', '--help'])).stdout, /status|connect/);
+  assert.equal(f.requests.length, 0);
 });
