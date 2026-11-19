@@ -33,8 +33,8 @@ a:focus-visible, pre:focus-visible { outline: 2px solid var(--accent); outline-o
 .path { color: var(--text); }
 .path span { color: var(--accent); }
 .art { display: grid; justify-items: center; gap: 22px; padding: clamp(36px, 6vw, 64px) 12px; }
-.keycaps { display: block; width: min(92%, 475px); height: auto; }
-.keycaps img { display: block; width: 100%; height: auto; }
+.groundhogs { display: block; width: min(100%, 600px); height: auto; }
+.groundhogs img { display: block; width: 100%; height: auto; }
 .art h1 { margin: 0; line-height: 0; }
 .wordmark { width: clamp(66px, 10vw, 99px); height: auto; filter: brightness(0) invert(.93); }
 .about { margin: 24px auto 17px; max-width: 62ch; color: var(--muted); text-wrap: balance; }

@@ -1,4 +1,4 @@
-"""Rebuild clqn's logos, README GIF and animated terminal illustration."""
+"""Rebuild clqn's logos, README GIF and animated website illustration."""
 
 from itertools import groupby
 from pathlib import Path
@@ -10,87 +10,93 @@ ASSETS = Path(__file__).resolve().parents[1] / "docs" / "assets"
 WEBSITE = ASSETS.parents[1] / "website"
 PAPER = "#f9faf7"
 INK = "#20231f"
-ORANGE = "#ff783e"
-DESCRIPTION = "Three isometric keycaps on one switch plate, with an orange return key."
+DESCRIPTION = "Three pixel groundhogs in separate holes staggered back, front-left, and front-right."
+SIZE = (96, 62)
+REST = (29, 23, 18)
+# Paint from back to front so foreground sprites naturally cover the rear rim.
+HOLES = ((48, 38), (30, 47), (55, 49))
+TRAVEL_MS = 200
+FRAME_MS = 40
+FULL_HEIGHT = 29
+ANTICIPATION_MS = 160
+ANTICIPATION_PIXELS = 6
 
 
-def project(point, height):
-    """Project one point from the switch plate onto the two-to-one pixel grid."""
-    x, y = point
-    return 46 + x - y, 27 + (x + y) // 2 - height
+def emergence(t, offset, hold):
+    phase = (t - offset) % 6000
+    if phase < TRAVEL_MS:
+        return round(FULL_HEIGHT * (1 - (1 - phase / TRAVEL_MS) ** 2))
+    phase -= TRAVEL_MS
+    if phase < hold:
+        return FULL_HEIGHT
+    phase -= hold
+    # Flick upward quickly, hold for a beat, then drop from the raised pose.
+    if phase < ANTICIPATION_MS:
+        lift = min(1, phase / FRAME_MS)
+        return FULL_HEIGHT + round(ANTICIPATION_PIXELS * lift)
+    phase -= ANTICIPATION_MS
+    if phase < TRAVEL_MS:
+        return round((FULL_HEIGHT + ANTICIPATION_PIXELS) * (1 - phase / TRAVEL_MS) ** 2)
+    return 0
 
 
-def octagon(radius, corner):
-    r, c = radius, corner
-    return [
-        (-r + c, -r), (r - c, -r), (r, -r + c), (r, r - c),
-        (r - c, r), (-r + c, r), (-r, r - c), (-r, -r + c),
-    ]
-
-
-# Legends use key coordinates, so their baselines follow the top faces.
-PROMPT = [(-5, -4), (-3, -5), (3, -1), (3, 1), (-3, 5), (-5, 4), (0, 0)]
-CURSOR = [(-4, 1), (4, 1), (4, 4), (-4, 4)]
-RETURN = [
-    (2, -5), (5, -5), (5, 2), (-1, 2), (-1, 5), (-6, 1),
-    (-1, -4), (-1, -1), (2, -1),
+# All three reach full height, anticipate the drop, and fully retreat independently.
+SEQUENCE = [
+    (FRAME_MS, tuple(emergence(t, offset, hold) for offset, hold in
+                ((0, 1500), (1700, 1800), (3500, 1000))))
+    for t in range(0, 6000, FRAME_MS)
 ]
 
-KEYS = (
-    ("prompt", (0, 22), PROMPT),
-    ("cursor", (22, 0), CURSOR),
-    ("return", (22, 22), RETURN),
-)
 
-# Timing in milliseconds and key travel in pixels, shared by the GIF and SVG.
-SEQUENCE = (
-    (250, (0, 0, 0)),
-    (60, (3, 0, 0)), (170, (7, 0, 0)), (70, (3, 0, 0)), (130, (0, 0, 0)),
-    (60, (0, 3, 0)), (170, (0, 7, 0)), (70, (0, 3, 0)), (130, (0, 0, 0)),
-    (60, (0, 0, 3)), (60, (0, 0, 6)), (270, (0, 0, 9)),
-    (70, (0, 0, 6)), (70, (0, 0, 3)), (750, (0, 0, 0)),
-)
-
-
-def draw_key(draw, center, legend, orange=False, travel=0, return_ink=INK):
-    x, y = center
-
-    def at(points, height):
-        return [project((x + u, y + v), height) for u, v in points]
-
-    if orange:
-        shadow, midtone, highlight, top = "#993e29", "#d65a30", "#ffaf80", ORANGE
-    else:
-        shadow, midtone, highlight, top = "#343a37", "#59605b", "#9ca39a", "#464c46"
-
-    # The base of each switch stays put as its cap moves down.
-    base = at(octagon(10, 2), 5)
-    rim = at(octagon(8, 2), 16 - travel)
-    for i in range(len(rim)):
-        j = (i + 1) % len(rim)
-        color = midtone if 3 <= i <= 6 else shadow
-        draw.polygon([base[i], base[j], rim[j], rim[i]], fill=color)
-    draw.polygon(rim, fill=INK)
-
-    top_edge = at(octagon(8, 2), 17 - travel)
-    draw.polygon(top_edge, fill=top)
-    draw.line(top_edge[5:] + top_edge[:2], fill=highlight)
-    draw.polygon(at(legend, 17 - travel), fill=return_ink if orange else PAPER)
+def groundhog(height, highlights=True):
+    sprite = Image.new("RGBA", (23, 40))
+    d = ImageDraw.Draw(sprite)
+    outline = [(7, 0), (15, 0), (15, 1), (18, 1), (18, 3),
+               (20, 3), (20, 6), (21, 6), (21, 39), (1, 39),
+               (1, 6), (2, 6), (2, 3), (4, 3), (4, 1), (7, 1)]
+    d.polygon(outline, fill="#392d2b")
+    d.polygon([(7, 2), (15, 2), (15, 3), (17, 3), (17, 5),
+               (19, 5), (19, 8), (19, 39), (3, 39), (3, 6),
+               (4, 6), (4, 4), (7, 4)], fill="#ae805b")
+    d.rectangle((17, 8, 19, 39), fill="#866047")
+    if highlights:
+        d.rectangle((5, 5, 7, 9), fill="#d7b28a")
+        d.rectangle((8, 3, 13, 4), fill="#d7b28a")
+    for x in (6, 15):
+        d.rectangle((x, 9, x + 1, 13), fill="#241f24")
+        d.point((x, 9), fill=PAPER)
+    d.rectangle((7, 16, 15, 20), fill="#392d2b")
+    d.rectangle((6, 17, 16, 19), fill="#392d2b")
+    d.rectangle((8, 16, 14, 19), fill="#e894a5")
+    d.rectangle((7, 17, 15, 18), fill="#e894a5")
+    d.rectangle((9, 16, 11, 16), fill="#ffe1dc")
+    d.rectangle((9, 20, 14, 20), fill="#ba657f")
+    return sprite.crop((0, 0, 23, height))
 
 
-def draw_plate(draw):
-    plate = [(-11, 11), (11, 11), (11, -11), (33, -11), (33, 33), (-11, 33)]
-    for height in range(5):
-        color = "#747b73" if height == 4 else INK
-        draw.polygon([project(p, height) for p in plate], fill=color)
-
-
-def icon(travel=(0, 0, 0), return_ink=INK):
-    image = Image.new("RGBA", (93, 65))
-    draw = ImageDraw.Draw(image)
-    draw_plate(draw)
-    for (name, center, legend), depth in zip(KEYS, travel):
-        draw_key(draw, center, legend, orange=name == "return", travel=depth, return_ink=return_ink)
+def icon(heights=REST, ascii_art=False):
+    image = Image.new("RGBA", SIZE)
+    for (cx, cy), height in zip(HOLES, heights):
+        d = ImageDraw.Draw(image)
+        # Separate stepped earth rims and dark openings, with clear air between them.
+        d.polygon([(cx-15, cy-1), (cx-12, cy-4), (cx-7, cy-5),
+                   (cx+8, cy-5), (cx+12, cy-3), (cx+15, cy),
+                   (cx+15, cy+3), (cx+10, cy+6), (cx-9, cy+6),
+                   (cx-14, cy+4)], fill="#866047")
+        d.rectangle((cx-11, cy-2, cx+11, cy+2), fill="#392d2b")
+        d.rectangle((cx-8, cy-3, cx+8, cy+3), fill="#392d2b")
+        if height:
+            image.alpha_composite(groundhog(height, highlights=not ascii_art), (cx-11, cy+1-height))
+        d = ImageDraw.Draw(image)
+        # Front lip occludes the feet, even when the sprite is almost underground.
+        d.rectangle((cx-10, cy+2, cx+10, cy+4), fill="#ae805b")
+        d.rectangle((cx-7, cy+5, cx+8, cy+5), fill="#866047")
+        d.rectangle((cx-12, cy, cx-10, cy+2), fill="#d7b28a")
+        d.rectangle((cx+10, cy+2, cx+13, cy+3), fill="#d7b28a")
+        d.rectangle((cx-6, cy+3, cx-4, cy+3), fill="#d7b28a")
+        if ascii_art:
+            # Keep a continuous bright front rim visible over every emerging body.
+            d.rectangle((cx-9, cy+2, cx+9, cy+3), fill="#392d2b")
     return image
 
 
@@ -152,75 +158,71 @@ def scale(image, factor):
     return image.resize((image.width * factor, image.height * factor), Image.Resampling.NEAREST)
 
 
-def write_terminal(bounds):
-    # Rasterize the same poses on a monospace grid. Share identical scanlines
-    # between poses so the browser downloads each line of text only once.
+def ascii_rows(heights):
+    """Sample two vertical pixels per monospace cell to preserve the silhouette."""
     palette = {
-        "#20231f": ("=", "#85909d"), "#747b73": ("/", "#9ba8b5"),
-        "#464c46": ("+", "#aeb9c5"), "#9ca39a": ("/", "#d7dde4"),
-        PAPER: ("█", "#f5f5ef"), "#59605b": ("#", "#8a97a6"),
-        "#343a37": (":", "#7f8d9c"), ORANGE: ("#", "#ffab78"),
-        "#ffaf80": ("/", "#ffe1b8"), "#d65a30": ("+", "#f99462"),
-        "#993e29": (":", "#de814f"), "#86503c": ("@", "#86503c"),
+        "#392d2b": ("#", "#ffe0a3"), "#ae805b": (":", "#c48a4e"),
+        "#866047": (".", "#9b693f"), "#d7b28a": ("+", "#ffe7b9"),
+        "#241f24": ("@", "#ffffff"), PAPER: ("*", "#ffffff"),
+        "#e894a5": ("O", "#ff77bf"), "#ffe1dc": ("*", "#fff4fb"),
+        "#ba657f": ("=", "#ff94cf"),
     }
-    columns, rows = 77, 28
-    cell_width, cell_height = 10, 14
-    width, height = columns * cell_width, rows * cell_height
+    # Trim unused side padding so more of the artwork fits the website.
+    grid = icon(heights, ascii_art=True).crop((10, 0, 78, SIZE[1])).resize((68, SIZE[1] // 2), Image.Resampling.NEAREST)
+    rows = []
+    for y in range(grid.height):
+        runs = []
+        x = 0
+        for rgba, run in groupby(grid.getpixel((col, y)) for col in range(grid.width)):
+            length = sum(1 for _ in run)
+            if rgba[3]:
+                char, fill = palette["#%02x%02x%02x" % rgba[:3]]
+                runs.append(f'<tspan x="{x * 10}" fill="{fill}" textLength="{length * 10}" lengthAdjust="spacingAndGlyphs">{char * length}</tspan>')
+            x += length
+        rows.append("".join(runs))
+    return rows
+
+
+def write_website():
+    # Text-only ASCII frames share the pixel logo's poses and timing.
+    width, height = 680, SIZE[1] * 10
     poses = list(dict.fromkeys(pose for _, pose in SEQUENCE))
     lines = {}
     frames = []
-    resting_rows = []
-    for index, pose in enumerate(poses):
-        grid = icon(pose, return_ink="#86503c").crop(bounds).resize((columns, rows), Image.Resampling.NEAREST)
+    for i, pose in enumerate(poses):
         references = []
-        for y in range(rows):
-            runs = []
-            x = 0
-            for rgba, run in groupby(grid.getpixel((col, y)) for col in range(columns)):
-                length = sum(1 for _ in run)
-                if rgba[3]:
-                    char, fill = palette["#%02x%02x%02x" % rgba[:3]]
-                    runs.append(f'<tspan x="{x * cell_width}" fill="{fill}">{char * length}</tspan>')
-                x += length
-            line_id = lines.setdefault("".join(runs), len(lines))
-            references.append(f'<use href="#r{line_id}" y="{13 + y * cell_height}"/>')
-            if index == 0:
-                resting_rows.append(f'<text y="{13 + y * cell_height}">{"".join(runs)}</text>')
-        frames.append(f'<g transform="translate(0 {height * index})">{"".join(references)}</g>')
-
-    total = sum(duration for duration, _ in SEQUENCE)
+        for y, row in enumerate(ascii_rows(pose)):
+            line_id = lines.setdefault(row, len(lines))
+            references.append(f'<use href="#r{line_id}" y="{16 + y * 20}"/>')
+        frames.append(f'<g transform="translate(0 {height * i})">{"".join(references)}</g>')
+    definitions = "".join(f'<text id="r{i}">{row}</text>' for row, i in lines.items())
+    rest = "".join(f'<text y="{16 + y * 20}">{row}</text>' for y, row in enumerate(ascii_rows(REST)))
     elapsed = 0
     steps = []
     for duration, pose in SEQUENCE:
-        offset = -height * poses.index(pose)
-        steps.append(f'{100 * elapsed / total:.3f}% {{ transform: translateY({offset}px); }}')
+        steps.append(f'{elapsed / 60:.3f}% {{transform:translateY(-{height * poses.index(pose)}px)}}')
         elapsed += duration
-    definitions = "\n".join(f'<text id="r{i}">{row}</text>' for row, i in lines.items())
-    opening = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" overflow="hidden" role="img" aria-labelledby="title">
-  <title id="title">The clqn keycaps drawn in terminal characters</title>'''
-    font = 'font-family="monospace" font-size="16.6" font-weight="bold"'
-    still = f'{opening}\n  <g {font}>\n{chr(10).join(resting_rows)}\n  </g>\n</svg>\n'
-    (WEBSITE / "keycaps-still.svg").write_bytes(still.encode())
-    svg = f'''{opening}
-  <style>
-    @media (prefers-reduced-motion: no-preference) {{
-      .strip {{ animation: press {total}ms step-end infinite; }}
-    }}
-    @keyframes press {{ {" ".join(steps)} 100% {{ transform: translateY(0); }} }}
-  </style>
-  <defs>
-{definitions}
-  </defs>
-  <g class="strip" {font}>
-{chr(10).join(frames)}
-  </g>
-</svg>
-'''
-    (WEBSITE / "keycaps.svg").write_bytes(svg.encode())
+    opening = f'<svg xmlns="http://www.w3.org/2000/svg" width="680" height="620" viewBox="0 0 {width} {height}" overflow="hidden" role="img" aria-labelledby="title"><title id="title">Three ASCII groundhogs popping out of separate holes</title>'
+    font = 'font-family="monospace" font-size="16" font-weight="bold"'
+    still = opening + f'<g {font}>{rest}</g></svg>\n'
+    animated = opening + f"""
+<style>
+.strip {{display:none}}
+@media (prefers-reduced-motion: no-preference) {{.rest {{display:none}} .strip {{display:inline;animation: pop 6000ms step-end infinite}}}}
+@keyframes pop {{{' '.join(steps)} 100% {{transform:translateY(0)}}}}
+</style>
+<defs>{definitions}</defs>
+<g {font}><g class="rest">{rest}</g><g class="strip">{''.join(frames)}</g></g></svg>
+"""
+    (WEBSITE / "groundhogs-still.svg").write_text(still)
+    (WEBSITE / "groundhogs.svg").write_text(animated)
 
 
 def main():
-    bounds = icon().getbbox()
+    # Use shared bounds across poses so no hidden canvas padding separates the wordmark.
+    boxes = [icon(pose).getbbox() for pose in [REST] + [pose for _, pose in SEQUENCE]]
+    bounds = (min(b[0] for b in boxes), min(b[1] for b in boxes),
+              max(b[2] for b in boxes), max(b[3] for b in boxes))
     mark = icon().crop(bounds)
     name = wordmark()
     mark_paths = pixel_paths(mark)
@@ -230,9 +232,9 @@ def main():
 
     size = (344, 104)
     letters = scale(name, 4)
-    gap = 13
+    gap = 8
     left = (size[0] - mark.width - letters.width - gap) // 2
-    key_at = (left, (size[1] - mark.height) // 2)
+    key_at = (left, (size[1] - mark.height) // 2 - 4)
     name_at = (left + mark.width + gap, (size[1] - letters.height) // 2)
     header = f'''  <rect width="{size[0]}" height="{size[1]}" fill="{PAPER}"/>
   <g transform="translate({key_at[0]} {key_at[1]})">
@@ -243,11 +245,12 @@ def main():
   </g>'''
     write_svg("header.svg", size, 3, header, DESCRIPTION)
 
-    write_terminal(bounds)
+    write_website()
+    scale(mark, 6).save(ASSETS / "logo.png")
     frames = []
-    for _, travel in SEQUENCE:
+    for _, heights in SEQUENCE:
         frame = Image.new("RGBA", size, PAPER)
-        frame.alpha_composite(icon(travel).crop(bounds), key_at)
+        frame.alpha_composite(icon(heights).crop(bounds), key_at)
         frame.alpha_composite(letters, name_at)
         frames.append(scale(frame, 3).convert("RGB"))
     frames[0].save(
