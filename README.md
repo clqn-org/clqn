@@ -3,158 +3,104 @@
   <img src="docs/assets/header.gif" width="1032" alt="clqn">
 </picture>
 
-[clqn.org](https://clqn.org/) · [Download](https://clqn.org/download.html) · [Documentation](https://clqn.org/docs/)
+<p align="center">
+  <a href="https://clqn.org/">clqn.org</a> · <a href="https://clqn.org/download.html">Download</a> · <a href="https://clqn.org/docs/">Documentation</a>
+</p>
 
+<p align="center">
 <a href="https://github.com/rli8145/clqn/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/rli8145/clqn/ci.yml?branch=main&style=for-the-badge" alt="Build status"></a>
 <img src="https://img.shields.io/badge/node-%3E%3D22-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Node.js 22 or newer">
+<a href="https://npmjs.com/package/clqn-cli"><img src="https://img.shields.io/npm/v/clqn-cli?style=for-the-badge" alt="npm version"></a>
+</p>
 <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="MIT license"></a>
+
+## Why clqn?
 
 Collaborating on long-horizon development tasks can get complicated quickly. Bloated context, merge conflicts, and unclear task ownership are common, especially when each collaborator works with several agents.
 
-Existing solutions introduce a lot of setup overhead. `clqn` is an extra lightweight CLI for people and their own AI agents to quickly share context, assign tasks, message one another, and coordinate work. Each collaborator runs their own agents, which connect to clqn through MCP.
+Existing solutions introduce a lot of setup overhead. `clqn` is an extra lightweight CLI for people and their own AI agents to easily coordinate work.
 
 `clqn` stands for **clan**. Each clan has a **leader** who invites members and registers the orchestrator. **Members** register their own worker agents.
 
 ## Installation
 
-Homebrew is the primary install route and manages Node.js for you. Code workflows also need Git and an authenticated GitHub CLI (`gh`).
-
 ```sh
 brew tap rli8145/clqn https://github.com/rli8145/clqn
 brew install clqn
-clqn --help
 ```
 
-The CLI includes the local MCP server for Codex, Claude Code, and other MCP clients. No separate MCP package is needed.
+Or install with npm (Node.js 22+): `npm install -g clqn-cli`.
 
-### npm alternative
+## Usage
 
-With Node.js 22+, install from npm:
+### 1. Sign in and create a clan
 
-```sh
-npm install -g clqn-cli
-```
-
-### Build from source
-
-For development, use Node.js 22+ and npm 10+:
-
-```sh
-git clone https://github.com/rli8145/clqn.git
-cd clqn
-npm ci
-npm run build
-npm link --workspace @clqn/cli
-clqn --help
-```
-
-This puts `clqn` on your `PATH`. Update a Homebrew installation with `brew upgrade clqn`. For a source installation, run `git pull`, `npm ci`, and `npm run build` in your clone.
-
-### Sign in
-
-Replace `<operator-api-url>` with the HTTPS URL supplied by your clan operator, then log in.
+Use the API URL from your clan operator.
 
 ```sh
 export CLQN_API_URL="<operator-api-url>"
 clqn login --github
-# Or use an operator-provisioned token:
-clqn login < /secure/path/to/personal-token
-```
-
-GitHub login requires the operator to [configure an OAuth App](docs/authentication.md#operator-setup). It requests email identity access only, never repository access.
-
-## Create or join a clan
-
-```sh
 clqn init "My project"
-clqn invite bob@example.com
-
-# Bob logs in with his own token, then joins.
-clqn join <invite-code>
+clqn invite teammate@example.com
 ```
 
-## Connect agents
+Invited? Sign in and run `clqn join <invite-code>`.
+
+### 2. Connect your agents
+
+The leader registers the orchestrator; each member registers their own workers.
 
 ```sh
-# Leader: register the clan's orchestrator.
-clqn agent add Coordinator --orchestrator --json
-
-# Each member: register a worker.
-clqn agent add Codex --json
+clqn agent add Coordinator --orchestrator
+clqn agent add Codex
 ```
 
-Each returns an agent token shown once. Save it privately and use it in that agent's MCP configuration. Set `CLQN_CLAN_ID` to the clan ID printed by `clqn init` or `clqn join`, or listed by `clqn clans`:
+Connect each agent to MCP using its returned token: [agent setup](docs/index.md#connect-an-agent).
 
-```json
-{
-  "mcpServers": {
-    "clqn": {
-      "command": "clqn",
-      "args": ["mcp", "--path", "/absolute/path/to/project"],
-      "env": {
-        "CLQN_API_URL": "<operator-api-url>",
-        "CLQN_TOKEN": "<agent-token>",
-        "CLQN_CLAN_ID": "<clan-id>"
-      }
-    }
-  }
-}
+Save token limits, allowed models, and approval preferences for your agents:
+
+```sh
+clqn limits --tokens 100000 --models provider/model --control approve
 ```
 
-## Share context
+### 3. Share context and coordinate work
 
 ```sh
 printf 'Run npm test before committing.\n' | clqn context write conventions --expected-revision 0
 clqn context read conventions
-clqn context history conventions
 ```
 
-## Coordinate work
-
-Code tasks use isolated Git worktrees so agents can work in parallel, with GitHub PRs for review and merging.
-
-Run from the project clone, using each agent's credentials in its session:
+For code tasks, run from your project clone with Git and an authenticated GitHub CLI (`gh`). Each agent uses its own credentials.
 
 ```sh
-# Orchestrator: create and assign.
-clqn task add "Review the API contract" --code
+# Orchestrator
+clqn task add "Implement login" --code
 clqn task assign <task-id> --agent <worker-agent-id>
 
-# Assigned worker: open a worktree, work, commit, and submit a PR.
+# Worker
 clqn task start <task-id>
 cd <printed-worktree-path>
 # Make changes, test, and commit.
 clqn task submit <task-id>
 
-# Orchestrator: verify checks and merge.
+# Orchestrator
 clqn task check <task-id>
 clqn task merge <task-id>
 
-# Task owner: complete after integration.
+# Worker
 clqn task done <task-id>
 ```
 
-`--code` selects origin/main and a unique branch (omit for non-code tasks). 
+As the leader, run `clqn repo link` once to set up the [GitHub webhook](docs/webhooks.md#link-a-repository). While MCP is connected, changes to `origin/main` automatically update clean local `main` checkouts.
 
-## Sync main
-
-```sh
-# Leader: configure the GitHub webhook once per repository/clan.
-clqn repo link
-```
-
-Linking requires repository admin access and a [configured HTTPS API](docs/webhooks.md#server-setup). While the project MCP connection is active, main sync runs automatically. It fetches at startup, after main-change notifications, and on a five-minute fallback. A clean main worktree fast-forwards; task branches stay pinned. Set the project path in the MCP configuration above.
-
-## Limits and activity
+### 4. Follow progress
 
 ```sh
-clqn limits --tokens 100000 --models provider/model --control approve
-clqn limits       # Saved preferences; limits and approvals are not enforced yet.
-clqn status       # Workspace counts and task distribution.
-clqn log          # Latest 10 clan activity events, newest first.
+clqn status
+clqn log
 ```
 
-Add `--json` for scripting. 
+Use `clqn --help` to explore all commands. Add `--json` for scripting.
 
 ## Documentation
 
