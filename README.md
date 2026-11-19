@@ -17,7 +17,29 @@ Existing solutions introduce a lot of setup overhead. `clqn` is an extra lightwe
 
 ## Installation
 
-Build from source with Node.js 22+ and npm 10+. Code workflows also need Git and an authenticated GitHub CLI (`gh`).
+Homebrew is the primary install route and manages Node.js for you. Code workflows also need Git and an authenticated GitHub CLI (`gh`).
+
+The first packaged release is not published yet. Once it is available:
+
+```sh
+brew tap rli8145/clqn https://github.com/rli8145/clqn
+brew install clqn
+clqn --help
+```
+
+The CLI includes the local MCP server for Codex, Claude Code, and other MCP clients. No separate MCP package is needed.
+
+### npm alternative
+
+With Node.js 22+, install the same release archive through npm; no registry publication is required:
+
+```sh
+npm install -g https://github.com/rli8145/clqn/releases/download/v0.1.0/clqn-cli-0.1.0.tgz
+```
+
+### Build from source
+
+Until the first release, or for development, use Node.js 22+ and npm 10+:
 
 ```sh
 git clone https://github.com/rli8145/clqn.git
@@ -28,19 +50,9 @@ npm link --workspace @clqn/cli
 clqn --help
 ```
 
-Use the API URL and personal token supplied by your workspace operator.
+This puts `clqn` on your `PATH`. Update a Homebrew installation with `brew upgrade clqn`. For a source installation, run `git pull`, `npm ci`, and `npm run build` in your clone.
 
-clqn is not yet published to npm. Install it from a clone:
-
-```sh
-git clone https://github.com/rli8145/clqn.git
-cd clqn
-npm ci
-npm run build
-npm link -w packages/cli
-```
-
-This puts `clqn` on your `PATH`. To update, run `git pull`, `npm ci`, and `npm run build`; the link stays in place. Remove it with `npm rm -g @clqn/cli`.
+### Sign in
 
 Replace `<operator-api-url>` with the HTTPS URL supplied by your clan operator, then log in.
 

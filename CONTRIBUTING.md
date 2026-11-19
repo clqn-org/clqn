@@ -51,3 +51,23 @@ The current Drizzle Kit dependency tree reports four moderate development-only a
 ## Commits
 
 Commit incrementally using `<type>(optional scope): <brief description>`, for example `feat(cli): add clan status`. Keep unrelated existing changes out of commits.
+
+## CLI releases
+
+Keep the development workspaces private. Ship the CLI and local MCP adapter together as one package, with Homebrew as the primary installation route. Thin agent plugins can be added later; manual MCP configuration continues to work.
+
+```sh
+npm run package:cli
+npm run test:package
+```
+
+Packaging bundles the CLI and its dependencies into `dist/cli/clqn.mjs`, then creates `dist/clqn-cli-<version>.tgz` and `dist/clqn.rb`. Node.js remains a runtime dependency; users do not build the workspaces. The package test installs the archive into a temporary prefix outside the repository and checks CLI and MCP calls against a local HTTP server.
+
+For a release:
+
+1. Update the version in the root and workspace manifests and `packages/shared/src/index.ts`; refresh the lockfile with `npm install --package-lock-only`.
+2. Run `npm test`, `npm run typecheck`, and the packaging commands above. Copy `dist/clqn.rb` to `Formula/clqn.rb`. The formula contains the archive's SHA-256 and its versioned GitHub release URL.
+3. Commit the release changes and tag that commit `v<version>`. Upload the exact generated `.tgz` to that GitHub release. Do not rebuild the archive after generating the formula; changing packaged files changes its checksum.
+4. On a machine with Homebrew, tap this repository as shown in the README, then run `brew install clqn` and `brew test clqn`. Remove the first-release notices from the install docs when the release is available.
+
+This repository doubles as the Homebrew tap; no separate tap repository is needed. npm users install the same GitHub release archive. Publishing that archive to npm is optional (`npm publish dist/clqn-cli-<version>.tgz --access public`) and requires ownership of the `@clqn` scope. Never publish the private workspace directories directly.

@@ -12,9 +12,11 @@
     "test": "npm run build && node --test --test-concurrency=1 packages/*/test/*.test.mjs",
     "dev": "npm run dev --workspace @clqn/api",
     "cli": "node packages/cli/dist/index.js",
+    "package:cli": "node scripts/package-cli.mjs",
+    "test:package": "node --test scripts/package.test.mjs",
     "db:generate": "npm run db:generate --workspace @clqn/api",
     "db:migrate": "npm run db:migrate --workspace @clqn/api",
     "user": "npm run user --workspace @clqn/api --"
   },
-  "devDependencies": { "@types/node": "^22.0.0", "marked": "18.2.1", "typescript": "^5.9.0" }
+  "devDependencies": { "@types/node": "^22.0.0", "esbuild": "0.28.2", "marked": "18.2.1", "typescript": "^5.9.0" }
 }
