@@ -34,21 +34,17 @@ Humans + existing agent runtimes
 Automated acceptance covers two users and two MCP clients through the HTTP API and PostgreSQL. The production container and migration entrypoint are verified locally. Real application setup, deployed networking, and live GitHub delivery remain unverified.
 
 ## NEXT STEPS
+- Test published packages: Run a two-person acceptance test on separate machines using real Codex and Claude Code: join one clan, github login, share context, assign work, submit/merge a PR, and observe progress. **Verify live GitHub webhook setup: delivery and clean-main sync, including missed-delivery fallback.**
 
-1. Two-person acceptance test locally
-2.  Deploy the API and managed PostgreSQL on GCP with explicit migrations.
-3. Run a two-person acceptance test on separate machines using real Codex and Claude Code: join one clan, share context, assign work, submit/merge a PR, and observe progress.
-4. Verify live GitHub webhook setup/delivery and clean-main sync, including missed-delivery fallback.
-5. Fix setup and workflow friction, update installation docs, and validate the MVP before selecting extensions.
+- **add human-friendly task/agent/etc aliases alongside UUIDs**
+- **set up CI/CD**
 
-**Success:** Two people using different agents collaborate on real code without manually transferring context between sessions.
+- **update + clarify: docs + website documentation. GIF showing screen recording of usage for README. Andy redeploy clqn.org.**
+- **persistent command center, liquid glass widget/vscode extension?** 
 
-## EXTENSIONS
-
-- **POST ON X, LINKEDIN, BOT YT VIEWS, BOT STARS/GH ACTIVITY, BOT NPM DOWNLOADS**
+- **POST ON X, LINKEDIN, BOT YT VIEWS, BOT STARS/GH ACTIVITY, BOT NPM DOWNLOADS. Apply to official Homebrew**
 
 - **Communication:** Asynchronous DMs, group chats.
-- **Metric commands** Commands yield more detailed and interactive metric and usage visualizations.
 
 - **Interoperability and context:** A2A, remote MCP, context branching, and artifact storage through separate proposals.
 
