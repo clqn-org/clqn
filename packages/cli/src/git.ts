@@ -51,9 +51,9 @@ async function validateRepository(repository: RepositoryWork, cwd: string): Prom
   if (repository.branch === repository.baseBranch) throw new Error('Task branch must differ from its base branch');
   await verifyOrigin(cwd, repository.slug);
 }
-async function verifyOrigin(cwd: string, expected: string): Promise<void> {
+async function verifyOrigin(cwd: string, expected: string, signal?: AbortSignal): Promise<void> {
   for (const args of [['remote', 'get-url', '--all', 'origin'], ['remote', 'get-url', '--push', '--all', 'origin']]) {
-    const urls = (await git(cwd, args)).split('\n');
+    const urls = (await git(cwd, args, signal)).split('\n');
     if (urls.length !== 1) throw new Error('Use exactly one origin fetch URL and one origin push URL');
     const url = urls[0]!;
     const match = url.match(/^https:\/\/github\.com\/([^/?#]+\/[^/?#]+?)(?:\.git)?\/?$/i)
@@ -61,15 +61,15 @@ async function verifyOrigin(cwd: string, expected: string): Promise<void> {
     if (!match || slug(match[1]!) !== slug(expected)) throw new Error('Origin does not match the task GitHub repository');
   }
 }
-export async function localRepository(repoPath = '.') {
+export async function localRepository(repoPath = '.', signal?: AbortSignal) {
   const directory = await realpath(repoPath);
-  const root = await realpath(await git(directory, ['rev-parse', '--show-toplevel']));
-  const urls = (await git(root, ['remote', 'get-url', '--all', 'origin'])).split('\n');
+  const root = await realpath(await git(directory, ['rev-parse', '--show-toplevel'], signal));
+  const urls = (await git(root, ['remote', 'get-url', '--all', 'origin'], signal)).split('\n');
   const match = urls.length === 1 ? (urls[0]!.match(/^https:\/\/github\.com\/([^/?#]+\/[^/?#]+?)(?:\.git)?\/?$/i)
     ?? urls[0]!.match(/^git@github\.com:([^/?#]+\/[^/?#]+?)(?:\.git)?$/i)) : null;
-  if (!match) throw new Error('Origin must be a single GitHub HTTPS or SSH repository; use --repo for an explicit repository');
+  if (!match) throw new Error('Origin must be a single GitHub HTTPS or SSH repository');
   const repository = slug(match[1]!);
-  await verifyOrigin(root, repository);
+  await verifyOrigin(root, repository, signal);
   return { root, repository };
 }
 
@@ -264,9 +264,14 @@ export interface MainSyncResult {
 export async function syncMain(input: { repoPath: string; repository: string; signal?: AbortSignal }): Promise<MainSyncResult> {
   const runGit = (cwd: string, args: string[]) => git(cwd, args, input.signal);
   const repoPath = await realpath(input.repoPath);
-  const root = await realpath(await runGit(repoPath, ['rev-parse', '--show-toplevel']));
+  let root = await realpath(await runGit(repoPath, ['rev-parse', '--show-toplevel']));
+  // A session may start in a task worktree. Find main without switching any branches.
+  const worktrees = (await runGit(root, ['worktree', 'list', '--porcelain', '-z'])).split('\0\0');
+  const main = worktrees.map((entry) => entry.split('\0')).find((fields) => fields.includes('branch refs/heads/main'));
+  const mainPath = main?.find((field) => field.startsWith('worktree '))?.slice('worktree '.length);
+  if (mainPath) root = await realpath(mainPath);
   const repository = slug(input.repository);
-  await verifyOrigin(root, repository);
+  await verifyOrigin(root, repository, input.signal);
   await runGit(root, ['fetch', '--no-tags', '--no-recurse-submodules', 'origin',
     'refs/heads/main:refs/remotes/origin/main']);
   const remoteSha = await runGit(root, ['rev-parse', '--verify', 'refs/remotes/origin/main^{commit}']);

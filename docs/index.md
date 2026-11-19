@@ -38,7 +38,7 @@ In your agent runtime's private MCP settings, replace the values below with your
   "mcpServers": {
     "clqn": {
       "command": "clqn",
-      "args": ["mcp"],
+      "args": ["mcp", "--path", "/absolute/path/to/project"],
       "env": {
         "CLQN_API_URL": "<operator-api-url>",
         "CLQN_TOKEN": "<agent-token>",
@@ -49,7 +49,7 @@ In your agent runtime's private MCP settings, replace the values below with your
 }
 ```
 
-`clqn mcp` starts the local stdio server and is launched by your agent runtime using this configuration. It is hidden from the main CLI help. To inspect the identity configured for an agent, run `clqn whoami` with its token.
+`clqn mcp` starts the local stdio server and automatic main sync, launched by your agent runtime using this configuration. Replace the project path with your local clone or worktree; if omitted, the current directory is used. With a selected clan and GitHub origin, the connection fetches main at startup, after main-change notifications, and every five minutes as a fallback. It finds the main worktree and fast-forwards it only when clean. Without a main worktree, it fetches `origin/main` without moving feature branches. Sync stops when the MCP connection closes. It is hidden from the main CLI help. To inspect the identity configured for an agent, run `clqn whoami` with its token.
 
 ## Share context
 

@@ -103,7 +103,7 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
     const client = new Client({ name, version: '1.0.0' });
     clients.push(client);
     const transport = new StdioClientTransport({ command: process.execPath,
-      args: [cliPath, '--api-url', apiUrl, 'mcp'], env, stderr: 'pipe' });
+      args: [cliPath, '--api-url', apiUrl, 'mcp'], cwd: directory, env, stderr: 'pipe' });
     transport.stderr?.resume();
     await client.connect(transport);
     return client;
@@ -147,10 +147,9 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
   assert.ok(log.events.some((event) => event.type === 'task.completed'));
   assert.ok(log.events.every((event, i) => i === 0 || event.sequence < log.events[i - 1].sequence));
   assert.equal((await call(bobMcp, 'clqn_get_status')).stats.tasks.completed, 2);
-  const events = (await runRaw(bobEnv, ['watch', '--once'])).trim().split('\n').map((line) => JSON.parse(line));
+  const events = (await (await fetch(`${apiUrl}/v1/clans/${clan.id}/events`, { headers: { authorization: `Bearer ${bob.token}` } })).json()).events;
   assert.ok(events.some((event) => event.type === 'context.written' && event.agentId === codex.agent.id));
   assert.ok(events.some((event) => event.type === 'context.written' && event.agentId === claude.agent.id));
   assert.ok(events.some((event) => event.type === 'task.completed' && event.resourceId === task.id));
   assert.ok(events.every((event, i) => i === 0 || event.sequence > events[i - 1].sequence));
-  assert.equal(await runRaw(aliceEnv, ['watch', '--once', '--cursor', String(events.at(-1).sequence)]), '');
 });

@@ -76,7 +76,7 @@ Each returns an agent token shown once. Save it privately and use it in that age
   "mcpServers": {
     "clqn": {
       "command": "clqn",
-      "args": ["mcp"],
+      "args": ["mcp", "--path", "/absolute/path/to/project"],
       "env": {
         "CLQN_API_URL": "<operator-api-url>",
         "CLQN_TOKEN": "<agent-token>",
@@ -127,12 +127,9 @@ clqn task done <task-id>
 ```sh
 # Leader: configure the GitHub webhook once per repository/clan.
 clqn repo link
-
-# Each member: run from the main checkout.
-clqn sync --watch
 ```
 
-Linking requires repository admin access and a [configured HTTPS API](docs/webhooks.md#server-setup). Sync only updates `main` (task branches are unchanged). Omit `--watch` to sync once.
+Linking requires repository admin access and a [configured HTTPS API](docs/webhooks.md#server-setup). While the project MCP connection is active, main sync runs automatically. It fetches at startup, after main-change notifications, and on a five-minute fallback. A clean main worktree fast-forwards; task branches stay pinned. Set the project path in the MCP configuration above.
 
 ## Limits and activity
 
@@ -141,7 +138,6 @@ clqn limits --tokens 100000 --models provider/model --control approve
 clqn limits       # Saved preferences; limits and approvals are not enforced yet.
 clqn status       # Workspace counts and task distribution.
 clqn log          # Latest 10 clan activity events, newest first.
-clqn watch        # Activity feed; does not sync Git.
 ```
 
 Add `--json` for scripting. 

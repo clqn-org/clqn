@@ -7,6 +7,8 @@ import { tmpdir, devNull } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { once } from 'node:events';
+import { createServer } from 'node:http';
+import { runMcpSync } from '../dist/mcp-sync.js';
 import { prepareWorktree, publishWorktree, inspectPullRequest, mergePullRequest, syncMain, localRepository, repositoryForNewTask, taskWorktreeLocation, openTaskWorktree } from '../dist/git.js';
 
 const execute = promisify(execFile);
@@ -305,81 +307,98 @@ test('main sync refuses to overwrite ignored local files that become tracked rem
 });
 
 const cli = fileURLToPath(new URL('../dist/index.js', import.meta.url));
-test('sync CLI runs without the clan API and emits structured main-only results', async (t) => {
+test('MCP sync follows notifications from a dirty feature worktree without moving that branch', { timeout: 15000 }, async (t) => {
   const f = await fixture(t);
-  const remoteSha = await advanceMain(f);
-  const { stdout, stderr } = await execute(process.execPath, [cli, 'sync', '--repo', 'test/project',
-    '--path', f.repoPath, '--json'], { env: { ...process.env, CLQN_API_URL: 'http://127.0.0.1:1' } });
-  assert.equal(JSON.parse(stdout).headSha, remoteSha);
-  assert.equal(JSON.parse(stdout).branch, 'main');
-  assert.equal(JSON.parse(stdout).status, 'updated');
-  assert.equal(stderr, '');
-  for (const interval of ['0', 'NaN', '3601']) {
-    await assert.rejects(execute(process.execPath, [cli, 'sync', '--repo', 'test/project',
-      '--path', f.repoPath, '--interval', interval, '--json']), (error) => {
-      assert.match(JSON.parse(error.stderr).error.message, /interval/); return true;
-    });
-  }
-  await assert.rejects(execute(process.execPath, [cli, 'sync', '--repo', 'test/project',
-    '--path', f.repoPath, '--branch', 'feature']), (error) => {
-    assert.match(error.stderr, /unknown option/); return true;
-  });
+  await prepareWorktree(f);
+  await writeFile(join(f.worktreePath, 'draft.txt'), 'unfinished work\n');
+  const controller = new AbortController();
+  t.after(() => controller.abort());
+  const results = [];
+  const cursors = [];
+  const errors = [];
+  let remoteSha;
+  const before = (await f.commands()).filter(({ args }) => args.includes('fetch')).length;
+  const api = {
+    repositories: async () => {
+      assert.equal((await f.commands()).filter(({ args }) => args.includes('fetch')).length, before);
+      return { repositories: [{ slug: 'test/project', lastEventSequence: 7 }] };
+    },
+    events: async (clanId, cursor) => {
+      assert.equal(clanId, 'test-clan');
+      cursors.push(cursor);
+      if (cursor === 7) {
+        remoteSha = await advanceMain(f);
+        return { events: [{ sequence: 8, type: 'repository.main_changed', resourceId: 'test/project' }], nextCursor: 8 };
+      }
+      controller.abort();
+      return { events: [], nextCursor: cursor };
+    },
+  };
+  await runMcpSync(api, 'test-clan', { repoPath: f.worktreePath, signal: controller.signal,
+    pollIntervalMs: 10, fallbackIntervalMs: 60000, onResult: (value) => results.push(value), onError: (error) => errors.push(error) });
+  assert.deepEqual(errors, []);
+  assert.deepEqual(cursors, [7, 8]);
+  assert.deepEqual(results.map((value) => value.status), ['unchanged', 'updated']);
+  assert.equal(await git(f.repoPath, ['rev-parse', 'HEAD']), remoteSha);
+  assert.equal(await git(f.worktreePath, ['rev-parse', 'HEAD']), f.baseSha);
+  assert.equal(await readFile(join(f.worktreePath, 'draft.txt'), 'utf8'), 'unfinished work\n');
+  assert.equal((await f.commands()).filter(({ args }) => args.includes('fetch')).length, before + 2);
 });
 
-test('sync watcher recovers from fetch errors, picks up later main commits, and stops on SIGTERM', { timeout: 20_000 }, async (t) => {
+test('automatic sync reports a non-project directory without fetching or polling', async (t) => {
   const f = await fixture(t);
-  const failFetch = join(f.root, 'fail-fetch');
-  const child = spawn(process.execPath, [cli, 'sync', '--repo', 'test/project', '--path', f.repoPath,
-    '--watch', '--fallback', '1', '--json'], { env: { ...process.env, CLQN_TEST_FAIL_FETCH: failFetch }, stdio: ['ignore', 'pipe', 'pipe'] });
-  const closed = once(child, 'close');
-  t.after(async () => { if (child.exitCode === null) child.kill('SIGTERM'); await closed; });
-  let buffer = '';
-  let stderr = '';
-  const results = [];
-  child.stderr.on('data', (chunk) => { stderr += chunk; });
-  child.stdout.on('data', (chunk) => {
-    buffer += chunk;
-    const lines = buffer.split('\n'); buffer = lines.pop();
-    for (const line of lines) if (line) results.push(JSON.parse(line));
+  const controller = new AbortController();
+  const errors = [];
+  await runMcpSync({ repositories: () => assert.fail('No clan request without a repository') }, 'test-clan', {
+    repoPath: f.root, signal: controller.signal,
+    onResult: () => assert.fail('No sync result outside a repository'), onError: (error) => errors.push(error),
   });
-  const waitFor = async (predicate) => {
-    const deadline = Date.now() + 10_000;
-    while (!results.some(predicate)) {
-      if (child.exitCode !== null) throw new Error(`Watcher exited early: ${stderr}`);
-      if (Date.now() > deadline) throw new Error(`Timed out waiting for sync result: ${stderr}`);
+  assert.equal(errors.length, 1);
+  assert.equal((await f.commands()).filter(({ args }) => args.includes('fetch')).length, 0);
+});
+
+test('MCP automatically catches up main and stops syncing on stdin close or SIGTERM', { timeout: 15000 }, async (t) => {
+  const f = await fixture(t);
+  await prepareWorktree(f);
+  const remoteSha = await advanceMain(f);
+  const clanId = '84367b51-14c7-43de-84a1-faf0207eadb3';
+  const server = createServer((request, response) => {
+    response.setHeader('content-type', 'application/json');
+    if (request.url === '/v1/me') response.end(JSON.stringify({ id: clanId, email: 'test@example.com', clanId }));
+    else if (request.url.endsWith('/repositories')) response.end(JSON.stringify({ repositories: [] }));
+    else if (request.url.includes('/events')) response.end(JSON.stringify({ events: [], nextCursor: 0 }));
+    else if (request.url === '/health') response.end(JSON.stringify({ status: 'ok', service: 'clqn-api', version: '0.1.0' }));
+    else { response.writeHead(404); response.end('{}'); }
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  for (const mode of ['stdin', 'signal']) {
+    const before = (await f.commands()).filter(({ args }) => args.includes('fetch')).length;
+    const child = spawn(process.execPath, [cli, '--api-url', `http://127.0.0.1:${server.address().port}`, 'mcp',
+      ...(mode === 'stdin' ? ['--path', f.worktreePath] : [])], {
+      cwd: mode === 'stdin' ? f.root : f.worktreePath,
+      env: { ...process.env, CLQN_TOKEN: 'test-token', CLQN_CLAN_ID: clanId }, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const closed = once(child, 'close');
+    t.after(async () => { if (child.exitCode === null) child.kill('SIGTERM'); await closed; });
+    let stdout = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.resume();
+    const deadline = Date.now() + 8000;
+    while ((await f.commands()).filter(({ args }) => args.includes('fetch')).length <= before
+      || await git(f.repoPath, ['rev-parse', 'HEAD']) !== remoteSha) {
+      if (Date.now() > deadline || child.exitCode !== null) throw new Error('MCP did not sync main at startup');
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
-  };
-  await waitFor((result) => result.status === 'unchanged');
-  await writeFile(failFetch, 'simulate a transient fetch failure');
-  const deadline = Date.now() + 10_000;
-  while (!stderr.includes('REPO_SYNC_FAILED')) {
-    if (Date.now() > deadline) throw new Error('Watcher did not report a fetch failure');
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(await git(f.worktreePath, ['rev-parse', 'HEAD']), f.baseSha);
+    if (mode === 'stdin') child.stdin.end();
+    else child.kill('SIGTERM');
+    const [code, signal] = await closed;
+    assert.equal(code, 0);
+    assert.equal(signal, null);
+    assert.equal(stdout, '', 'sync diagnostics must not corrupt MCP stdout');
   }
-  await rm(failFetch);
-  await waitFor(() => results.filter((result) => result.status === 'unchanged').length >= 2);
-  const remoteSha = await advanceMain(f);
-  await waitFor((result) => result.status === 'updated' && result.headSha === remoteSha);
-  child.kill('SIGTERM');
-  const [code, signal] = await closed;
-  assert.equal(code, 0);
-  assert.equal(signal, null);
-  assert.ok(stderr.trim().split('\n').every((line) => JSON.parse(line).error.code === 'REPO_SYNC_FAILED'));
-  assert.equal(await git(f.repoPath, ['rev-parse', 'HEAD']), remoteSha);
-});
-
-
-test('sync infers origin and current directory', async (t) => {
-  const f = await fixture(t);
-  const remoteSha = await advanceMain(f);
-  const inferred = await localRepository(f.repoPath);
-  assert.deepEqual(inferred, { root: f.repoPath, repository: 'test/project' });
-  const call = (args, cwd = f.repoPath) => execute(process.execPath, [cli, ...args, '--json'], { cwd, env: process.env });
-  const result = JSON.parse((await call(['sync'])).stdout);
-  assert.equal(result.status, 'updated');
-  assert.equal(result.headSha, remoteSha);
-  assert.equal(JSON.parse((await call(['sync', '--path', f.repoPath], f.root)).stdout).status, 'unchanged');
 });
 
 test('code task defaults use the latest origin/main and a unique branch without modifying the checkout', async (t) => {

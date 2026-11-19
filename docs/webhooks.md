@@ -36,21 +36,17 @@ Only a personal clan leader can configure a link or retrieve its setup secret. W
 
 Setup is idempotent for a repository in a clan. If GitHub setup fails, the clan link may already exist. Fix `gh` authentication/admin access and run `repo link` again; it reuses that link and updates its matching hook. Duplicate matching hooks are refused rather than modified ambiguously. If the API hostname changes, remove the old webhook in GitHub settings before configuring its replacement URL.
 
-## Watch locally
+## Automatic local sync
 
-On each machine, select the clan and run from its main checkout:
+The project's [MCP connection](index.md#connect-an-agent) starts main sync automatically. Set `mcp --path <directory>` in its configuration, or launch it from the local project clone or worktree. No separate sync command or background service is needed.
 
-```sh
-clqn sync --watch
-```
+The listener reads the repository's event watermark before its startup Git fetch, so a main push during startup is not lost. It then polls the authorized clan event endpoint every 15 seconds. Bounded pages are drained, matching notifications are coalesced, and only events for this repository trigger a Git fetch. GitHub is not polled over Git every 15 seconds.
 
-With a clan credential, the watcher reads the repository's event watermark before its startup Git fetch, so a main push during startup is not lost. It then polls the existing authorized clan event endpoint every 15 seconds. Bounded pages are drained, matching notifications are coalesced, and only events for this repository trigger a Git fetch. GitHub is not polled over Git every 15 seconds.
+Startup and five-minute fallback fetches recover from missed webhook deliveries or offline clients. A main worktree fast-forwards only when clean; if none exists, only `origin/main` is fetched. Feature branches remain pinned. Sync runs only while MCP is connected with a selected clan and a valid local GitHub repository.
 
-The watcher also fetches at startup and every five minutes by default. These checks recover from missed webhook deliveries, offline clients, or a missing link. Without a clan credential it uses local Git polling every five minutes. `--interval` changes event polling; `--fallback` changes the Git safety check. An explicit legacy `--interval` still changes Git polling in local-only mode when no `--fallback` is supplied.
+Successful or skipped attempts acknowledge notifications. After resolving a dirty, diverged, or locally ahead main, wait for the fallback or another notification, or reconnect MCP. Failed Git attempts retain notifications and retry with bounded backoff. API failures also back off without disabling the Git fallback. Connection shutdown aborts sync requests and subprocesses.
 
-A successful or skipped sync acknowledges its notifications. Dirty, diverged, locally ahead, or non-main checkouts remain untouched; after cleanup use `clqn sync`, wait for the fallback, or wait for another main notification. A failed Git attempt keeps notifications pending and retries with bounded exponential backoff. API failures also back off without disabling the Git fallback. Process cancellation aborts requests and subprocesses.
-
-The existing safety checks still apply: only clean main can fast-forward, ignored-file collisions fail, and task branches never update automatically. A webhook SHA is only validated as payload data; it is never executed, checked out directly, or used to reset local history. Git fetch reads the current remote main, so out-of-order notifications cannot move a checkout to an old payload SHA.
+Ignored-file collisions fail, and task branches never update automatically. A webhook SHA is only validated as payload data; it is never executed, checked out directly, or used to reset local history. Git fetch reads current remote main, so out-of-order notifications cannot move a checkout to an old payload SHA.
 
 ## Delivery security and ordering
 

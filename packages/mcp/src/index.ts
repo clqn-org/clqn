@@ -67,6 +67,14 @@ export function createMcpServer(client: ClqnClient, defaultClanId?: string) {
   return server;
 }
 
-export async function serveMcp(client: ClqnClient, clanId?: string): Promise<void> {
-  await createMcpServer(client, clanId).connect(new StdioServerTransport());
+export async function serveMcp(client: ClqnClient, clanId?: string, onClose?: () => void): Promise<McpServer> {
+  const server = createMcpServer(client, clanId);
+  const close = () => { void server.close(); };
+  process.stdin.once('end', close);
+  server.server.onclose = () => {
+    process.stdin.removeListener('end', close);
+    onClose?.();
+  };
+  await server.connect(new StdioServerTransport());
+  return server;
 }

@@ -144,10 +144,10 @@ test('removed commands and flags fail before API or Git access', async (t) => {
   const f = await fixture(t);
   for (const args of [
     ['agent', 'status'], ['agent', 'connect', '--name', 'Legacy'], ['agent', 'add', '--name', 'Legacy'],
-    ['repo', 'sync'], ['policy', 'show'], ['policy', 'set', '--tokens', '10'],
+    ['sync'], ['watch'], ['repo', 'sync'], ['policy', 'show'], ['policy', 'set', '--tokens', '10'],
     ...['claim', 'prepare', 'publish', 'complete', 'integrate'].map((action) => ['task', action, taskId]),
     ...['metrics', 'metric', 'usage'].map((action) => [action]),
-    ['login', '--token-stdin'], ['limits', '--token-limit', '10'], ['sync', '--repo-path', '.'],
+    ['login', '--token-stdin'], ['limits', '--token-limit', '10'],
   ]) await assert.rejects(f.call(args), (error) => {
     assert.equal(error.code, 1);
     assert.match(error.stderr, /unknown (command|option)/);

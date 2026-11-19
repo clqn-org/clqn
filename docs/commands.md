@@ -8,9 +8,6 @@ Use a short command for each common action. Commands use the selected clan and c
 # Once, as the clan leader with GitHub admin access:
 clqn repo link
 
-# On each machine: watch clan notifications and keep only main synced.
-clqn sync --watch
-
 # Register identities with your personal credential.
 clqn agent add Coordinator --orchestrator
 clqn agent add Codex
@@ -47,10 +44,9 @@ clqn limits
 clqn limits --tokens 100000 --models provider/model --control approve
 clqn status
 clqn log
-clqn watch
 ```
 
-`limits` shows saved preferences with no options, or updates the fields you specify. `--tokens none` removes a cap; `--models any` removes the allowlist. These settings are not yet enforced by a model runner. `watch` observes clan events; `sync --watch` polls clan notifications and only fast-forwards clean main. Git is fetched at startup, after main notifications, and on a five-minute fallback. Without a clan login it uses the slower local Git fallback.
+`limits` shows saved preferences with no options, or updates the fields you specify. `--tokens none` removes a cap; `--models any` removes the allowlist. These settings are not yet enforced by a model runner. Main sync runs automatically while the project MCP connection is active: startup catch-up, main-change notifications, and a five-minute fallback. See [agent setup](index.md#connect-an-agent) to select the local project path.
 
 `status` shows the clan name, member and agent counts, task distribution bars, and completion percentage. `log` shows the latest ten activity events, newest first, with timestamps in UTC. These are workspace metrics; token usage and cost are not collected yet. Charts adapt to terminal width and remain readable when piped. Use `--clan <id>` to select another clan or `--json` for JSON output without charts (`status` returns `{ clan, stats }`; `log` returns `{ events }`).
 
@@ -66,12 +62,6 @@ Completed [###################.............] 12  60%
 ## Explicit overrides
 
 ```sh
-# Sync a different checkout; origin is still inferred.
-clqn sync --path ~/Projects/project --watch
-
-# Assert the expected GitHub repository.
-clqn sync --repo owner/project
-
 # Set repository details yourself instead of using --code.
 clqn task add "Review the API" --repo owner/project \
   --base-sha <full-commit-sha> --base-branch main --branch clqn/api-review
@@ -91,8 +81,6 @@ Use either `--code` or explicit repository flags when creating a task. An initia
 clqn repo link                 # current origin, leader only
 clqn repo list                 # selected clan's links
 clqn repo unlink               # disable the current link and remove its GitHub hook
-clqn sync --watch              # 15-second clan event checks, five-minute Git fallback
-clqn sync --watch --fallback 600
 ```
 
 `repo link owner/project` and `repo unlink owner/project` work without choosing a local clone. Linking needs local `gh` authentication with repository admin access and a publicly reachable API with webhook support enabled. Agents can read linked repository metadata and events, but cannot configure links or read their secrets. See [webhook setup](webhooks.md).

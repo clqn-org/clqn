@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac, randomUUID } from 'node:crypto';
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { once } from 'node:events';
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -15,6 +15,7 @@ import { serve } from '@hono/node-server';
 import { ClqnClient } from '@clqn/shared';
 import { createApp } from '../dist/app.js';
 import { createStore } from '../dist/store.js';
+import { runMcpSync } from '../../cli/dist/mcp-sync.js';
 
 const execute = promisify(execFile);
 const cli = fileURLToPath(new URL('../../cli/dist/index.js', import.meta.url));
@@ -29,13 +30,11 @@ test('webhook sync acceptance: main notifications trigger Git fetches while idle
   const userIds = [];
   const clanIds = [];
   let server;
-  let watcher;
-  let watcherClosed;
+  const controller = new AbortController();
+  let syncing;
   t.after(async () => {
-    if (watcher) {
-      if (watcher.exitCode === null) watcher.kill('SIGTERM');
-      await watcherClosed;
-    }
+    controller.abort();
+    await syncing;
     if (server) await new Promise((resolve) => server.close(resolve));
     try {
       if (clanIds.length) {
@@ -135,23 +134,21 @@ process.stdin.on('end',()=>{
 
   const fetchCount = async () => (await readFile(gitLog, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse)
     .filter((args) => args.includes('fetch')).length;
-  let stdout = '';
   let stderr = '';
   const results = [];
-  watcher = spawn(process.execPath, [cli, '--api-url', apiUrl, '--json', 'sync', '--watch', '--interval', '1', '--fallback', '60'], {
-    cwd: personal, env: cliEnv, stdio: ['ignore', 'pipe', 'pipe'],
+  // Run the same automatic listener used by MCP, with short test-only intervals.
+  const savedEnv = { ...process.env };
+  Object.assign(process.env, cliEnv);
+  t.after(() => {
+    for (const key of Object.keys(process.env)) if (!(key in savedEnv)) delete process.env[key];
+    Object.assign(process.env, savedEnv);
   });
-  watcherClosed = once(watcher, 'close');
-  watcher.stdout.on('data', (chunk) => {
-    stdout += chunk;
-    const lines = stdout.split('\n'); stdout = lines.pop();
-    for (const line of lines) if (line) results.push(JSON.parse(line));
-  });
-  watcher.stderr.on('data', (chunk) => { stderr += chunk; });
+  syncing = runMcpSync(api, clan.id, { repoPath: taskPath, signal: controller.signal,
+    pollIntervalMs: 25, fallbackIntervalMs: 60000,
+    onResult: (result) => results.push(result), onError: (error) => { stderr += String(error); } });
   const waitFor = async (predicate) => {
     const deadline = Date.now() + 12_000;
     while (!await predicate()) {
-      if (watcher.exitCode !== null) throw new Error(`Watcher exited early: ${stderr}`);
       if (Date.now() > deadline) throw new Error(`Timed out waiting for watcher: ${stderr}`);
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
@@ -193,9 +190,7 @@ process.stdin.on('end',()=>{
   assert.equal(await fetchCount(), 2, 'a replayed delivery must not trigger another fetch');
   const [events] = await sql`select count(*)::integer as n from events where clan_id = ${clan.id} and type = 'repository.main_changed'`;
   assert.equal(events.n, 1);
-  watcher.kill('SIGTERM');
-  const [code, signal] = await watcherClosed;
-  assert.equal(code, 0);
-  assert.equal(signal, null);
+  controller.abort();
+  await syncing;
   assert.equal(stderr, '');
 });

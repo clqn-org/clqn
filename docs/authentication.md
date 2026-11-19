@@ -60,7 +60,7 @@ clqn join <invite-code>
 clqn members
 ```
 
-Joining selects the clan locally. The authenticated identity must match the invitation's normalized email. This checks the operator-provisioned identity, not mailbox ownership. Invalid, expired, consumed, or mismatched invitations return the same 404 response. An existing member receives `409 ALREADY_MEMBER`, leaving the invitation unconsumed. Joining consumes the code, adds membership, and appends an audit event in one transaction; simultaneous uses cannot add multiple memberships. Clan creation and invitation creation also append audit events. Clan members can read these audit events through the activity endpoint or `clqn watch`.
+Joining selects the clan locally. The authenticated identity must match the invitation's normalized email. This checks the operator-provisioned identity, not mailbox ownership. Invalid, expired, consumed, or mismatched invitations return the same 404 response. An existing member receives `409 ALREADY_MEMBER`, leaving the invitation unconsumed. Joining consumes the code, adds membership, and appends an audit event in one transaction; simultaneous uses cannot add multiple memberships. Clan creation and invitation creation also append audit events. Clan members can read these audit events through the activity endpoint or `clqn log`.
 
 ## Register an agent
 
@@ -93,7 +93,7 @@ Context keys store text up to 65,536 UTF-8 bytes. Write via stdin and provide `-
 
 Tasks start open. Row locks serialize assignment and claims so concurrent claimers cannot both win. Assigned tasks can be claimed only by the assigned agent. Only leaders and the designated orchestrator can assign or unassign an open task. Ownership distinguishes a human from each of their registered agents. Only the current owner can complete a claimed task. `task release <id>` reopens it when called by the owner or a human clan leader; another member or agent cannot reset someone else's claim. Release clears the assignment. Repository tasks require a recorded integration before completion; the API stores authorized reports, while local CLI commands verify GitHub state.
 
-State changes and their audit events commit together. Events use ascending sequence cursors with a page limit of 100. `watch --json` emits newline-delimited event objects; resume with `--cursor <last-sequence>`. `watch --once` drains currently available events and exits. Ordinary watch polls every three seconds by default; `--interval <seconds>` accepts values from 1 to 3600. `status` shows clan identity, member and agent counts, and task counts. `log` shows the latest ten activity events, newest first. These CLI commands return `{ clan, stats }` and `{ events }` respectively in JSON mode; the API status response still includes recent activity for MCP clients.
+State changes and their audit events commit together. Events use ascending sequence cursors with a page limit of 100. `status` shows clan identity, member and agent counts, and task counts. `log` shows the latest ten activity events, newest first. These CLI commands return `{ clan, stats }` and `{ events }` respectively in JSON mode; the API status response still includes recent activity for MCP clients.
 
 ## API surface
 
@@ -145,7 +145,7 @@ Automated integration checks exercise real HTTP, PostgreSQL, the CLI, and MCP pr
 3. Alice registers Codex and Bob registers Claude Code. Configure each real application with its own clan-scoped token and the local stdio command.
 4. Use one agent to create shared context; use the other to read it, update its expected revision, and inspect history. Confirm a stale revision fails.
 5. Create tasks from both agents. Claim one and confirm the other cannot claim or complete it. Complete it as the owner, then check explicit owner release and leader reset on another claim.
-6. Observe the other person's changes with `watch`, `status`, and `log`. Resume polling from an event sequence without replaying prior events.
+6. Observe the other person's changes with `status` and `log`. The MCP connection automatically follows main-change notifications.
 7. Try the agent token against another clan and a personal-only operation; confirm denial. Revoke a test credential server-side and confirm its next request fails.
 
 Record actual application versions and any setup friction. Deployment and this manual acceptance check are still operator-run steps.
