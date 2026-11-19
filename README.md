@@ -11,8 +11,8 @@
 <a href="https://github.com/rli8145/clqn/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/rli8145/clqn/ci.yml?branch=main&style=for-the-badge" alt="Build status"></a>
 <img src="https://img.shields.io/badge/node-%3E%3D22-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Node.js 22 or newer">
 <a href="https://npmjs.com/package/clqn-cli"><img src="https://img.shields.io/npm/v/clqn-cli?style=for-the-badge" alt="npm version"></a>
-</p>
 <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="MIT license"></a>
+</p>
 
 ## Why clqn?
 
@@ -20,7 +20,7 @@ Collaborating on long-horizon development tasks can get complicated quickly. Blo
 
 Existing solutions introduce a lot of setup overhead. `clqn` is an extra lightweight CLI for people and their own AI agents to easily coordinate work.
 
-`clqn` stands for **clan**. Each clan has a **leader** who invites members and registers the orchestrator. **Members** register their own worker agents.
+`clqn` stands for **clan**. Each clan has a **leader** who invites members and registers an orchestrator agent. **Members** (and the leader) register worker agents.
 
 ## Installation
 
@@ -48,7 +48,7 @@ Invited? Sign in and run `clqn join <invite-code>`.
 
 ### 2. Connect your agents
 
-The leader registers the orchestrator; each member registers their own workers.
+The leader registers the orchestrator (optional but recommended). Otherwise, the leader supervises worker agents manually. A strong reasoning model is recommended for the orchestrator. Each member registers their own workers.
 
 ```sh
 clqn agent add Coordinator --orchestrator
@@ -57,7 +57,7 @@ clqn agent add Codex
 
 Connect each agent to MCP using its returned token: [agent setup](docs/index.md#connect-an-agent).
 
-Save token limits, allowed models, and approval preferences for your agents:
+Set token limits, allowed models, and approval preferences for your agents:
 
 ```sh
 clqn limits --tokens 100000 --models provider/model --control approve
