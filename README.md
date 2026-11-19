@@ -19,8 +19,6 @@ Existing solutions introduce a lot of setup overhead. `clqn` is an extra lightwe
 
 Homebrew is the primary install route and manages Node.js for you. Code workflows also need Git and an authenticated GitHub CLI (`gh`).
 
-The first packaged release is not published yet. Once it is available:
-
 ```sh
 brew tap rli8145/clqn https://github.com/rli8145/clqn
 brew install clqn
@@ -31,15 +29,15 @@ The CLI includes the local MCP server for Codex, Claude Code, and other MCP clie
 
 ### npm alternative
 
-With Node.js 22+, install the same release archive through npm; no registry publication is required:
+With Node.js 22+, install from npm:
 
 ```sh
-npm install -g https://github.com/rli8145/clqn/releases/download/v0.1.0/clqn-cli-0.1.0.tgz
+npm install -g clqn
 ```
 
 ### Build from source
 
-Until the first release, or for development, use Node.js 22+ and npm 10+:
+For development, use Node.js 22+ and npm 10+:
 
 ```sh
 git clone https://github.com/rli8145/clqn.git

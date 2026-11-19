@@ -41,12 +41,14 @@ for (const directory of [...dependencies].sort()) {
 await writeFile(new URL('THIRD_PARTY_LICENSES.txt', stage), licenses.join('\n\n---\n\n'));
 await chmod(new URL('clqn.mjs', stage), 0o755);
 await writeFile(new URL('package.json', stage), JSON.stringify({
-  name: manifest.name,
+  name: 'clqn',
   version: manifest.version,
   description: 'Your agents. My agents. One workspace.',
   license: 'MIT',
   homepage: 'https://clqn.org/',
   repository: { type: 'git', url: 'git+https://github.com/rli8145/clqn.git' },
+  bugs: { url: 'https://github.com/rli8145/clqn/issues' },
+  keywords: ['cli', 'mcp', 'agents', 'collaboration'],
   engines: { node: '>=22' },
   bin: { clqn: 'clqn.mjs' },
   files: ['clqn.mjs', 'THIRD_PARTY_LICENSES.txt'],
