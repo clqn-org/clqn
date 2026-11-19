@@ -58,8 +58,12 @@ Replace `<operator-api-url>` with the HTTPS URL supplied by your clan operator, 
 
 ```sh
 export CLQN_API_URL="<operator-api-url>"
+clqn login --github
+# Or use an operator-provisioned token:
 clqn login < /secure/path/to/personal-token
 ```
+
+GitHub login requires the operator to [configure an OAuth App](docs/authentication.md#operator-setup). It requests email identity access only, never repository access.
 
 ## Create or join a clan
 

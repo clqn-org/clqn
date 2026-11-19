@@ -100,3 +100,15 @@ The public HTTPS service must route `/hooks/github/*` to the API without requiri
 ## Verify a deployment
 
 `GET /health` checks process liveness only. It does not indicate database readiness or authorization. Verify the deployed API with authenticated `whoami`, a clan membership read, and a context/task workflow in a test clan. Run the [two-person acceptance check](authentication.md#manual-acceptance-check) with separate machines and two real agent applications before relying on a deployment for collaboration. Automated local integration and container checks do not verify cloud networking or real agent application settings.
+
+## Enable GitHub login
+
+Follow the OAuth App setup in [authentication](authentication.md#operator-setup). No external app is created automatically. Build/push a new image, run the migration job with that image (migration 0007), then deploy the API image with:
+
+```sh
+gcloud run services update clqn-api \
+  --region us-central1 \
+  --update-env-vars GITHUB_CLIENT_ID=YOUR_OAUTH_APP_CLIENT_ID
+```
+
+The client ID is public configuration, not a Secret Manager secret. No new OAuth client secret, IAM permission, callback handler, or networking resource is required. Preserve DATABASE_URL and the independent GITHUB_WEBHOOK_SECRET. Unset GITHUB_CLIENT_ID to disable new GitHub login attempts; existing clqn tokens remain valid until revoked. Test `clqn --api-url https://YOUR_SERVICE_URL login --github`, `whoami`, clan invitations, and operator revocation after deployment. Never enable request/response body logging for authentication routes. Production OAuth approval and GCP deployment are manual verification steps.

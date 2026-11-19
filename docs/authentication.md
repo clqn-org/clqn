@@ -1,6 +1,6 @@
 # Authentication and clans
 
-The MVP uses operator-provisioned personal credentials. There is no public signup endpoint or external identity provider yet. The API verifies opaque bearer tokens against SHA-256 hashes in PostgreSQL. Each token contains 256 bits of randomness, belongs to one human user, and grants access to that user's clans. Members can register agents with independent credentials restricted to one clan.
+The MVP uses operator-provisioned personal credentials. GitHub self-service signup/login is optional; see GitHub device login below. The API verifies opaque bearer tokens against SHA-256 hashes in PostgreSQL. Each token contains 256 bits of randomness, belongs to one human user, and grants access to that user's clans. Members can register agents with independent credentials restricted to one clan.
 
 ## Provision a credential (server operator)
 
@@ -97,7 +97,7 @@ State changes and their audit events commit together. Events use ascending seque
 
 ## API surface
 
-All `/v1` operations require `Authorization: Bearer <token>` and return JSON. The server marks responses `Cache-Control: no-store`.
+The optional `/auth/github` routes are public. All `/v1` operations require `Authorization: Bearer <token>` and return JSON. The server marks responses `Cache-Control: no-store`.
 
 | Method | Route | Behavior |
 | --- | --- | --- |
@@ -149,3 +149,21 @@ Automated integration checks exercise real HTTP, PostgreSQL, the CLI, and MCP pr
 7. Try the agent token against another clan and a personal-only operation; confirm denial. Revoke a test credential server-side and confirm its next request fails.
 
 Record actual application versions and any setup friction. Deployment and this manual acceptance check are still operator-run steps.
+
+## GitHub device login
+
+`clqn login` in a terminal (or `clqn login --github`) displays a GitHub URL and code. Open that URL, enter the code, and approve access. The CLI waits up to 15 minutes and saves only the resulting clqn credential. In JSON mode the URL/code go to stderr and the final identity goes to stdout; tokens are never printed. Piped personal-token login remains compatible.
+
+The API requests only `user:email`, calls GitHub `/user` and `/user/emails` itself, and binds accounts to the immutable numeric GitHub user ID. A verified primary email is required and becomes the invitation address. We never adopt existing accounts by email: an operator account with the same email produces `account_conflict`. Account linking is not implemented. Existing GitHub identities whose primary email changes also require operator reconciliation before another login; existing sessions retain the stored invitation identity. Do not change primary emails during a pilot without coordinating with the operator.
+
+Attempts expire within 15 minutes and successful completion is single-use. PostgreSQL row locks serialize polls and an identity advisory lock serializes account creation. A lost completion response requires a fresh login. Raw GitHub device codes are temporarily stored in the private database, deleted on completion or terminal failure; expired attempts are purged on subsequent starts. GitHub access tokens are used only in server memory and discarded. No refresh token is retained. clqn credentials use the existing operator revocation mechanism and do not expire automatically; local logout does not revoke them. Revoking GitHub authorization does not revoke an already issued clqn credential.
+
+There is a process-local admission guard (20 starts/minute, 10 concurrent auth requests) plus server-enforced polling intervals and upstream timeouts. This is not a deployment-wide abuse quota. Configure edge rate limits before broad public signup; enabling GitHub login permits any qualifying GitHub user to create an account, but grants no clan memberships.
+
+### Operator setup
+
+Create a dedicated **GitHub OAuth App** under GitHub Settings → Developer settings → OAuth Apps. Enable **Device Flow**. Set its homepage to the project site and its required callback URL to your API origin (the device flow does not use a callback route). Do not reuse an app with repository permissions. Set `GITHUB_CLIENT_ID` on the API only. GitHub's device grant requires the client ID, not a client secret; no OAuth secret or repository permission is needed. Keep the existing webhook secret separate.
+
+Apply migration `0007_pretty_darkhawk` before deploying. It adds the nullable unique `users.github_id` and transient `github_logins` table; existing users and credentials are unchanged. Leave `GITHUB_CLIENT_ID` unset to disable both public auth endpoints. The public endpoints are `POST /auth/github/start` and `POST /auth/github/poll` (handle in JSON body, never URL). All responses use `Cache-Control: no-store`.
+
+References: [GitHub device flow](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#device-flow), [verified email endpoint](https://docs.github.com/en/rest/users/emails#list-email-addresses-for-the-authenticated-user).
