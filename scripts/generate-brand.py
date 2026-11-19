@@ -86,6 +86,10 @@ def icon(heights=REST, ascii_art=False):
         d.rectangle((cx-11, cy-2, cx+11, cy+2), fill="#392d2b")
         d.rectangle((cx-8, cy-3, cx+8, cy+3), fill="#392d2b")
         if height:
+            if ascii_art:
+                # ASCII samples every other row. Keep the sprite's top on an even
+                # row so single-pixel eye highlights never flicker or disappear.
+                height += (cy + 1 - height) % 2
             image.alpha_composite(groundhog(height, highlights=not ascii_art), (cx-11, cy+1-height))
         d = ImageDraw.Draw(image)
         # Front lip occludes the feet, even when the sprite is almost underground.
