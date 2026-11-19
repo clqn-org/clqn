@@ -17,7 +17,11 @@ body { margin: 0; min-height: 100svh; display: grid; place-items: center; paddin
 a { color: inherit; text-underline-offset: .24em; }
 a:focus-visible, pre:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; }
 
-.home { width: min(100%, 760px); text-align: center; }
+.home-body { height: 100svh; padding: clamp(12px, 3svh, 28px) 20px; }
+.home { width: min(100%, 620px); height: 100%; max-height: 600px; display: grid; grid-template-rows: minmax(0, 1fr) auto auto; gap: 12px; text-align: center; }
+.home .terminal { display: flex; flex-direction: column; min-height: 0; }
+.home .bar { flex-shrink: 0; }
+.home .about { margin: 0 auto; }
 .terminal, .manual { overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
 .bar {
   display: flex;
@@ -32,11 +36,9 @@ a:focus-visible, pre:focus-visible { outline: 2px solid var(--accent); outline-o
 .bar a:hover { text-decoration: underline; color: var(--text); }
 .path { color: var(--text); }
 .path span { color: var(--accent); }
-.art { display: grid; justify-items: center; gap: 22px; padding: clamp(36px, 6vw, 64px) 12px; }
-.groundhogs { display: block; width: min(100%, 600px); height: auto; }
-.groundhogs img { display: block; width: 100%; height: auto; }
-.art h1 { margin: 0; line-height: 0; }
-.wordmark { width: clamp(66px, 10vw, 99px); height: auto; filter: brightness(0) invert(.93); }
+.art { display: grid; grid-template-rows: minmax(0, 1fr); flex: 1; min-height: 0; padding: 12px; }
+.groundhogs { display: block; width: 100%; height: 100%; min-height: 0; }
+.groundhogs img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .about { margin: 24px auto 17px; max-width: 62ch; color: var(--muted); text-wrap: balance; }
 .actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 12px; }
 .actions a, .zip {
@@ -94,6 +96,5 @@ code { font: inherit; }
 @media (max-width: 480px) {
   body { padding: 24px 14px; }
   .bar { padding: 10px 13px; }
-  .art { gap: 16px; }
   .about { margin-top: 18px; }
 }

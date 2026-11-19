@@ -163,7 +163,7 @@ def ascii_rows(heights):
     palette = {
         "#392d2b": ("#", "#ffe0a3"), "#ae805b": (":", "#c48a4e"),
         "#866047": (".", "#9b693f"), "#d7b28a": ("+", "#ffe7b9"),
-        "#241f24": ("@", "#ffffff"), PAPER: ("*", "#ffffff"),
+        "#241f24": ("@", "#090b0e"), PAPER: ("*", "#ffffff"),
         "#e894a5": ("O", "#ff77bf"), "#ffe1dc": ("*", "#fff4fb"),
         "#ba657f": ("=", "#ff94cf"),
     }
