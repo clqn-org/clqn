@@ -12,6 +12,13 @@ export * from './agents.js';
 export * from './context.js';
 export * from './tasks.js';
 
+export const githubStartSchema = z.object({ handle: z.string().regex(/^[A-Za-z0-9_-]{43}$/), userCode: z.string(),
+  verificationUri: z.literal('https://github.com/login/device'), expiresIn: z.number().int().positive().max(900), interval: z.number().int().min(5).max(300) });
+export const githubPollSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('pending'), interval: z.number().int().min(5).max(300) }),
+  z.object({ status: z.literal('complete'), token: z.string().regex(/^clqn_[A-Za-z0-9_-]{43}$/), user: z.object({ id: z.uuid(), email: z.email() }) }),
+  z.object({ status: z.enum(['expired', 'denied', 'account_conflict']) }),
+]);
 export const VERSION = '0.1.0';
 export const healthSchema = z.object({
   status: z.literal('ok'), service: z.literal('clqn-api'), version: z.string(),
@@ -74,6 +81,13 @@ export class ClqnClient {
     }
     return schema.parse(await response.json());
   }
+  private requireSecureLogin() {
+    if (this.baseUrl.protocol !== 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(this.baseUrl.hostname)) {
+      throw new Error('GitHub login requires HTTPS except on loopback');
+    }
+  }
+  startGithubLogin() { this.requireSecureLogin(); return this.request('/auth/github/start', githubStartSchema, {}); }
+  pollGithubLogin(handle: string) { this.requireSecureLogin(); return this.request('/auth/github/poll', githubPollSchema, { handle }); }
   health(): Promise<Health> { return this.request('/health', healthSchema); }
   whoami(signal?: AbortSignal) { return this.request('/v1/me', actorSchema, undefined, signal); }
   createClan(name: string): Promise<Clan> { return this.request('/v1/clans', clanSchema, createClanSchema.parse({ name })); }

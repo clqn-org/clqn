@@ -8,6 +8,7 @@ export const membershipRole = pgEnum('membership_role', ['leader', 'member']);
 export const users = pgTable('users', {
   id: uuid('id').primaryKey(),
   email: text('email').notNull().unique(),
+  githubId: text('github_id').unique(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -87,3 +88,12 @@ export const githubDeliveries = pgTable('github_deliveries', {
   deliveryId: uuid('delivery_id').notNull(),
   receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [primaryKey({ columns: [table.bindingId, table.deliveryId] })]);
+
+// Short-lived authorization attempts. Only the opaque clqn polling handle is hashed.
+export const githubLogins = pgTable('github_logins', {
+  handleHash: text('handle_hash').primaryKey(),
+  deviceCode: text('device_code').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  nextPollAt: timestamp('next_poll_at', { withTimezone: true }).notNull(),
+  interval: integer('interval').notNull(),
+});

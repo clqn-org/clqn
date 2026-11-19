@@ -68,9 +68,25 @@ repo.command('unlink [repository]').description('Disable a clan link and remove 
     }
   });
 
-program.command('login').description('Save a server-provisioned user token for this API')
-  .action(async () => {
-    if (process.stdin.isTTY) throw new Error('Pipe your token to clqn login, or redirect a private token file to standard input');
+program.command('login').description('Log in with GitHub or a personal token from stdin').option('--github', 'sign in using GitHub device authorization')
+  .action(async (options: { github?: boolean }) => {
+    if (options.github || process.stdin.isTTY) {
+      const api = new ClqnClient(apiUrl());
+      const attempt = await api.startGithubLogin();
+      console.error(`Open ${attempt.verificationUri} and enter code ${attempt.userCode}`);
+      const deadline = Date.now() + attempt.expiresIn * 1000;
+      let interval = attempt.interval;
+      while (Date.now() + interval * 1000 < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, interval * 1000));
+        const result = await api.pollGithubLogin(attempt.handle);
+        if (result.status === 'pending') { interval = result.interval; continue; }
+        if (result.status !== 'complete') throw new Error(`GitHub login ${result.status}. Start again or contact the operator for account conflicts.`);
+        await writeConfig(apiUrl(), { token: result.token });
+        output(result.user, `Logged in as ${result.user.email}`);
+        return;
+      }
+      throw new Error('GitHub login expired; run login again');
+    }
     const chunks: Buffer[] = [];
     let length = 0;
     for await (const chunk of process.stdin) {

@@ -50,6 +50,13 @@
       "when": 1794705167775,
       "tag": "0006_young_miek",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795115385759,
+      "tag": "0007_pretty_darkhawk",
+      "breakpoints": true
     }
   ]
 }

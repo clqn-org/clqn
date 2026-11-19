@@ -8,7 +8,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 }
 const hostname = process.env.HOST ?? '127.0.0.1';
 const connection = process.env.DATABASE_URL ? createStore(process.env.DATABASE_URL) : undefined;
-const server = serve({ fetch: createApp(connection?.store, connection?.db, { githubWebhookSecret: process.env.GITHUB_WEBHOOK_SECRET }).fetch, port, hostname }, (info) => {
+const server = serve({ fetch: createApp(connection?.store, connection?.db, { githubWebhookSecret: process.env.GITHUB_WEBHOOK_SECRET, githubClientId: process.env.GITHUB_CLIENT_ID }).fetch, port, hostname }, (info) => {
   console.error(`clqn API listening on http://${hostname}:${info.port}`);
 });
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

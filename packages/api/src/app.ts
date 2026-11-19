@@ -1,3 +1,4 @@
+import { createGithubLoginRoutes } from './github-login.js';
 import { createRepositoryRoutes, createGithubWebhookRoutes } from './repositories.js';
 import { createContextRoutes } from './context.js';
 import { createPolicyRoutes } from './policy.js';
@@ -11,7 +12,7 @@ import { VERSION, healthSchema, createClanSchema, createInvitationSchema, joinIn
 import { requirePersonal } from './access.js';
 import { hashToken, type WorkspaceStore } from './store.js';
 
-export function createApp(store?: WorkspaceStore, db?: WorkspaceDb, options: { githubWebhookSecret?: string | undefined } = {}) {
+export function createApp(store?: WorkspaceStore, db?: WorkspaceDb, options: { githubWebhookSecret?: string | undefined; githubClientId?: string | undefined } = {}) {
   if (options.githubWebhookSecret !== undefined && options.githubWebhookSecret.trim().length < 32) {
     throw new Error('GITHUB_WEBHOOK_SECRET must contain at least 32 non-padding characters');
   }
@@ -19,6 +20,7 @@ export function createApp(store?: WorkspaceStore, db?: WorkspaceDb, options: { g
   // Liveness only: this endpoint intentionally does not connect to the database.
   app.get('/health', (c) => c.json(healthSchema.parse({ status: 'ok', service: 'clqn-api', version: VERSION })));
   app.route('/hooks/github', createGithubWebhookRoutes(db, options.githubWebhookSecret));
+  app.route('/auth/github', createGithubLoginRoutes(db, options.githubClientId));
   app.use('/v1/*', async (c, next) => {
     c.header('Cache-Control', 'no-store');
     const header = c.req.header('authorization');
