@@ -46,13 +46,13 @@ clqn join <invite-code>
 clqn limits
 clqn limits --tokens 100000 --models provider/model --control approve
 clqn status
-clqn stats
+clqn log
 clqn watch
 ```
 
 `limits` shows saved preferences with no options, or updates the fields you specify. `--tokens none` removes a cap; `--models any` removes the allowlist. These settings are not yet enforced by a model runner. `watch` observes clan events; `sync --watch` polls clan notifications and only fast-forwards clean main. Git is fetched at startup, after main notifications, and on a five-minute fallback. Without a clan login it uses the slower local Git fallback.
 
-`stats` shows member and agent counts, task distribution bars, and completion percentage. `status` adds the clan name and latest ten activity events, with timestamps in UTC. These are workspace metrics; token usage and cost are not collected yet. Charts adapt to terminal width and remain readable when piped. Use `--clan <id>` to select another clan or `--json` for the unchanged API response without charts.
+`status` shows the clan name, member and agent counts, task distribution bars, and completion percentage. `log` shows the latest ten activity events, newest first, with timestamps in UTC. These are workspace metrics; token usage and cost are not collected yet. Charts adapt to terminal width and remain readable when piped. Use `--clan <id>` to select another clan or `--json` for JSON output without charts (`status` returns `{ clan, stats }`; `log` returns `{ events }`).
 
 ```text
 TASKS / 20 total

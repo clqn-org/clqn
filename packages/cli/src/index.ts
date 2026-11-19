@@ -4,7 +4,7 @@ import { ApiError, ClqnClient, VERSION, updatePolicySchema, type UpdatePolicy, r
 import { serveMcp } from '@clqn/mcp';
 import { readConfig, removeConfig, writeConfig } from './config.js';
 import { runSyncWatch } from './sync-watch.js';
-import { renderMetrics } from './metrics.js';
+import { renderMetrics, renderActivity } from './metrics.js';
 import { configureGithubWebhook, removeGithubWebhook } from './github-hooks.js';
 import { publishWorktree, inspectPullRequest, mergePullRequest, syncMain, localRepository, repositoryForNewTask, taskWorktreeLocation, openTaskWorktree } from './git.js';
 
@@ -406,16 +406,17 @@ for (const action of ['release', 'complete'] as const) {
     output(result, `${result.id}: ${result.status}`);
   });
 }
-for (const action of ['status', 'stats'] as const) {
-  const command = program.command(action).description(action === 'status'
-    ? 'Show clan metrics, task charts, and recent activity'
-    : 'Show workspace usage and task distribution charts');
-  command.option('--clan <id>', 'clan ID').action(async (options: { clan?: string }) => {
-    const api = await client(); const clanId = await selectedClan(options);
-    const result = action === 'status' ? await api.status(clanId) : await api.stats(clanId);
+program.command('status').description('Show clan metrics and task charts')
+  .option('--clan <id>', 'clan ID').action(async (options: { clan?: string }) => {
+    const { clan, stats } = await (await client()).status(await selectedClan(options));
+    const result = { clan, stats };
     output(result, program.opts().json ? '' : renderMetrics(result, process.stdout.columns));
   });
-}
+program.command('log').description('Show the latest 10 clan activity events, newest first')
+  .option('--clan <id>', 'clan ID').action(async (options: { clan?: string }) => {
+    const { recentActivity: events } = await (await client()).status(await selectedClan(options));
+    output({ events }, program.opts().json ? '' : renderActivity(events, process.stdout.columns));
+  });
 program.command('watch').description('Poll activity; JSON mode emits one JSON object per event')
   .option('--clan <id>', 'clan ID').option('--cursor <number>', 'resume after this event sequence', '0')
   .option('--interval <seconds>', 'polling interval (minimum 1 second)', '3').option('--once', 'fetch available events and exit')

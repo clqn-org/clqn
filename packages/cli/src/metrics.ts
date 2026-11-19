@@ -1,6 +1,5 @@
 import type { ClqnClient } from '@clqn/shared';
 
-type Stats = Awaited<ReturnType<ClqnClient['stats']>>;
 type Status = Awaited<ReturnType<ClqnClient['status']>>;
 
 // API strings are untrusted, including clan names and activity types.
@@ -10,15 +9,15 @@ const fit = (text: string, width: number) => {
   return chars.length <= width ? chars.join('') : `${chars.slice(0, width - 3).join('')}...`;
 };
 
-export function renderMetrics(result: Stats | Status, columns = 80): string {
+export function renderMetrics(result: Pick<Status, 'clan' | 'stats'>, columns = 80): string {
   const width = Math.max(32, Math.min(100, Number.isFinite(columns) ? Math.floor(columns) : 80));
-  const stats = 'stats' in result ? result.stats : result;
+  const { stats } = result;
   const total = stats.tasks.open + stats.tasks.claimed + stats.tasks.completed;
   const percent = (count: number) => total === 0 ? 0 : Math.round(count / total * 100);
   const countWidth = String(total).length;
   const barWidth = Math.max(4, Math.min(32, width - countWidth - 22));
   const lines = [
-    fit('clan' in result ? `CLAN / ${result.clan.name}` : 'CLAN / Workspace usage', width),
+    fit(`CLAN / ${result.clan.name}`, width),
     '='.repeat(width),
     `${stats.members} members  /  ${stats.agents} agents`,
     '',
@@ -32,14 +31,17 @@ export function renderMetrics(result: Stats | Status, columns = 80): string {
   }
   lines.push('', total === 0 ? 'No tasks yet.' : `${percent(stats.tasks.completed)}% complete / ${total - stats.tasks.completed} remaining`);
 
-  if ('recentActivity' in result) {
-    lines.push('', 'RECENT ACTIVITY / latest 10');
-    if (result.recentActivity.length === 0) lines.push('No activity yet.');
-    for (const event of result.recentActivity) {
-      lines.push(fit(`${event.createdAt.slice(5, 16).replace('T', ' ')}Z  ${event.type}`, width));
-      if (event.resourceId) lines.push(fit(`  resource: ${event.resourceId}`, width));
-    }
-  }
   lines.push('', 'Token usage / cost: not collected.');
+  return lines.join('\n');
+}
+
+export function renderActivity(events: Status['recentActivity'], columns = 80): string {
+  const width = Math.max(32, Math.min(100, Number.isFinite(columns) ? Math.floor(columns) : 80));
+  const lines = ['RECENT ACTIVITY / latest 10'];
+  if (events.length === 0) lines.push('No activity yet.');
+  for (const event of events) {
+    lines.push(fit(`${event.createdAt.slice(5, 16).replace('T', ' ')}Z  ${event.type}`, width));
+    if (event.resourceId) lines.push(fit(`  resource: ${event.resourceId}`, width));
+  }
   return lines.join('\n');
 }

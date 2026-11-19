@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
-import { renderMetrics } from '../dist/metrics.js';
+import { renderMetrics, renderActivity } from '../dist/metrics.js';
 
 const stats = { members: 2, agents: 3, tasks: { open: 5, claimed: 3, completed: 12 } };
 const clan = { id: '84367b51-14c7-43de-84a1-faf0207eadb3', name: 'Example clan' };
@@ -15,7 +15,7 @@ const status = { clan, stats, recentActivity: [{
 }] };
 
 test('metrics show proportional task bars and completion totals', () => {
-  const output = renderMetrics(stats);
+  const output = renderMetrics(status);
   assert.match(output, /2 members  \/  3 agents/);
   assert.match(output, /TASKS \/ 20 total/);
   assert.match(output, /Open\s+\[#{8}\.{24}\]\s+5\s+25%/);
@@ -25,13 +25,13 @@ test('metrics show proportional task bars and completion totals', () => {
   assert.match(output, /Token usage \/ cost: not collected/);
 });
 
-test('empty metrics and activity do not imply collected token usage or invalid percentages', () => {
+test('empty metrics do not imply collected token usage or invalid percentages', () => {
   const output = renderMetrics({ ...status, stats: { members: 0, agents: 0, tasks: { open: 0, claimed: 0, completed: 0 } }, recentActivity: [] });
   assert.match(output, /No tasks yet/);
-  assert.match(output, /No activity yet/);
+  assert.doesNotMatch(output, /ACTIVITY|activity/);
   assert.equal((output.match(/0%/g) ?? []).length, 3);
   assert.doesNotMatch(output, /NaN|Infinity|undefined/);
-  const complete = renderMetrics({ ...stats, tasks: { open: 0, claimed: 0, completed: 1 } });
+  const complete = renderMetrics({ clan, stats: { ...stats, tasks: { open: 0, claimed: 0, completed: 1 } } });
   assert.match(complete, /Completed\s+\[#{32}\]\s+1\s+100%/);
   assert.match(complete, /100% complete \/ 0 remaining/);
 });
@@ -41,33 +41,50 @@ test('status fits charts to narrow terminals and neutralizes control characters'
     recentActivity: [{ ...status.recentActivity[0], type: 'task.completed\x1b[2J' }] }, 40);
   assert.ok(output.split('\n').every((line) => Array.from(line).length <= 40));
   assert.doesNotMatch(output, /\x1b/);
+  assert.doesNotMatch(output, /ACTIVITY|task.completed|resource:/);
+});
+
+test('activity log handles empty history and neutralizes untrusted event text', () => {
+  assert.equal(renderActivity([]), 'RECENT ACTIVITY / latest 10\nNo activity yet.');
+  const output = renderActivity([{ ...status.recentActivity[0], type: 'task.completed\x1b[2J\n',
+    resourceId: '\x1b[2J' + 'resource'.repeat(20) }], 40);
+  assert.ok(output.split('\n').every((line) => Array.from(line).length <= 40));
+  assert.doesNotMatch(output, /\x1b/);
   assert.match(output, /11-18 16:30Z  task.completed/);
   assert.match(output, /resource:/);
 });
 
-test('stats and status use the selected clan endpoint and preserve JSON contracts', async (t) => {
+test('status shows only metrics and log shows only recent activity in human and JSON output', async (t) => {
   const requests = [];
+  let responseValue = status;
   const server = createServer((request, response) => {
     requests.push(request.url);
     response.writeHead(200, { 'content-type': 'application/json' });
-    response.end(JSON.stringify(request.url.endsWith('/status') ? status : stats));
+    response.end(JSON.stringify(responseValue));
   });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const cli = fileURLToPath(new URL('../dist/index.js', import.meta.url));
   const run = promisify(execFile);
-  const call = (command, json) => run(process.execPath, [cli, '--api-url', `http://127.0.0.1:${server.address().port}`,
+  const call = (command, json = false) => run(process.execPath, [cli, '--api-url', `http://127.0.0.1:${server.address().port}`,
     command, '--clan', clan.id, ...(json ? ['--json'] : [])]);
-  for (const command of ['stats', 'status']) {
-    const human = await call(command, false);
-    assert.match(human.stdout, /TASKS \/ 20 total/);
-    assert.equal(human.stderr, '');
-    if (command === 'status') assert.match(human.stdout, /Example clan[\s\S]*task.completed/);
-    const json = await call(command, true);
-    assert.deepEqual(JSON.parse(json.stdout), command === 'status' ? status : stats);
-    assert.equal(json.stderr, '');
-  }
-  assert.deepEqual(requests, ['stats', 'stats', 'status', 'status']
-    .map((route) => `/v1/clans/${clan.id}/${route}`));
+  const human = await call('status');
+  assert.match(human.stdout, /Example clan[\s\S]*TASKS \/ 20 total/);
+  assert.doesNotMatch(human.stdout, /ACTIVITY|task.completed|resource:/);
+  assert.equal(human.stderr, '');
+  const json = await call('status', true);
+  assert.deepEqual(JSON.parse(json.stdout), { clan, stats });
+  assert.equal(json.stderr, '');
+  const log = await call('log');
+  assert.match(log.stdout, /RECENT ACTIVITY[\s\S]*11-18 16:30Z  task.completed/);
+  assert.doesNotMatch(log.stdout, /TASKS|members|Token usage/);
+  assert.equal(log.stderr, '');
+  assert.deepEqual(JSON.parse((await call('log', true)).stdout), { events: status.recentActivity });
+  responseValue = { ...status, recentActivity: [] };
+  assert.match((await call('log')).stdout, /No activity yet/);
+  assert.deepEqual(JSON.parse((await call('log', true)).stdout), { events: [] });
+  assert.deepEqual(requests, Array(6).fill(`/v1/clans/${clan.id}/status`));
+  await assert.rejects(call('stats'), /unknown command 'stats'/);
+  assert.equal(requests.length, 6);
 });

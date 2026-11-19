@@ -139,11 +139,13 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
   assert.equal((await call(bobMcp, 'clqn_complete_task', { taskId: secondTask.id })).status, 'completed');
   assert.equal((await call(aliceMcp, 'clqn_list_tasks')).tasks.length, 2);
   assert.equal((await run(aliceEnv, ['task', 'list'])).tasks.length, 2);
-  const stats = await run(bobEnv, ['stats']);
-  assert.deepEqual(stats, { members: 2, agents: 2, tasks: { open: 0, claimed: 0, completed: 2 } });
   const status = await run(aliceEnv, ['status']);
   assert.equal(status.clan.id, clan.id);
-  assert.deepEqual(status.stats, stats);
+  assert.deepEqual(status.stats, { members: 2, agents: 2, tasks: { open: 0, claimed: 0, completed: 2 } });
+  assert.equal('recentActivity' in status, false);
+  const log = await run(bobEnv, ['log']);
+  assert.ok(log.events.some((event) => event.type === 'task.completed'));
+  assert.ok(log.events.every((event, i) => i === 0 || event.sequence < log.events[i - 1].sequence));
   assert.equal((await call(bobMcp, 'clqn_get_status')).stats.tasks.completed, 2);
   const events = (await runRaw(bobEnv, ['watch', '--once'])).trim().split('\n').map((line) => JSON.parse(line));
   assert.ok(events.some((event) => event.type === 'context.written' && event.agentId === codex.agent.id));
