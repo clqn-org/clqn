@@ -18,12 +18,12 @@ test('release installs without workspace dependencies and serves CLI and MCP', {
   t.after(() => rm(directory, { recursive: true, force: true }));
   const root = new URL('../', import.meta.url);
   const manifest = JSON.parse(await readFile(new URL('dist/cli/package.json', root), 'utf8'));
-  assert.equal(manifest.name, 'clqn');
+  assert.equal(manifest.name, 'clqn-cli');
   assert.equal(manifest.dependencies, undefined);
   assert.equal(manifest.private, undefined);
-  const archive = fileURLToPath(new URL(`dist/clqn-${manifest.version}.tgz`, root));
+  const archive = fileURLToPath(new URL(`dist/clqn-cli-${manifest.version}.tgz`, root));
   const formula = await readFile(new URL('dist/clqn.rb', root), 'utf8');
-  assert.ok(formula.includes(`releases/download/v${manifest.version}/clqn-${manifest.version}.tgz`));
+  assert.ok(formula.includes(`releases/download/v${manifest.version}/clqn-cli-${manifest.version}.tgz`));
   assert.ok(formula.includes(createHash('sha256').update(await readFile(archive)).digest('hex')));
   await exec('npm', ['install', '--global', '--prefix', directory, '--cache', join(directory, 'cache'),
     '--offline', '--ignore-scripts', '--no-audit', '--no-fund', archive], { cwd: directory });

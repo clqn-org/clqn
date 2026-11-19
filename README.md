@@ -32,7 +32,7 @@ The CLI includes the local MCP server for Codex, Claude Code, and other MCP clie
 With Node.js 22+, install from npm:
 
 ```sh
-npm install -g clqn
+npm install -g clqn-cli
 ```
 
 ### Build from source

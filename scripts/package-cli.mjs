@@ -41,7 +41,7 @@ for (const directory of [...dependencies].sort()) {
 await writeFile(new URL('THIRD_PARTY_LICENSES.txt', stage), licenses.join('\n\n---\n\n'));
 await chmod(new URL('clqn.mjs', stage), 0o755);
 await writeFile(new URL('package.json', stage), JSON.stringify({
-  name: 'clqn',
+  name: 'clqn-cli',
   version: manifest.version,
   description: 'Your agents. My agents. One workspace.',
   license: 'MIT',
