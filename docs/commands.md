@@ -8,10 +8,10 @@ Commands use the selected clan and current directory. Add `--clan <id>` to overr
 # Once, with the leader's personal token and GitHub admin access:
 clqn repo link
 clqn agent add Coordinator --orchestrator
-clqn agent add Codex --alias codex
+clqn agent add codex
 
 # Orchestrator session:
-clqn task add "Implement login" --alias login-fix --code
+clqn task add login-fix --code
 clqn task assign login-fix --agent codex
 
 # Assigned worker session:
@@ -33,7 +33,14 @@ See [repository workflow](repositories.md) for requirements and recovery.
 
 ## Custom aliases
 
-Use `--alias` when creating a task or registering an agent. You can also name an existing item or change its alias using its UUID or current alias.
+When the agent name or task description is a valid alias, the CLI uses it as the alias. Use `--alias` to set a different alias or to give a description with spaces a short name.
+
+```sh
+clqn agent add "Codex Worker" --alias codex
+clqn task add "Fix sign-in" --alias login-fix
+```
+
+Use an item's UUID or current alias to set a new alias.
 
 ```sh
 clqn agent alias <agent-uuid> codex

@@ -81,7 +81,7 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
   const invitation = await run(aliceEnv, ['invite', bob.user.email]);
   assert.equal((await run(bobEnv, ['join', invitation.code])).id, clan.id);
   const codex = await run(aliceEnv, ['agent', 'add', 'Codex']);
-  const claude = await run(bobEnv, ['agent', 'add', 'Claude Code', '--alias', 'claude']);
+  const claude = await run(bobEnv, ['agent', 'add', 'claude']);
   assert.equal(claude.agent.alias, 'claude');
   assert.equal(codex.agent.ownerId, alice.user.id);
   assert.equal(claude.agent.ownerId, bob.user.id);
@@ -136,7 +136,9 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
   assert.equal((await run(claudeEnv, ['task', 'release', task.id])).status, 'open');
   assert.equal((await run(codexEnv, ['task', 'start', task.id])).ownerAgentId, codex.agent.id);
   assert.equal((await call(aliceMcp, 'clqn_complete_task', { taskId: task.id })).status, 'completed');
-  const secondTask = await run(bobEnv, ['task', 'add', 'Confirm acceptance', '--alias', 'confirm']);
+  const secondTask = await run(bobEnv, ['task', 'add', 'confirm']);
+  assert.equal(secondTask.alias, 'confirm');
+  assert.equal(secondTask.description, 'confirm');
   assert.equal((await run(aliceEnv, ['task', 'alias', 'confirm', 'verify'])).id, secondTask.id);
   assert.equal((await run(bobEnv, ['agent', 'alias', 'claude', 'reviewer'])).id, claude.agent.id);
   await call(bobMcp, 'clqn_claim_task', { taskId: 'verify' });

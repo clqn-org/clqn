@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { ApiError, ClqnClient, VERSION, updatePolicySchema, type UpdatePolicy, registerAgentSchema, repositoryInputSchema, repositorySlugSchema, type Task } from '@clqn/shared';
+import { ApiError, ClqnClient, VERSION, updatePolicySchema, type UpdatePolicy, registerAgentSchema, repositoryInputSchema, repositorySlugSchema, resourceAliasSchema, type Task } from '@clqn/shared';
 import { serveMcp } from '@clqn/mcp';
 import { readConfig, removeConfig, writeConfig } from './config.js';
 import { runMcpSync } from './mcp-sync.js';
@@ -19,6 +19,7 @@ const apiUrl = () => program.opts().apiUrl as string;
 const output = (value: unknown, human: string) => console.log(program.opts().json ? JSON.stringify(value) : human);
 const displayId = (value: { id: string; alias?: string | null | undefined }) =>
   value.alias ? `${value.alias} (${value.id})` : value.id;
+const defaultAlias = (name: string) => resourceAliasSchema.safeParse(name.trim()).data;
 const client = async () => new ClqnClient(apiUrl(), process.env.CLQN_TOKEN ?? (await readConfig(apiUrl())).token);
 
 program.command('health').description('Check API liveness (not clan status or database readiness)').action(async () => {
@@ -211,10 +212,12 @@ const readText = async () => {
 const agent = program.command('agent').description('Register and list agents');
 agent.command('add <name>').description('Register an agent under your identity')
   .option('--clan <id>', 'clan ID')
-  .option('--alias <alias>', 'short name for assignment, e.g. codex')
+  .option('--alias <alias>', 'short name for assignment (defaults to the name if valid)')
   .option('--orchestrator', 'register the clan orchestrator (leader only, one per clan)')
   .action(async (name: string, options: { clan?: string; orchestrator?: boolean; alias?: string }) => {
-    const registration = registerAgentSchema.parse({ name, role: options.orchestrator ? 'orchestrator' : 'worker', alias: options.alias });
+    const registration = registerAgentSchema.parse({
+      name, role: options.orchestrator ? 'orchestrator' : 'worker', alias: options.alias ?? defaultAlias(name),
+    });
     const result = await (await client()).registerAgent(await selectedClan(options), registration.name, registration.role, registration.alias);
     output(result, `Registered ${result.agent.name}: ${displayId(result.agent)}\nToken (shown once): ${result.token}\nConfigure CLQN_TOKEN and CLQN_CLAN_ID in your agent environment, then run clqn mcp.`);
   });
@@ -254,7 +257,7 @@ const describeTask = (value: Task) => `${displayId(value)}  ${value.status}  ${v
   (value.repository ? `\nRepository: ${value.repository.slug}  branch=${value.repository.branch}  base=${value.repository.baseSha}` +
     `\nIntegration: ${value.repository.state}${value.repository.prUrl ? `  ${value.repository.prUrl}` : ''}` : '');
 task.command('add <description>').description('Create a task; add --code for work in this repository').option('--clan <id>', 'clan ID')
-  .option('--alias <alias>', 'short name for this task, e.g. login-fix')
+  .option('--alias <alias>', 'short name for this task (defaults to the description if valid)')
   .option('--code', 'use this GitHub clone, the latest origin/main, and an automatic task branch')
   .option('--repo <owner/repo>', 'GitHub repository')
   .option('--base-sha <sha>', 'full starting commit SHA on the remote base branch')
@@ -265,7 +268,8 @@ task.command('add <description>').description('Create a task; add --code for wor
     if (options.code && hasRepository) throw new Error('Use --code for defaults, or explicit repository flags');
     const repository = options.code ? await repositoryForNewTask() : hasRepository ? repositoryInputSchema.parse({ slug: options.repo, baseSha: options.baseSha,
       baseBranch: options.baseBranch ?? 'main', branch: options.branch }) : undefined;
-    const result = await (await client()).createTask(await selectedClan(options), description, repository, options.alias);
+    const alias = options.alias ?? defaultAlias(description);
+    const result = await (await client()).createTask(await selectedClan(options), description, repository, alias);
     output(result, describeTask(result));
   });
 task.command('alias <task> <alias>').description('Set or change a task’s short name')
