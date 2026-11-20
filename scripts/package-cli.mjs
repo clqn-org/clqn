@@ -57,7 +57,10 @@ await writeFile(new URL('package.json', stage), JSON.stringify({
 for (const name of ['README.md', 'LICENSE.md']) {
   await copyFile(new URL(name, root), new URL(name, stage));
 }
-const [packed] = JSON.parse(execFileSync('npm', [
+// npm exposes the CLI entry point even when Windows starts it through npm.cmd.
+const npmCli = process.env.npm_execpath;
+const [packed] = JSON.parse(execFileSync(npmCli ? process.execPath : 'npm', [
+  ...(npmCli ? [npmCli] : []),
   'pack', '--json', '--ignore-scripts', '--pack-destination', fileURLToPath(output),
 ], { cwd: stage, encoding: 'utf8' }));
 const archive = await readFile(new URL(packed.filename, output));
