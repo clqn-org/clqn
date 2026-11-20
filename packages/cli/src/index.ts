@@ -16,7 +16,9 @@ const program = new Command()
   .option('--json', 'output machine-readable JSON');
 
 const apiUrl = () => program.opts().apiUrl as string;
-const output = (value: unknown, human: string) => console.log(program.opts().json ? JSON.stringify(value) : human);
+const verbatim = (value: unknown, text: string) => console.log(program.opts().json ? JSON.stringify(value) : text);
+// API strings are untrusted; keep terminal control characters out of human-readable output.
+const output = (value: unknown, human: string) => verbatim(value, human.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, ' '));
 const displayId = (value: { id: string; alias?: string | null | undefined }) =>
   value.alias ? `${value.alias} (${value.id})` : value.id;
 const defaultAlias = (name: string) => resourceAliasSchema.safeParse(name.trim()).data;
@@ -244,10 +246,13 @@ for (const action of ['list', 'read', 'history', 'write'] as const) {
     } else if (action === 'history') {
       const result = await api.contextHistory(clanId, key);
       output(result, result.revisions.map((e) => `Revision ${e.revision} (${e.updatedAt})\n${e.text}`).join('\n\n'));
+    } else if (action === 'read') {
+      // Shared text is printed exactly, so it can be piped to files or other tools.
+      const result = await api.readContext(clanId, key);
+      verbatim(result, result.text);
     } else {
-      const result = action === 'read' ? await api.readContext(clanId, key)
-        : await api.writeContext(clanId, key, await readText(), Number((options as { expectedRevision?: string }).expectedRevision));
-      output(result, action === 'read' ? result.text : `Wrote ${result.key} revision ${result.revision}`);
+      const result = await api.writeContext(clanId, key, await readText(), Number((options as { expectedRevision?: string }).expectedRevision));
+      output(result, `Wrote ${result.key} revision ${result.revision}`);
     }
   });
 }

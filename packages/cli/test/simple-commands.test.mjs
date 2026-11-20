@@ -71,8 +71,17 @@ async function fixture(t) {
     result.child.stdin.end(options.input);
     return result;
   };
-  return { call, requests, directory, token, user, executions };
+  return { call, requests, directory, token, user, executions, task };
 }
+
+test('human output strips terminal control characters from API text, while JSON keeps it exact', async (t) => {
+  const f = await fixture(t);
+  f.task.description = 'Fix\x1b]0;spoofed\x07 bug\x1b[2J\r\nnext';
+  const human = (await f.call(['task', 'show', taskId])).stdout;
+  assert.doesNotMatch(human, /[\x00-\x08\x0b-\x1f\x7f-\x9f]/);
+  assert.match(human, /Fix ]0;spoofed  bug \[2J \nnext/);
+  assert.equal(JSON.parse((await f.call(['task', 'show', taskId, '--json'])).stdout).description, f.task.description);
+});
 
 test('agent add registers workers and orchestrators with positional names', async (t) => {
   const f = await fixture(t);
