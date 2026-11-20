@@ -11,6 +11,7 @@ export interface RepositoryWork {
   baseBranch: string;
   baseSha: string;
   branch: string;
+  headSha?: string | null;
 }
 const shaPattern = /^[a-f0-9]{40}$/;
 const slugPattern = /^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -139,16 +140,23 @@ export async function prepareWorktree(input: { repoPath: string; worktreePath: s
   await validateRepository(input.repository, root);
   const path = await unusedPath(input.worktreePath);
   if (inside(path, root)) throw new Error('Place task worktrees outside your current working tree');
-  const { baseBranch, baseSha, branch } = input.repository;
+  const { baseBranch, baseSha, branch, headSha } = input.repository;
+  let start = baseSha;
   if (await git(root, ['ls-remote', '--heads', 'origin', `refs/heads/${branch}`])) {
-    throw new Error('Task branch already exists on origin; choose a unique task branch');
+    // A released task resumes from its reported head; any other existing branch is refused.
+    if (!headSha || !shaPattern.test(headSha)) throw new Error('Task branch already exists on origin; choose a unique task branch');
+    await git(root, ['fetch', '--no-tags', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`]);
+    if ((await git(root, ['rev-parse', '--verify', `refs/remotes/origin/${branch}^{commit}`])) !== headSha) {
+      throw new Error('Remote task branch differs from the reported head; submit or inspect it before resuming');
+    }
+    start = headSha;
   }
   await git(root, ['fetch', '--no-tags', 'origin', `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`]);
   await git(root, ['cat-file', '-e', `${baseSha}^{commit}`]);
   try { await git(root, ['merge-base', '--is-ancestor', baseSha, `refs/remotes/origin/${baseBranch}`]); }
   catch { throw new Error('Task base commit is not on the fetched base branch'); }
   // No pull, stash, reset, force, or checkout in the user's existing working tree.
-  await git(root, ['worktree', 'add', '-b', branch, path, baseSha]);
+  await git(root, ['worktree', 'add', '-b', branch, path, start]);
   return { path, branch, baseSha };
 }
 

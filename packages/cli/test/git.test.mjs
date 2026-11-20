@@ -156,6 +156,20 @@ test('publish pushes without force, creates or reuses the exact PR, and leaves t
   assert.ok(commands.filter(({file}) => file === 'gh').every(({args}) => args[args.indexOf('--repo') + 1] === 'github.com/test/project'));
 });
 
+test('a released task resumes from its reported head on origin, and refuses a different remote head', async (t) => {
+  const f = await fixture(t);
+  const headSha = await taskCommit(f);
+  await git(f.worktreePath, ['push', 'origin', `HEAD:refs/heads/${f.repository.branch}`]);
+  // A new owner has neither the old worktree nor the local task branch.
+  await git(f.repoPath, ['worktree', 'remove', f.worktreePath]);
+  await git(f.repoPath, ['branch', '-D', f.repository.branch]);
+  await assert.rejects(prepareWorktree({ ...f, repository: { ...f.repository, headSha: f.baseSha } }), /differs from the reported head/);
+  const prepared = await prepareWorktree({ ...f, repository: { ...f.repository, headSha } });
+  assert.deepEqual(prepared, { path: f.worktreePath, branch: f.repository.branch, baseSha: f.baseSha });
+  assert.equal(await git(f.worktreePath, ['rev-parse', 'HEAD']), headSha);
+  assert.equal(await git(f.worktreePath, ['symbolic-ref', '--short', 'HEAD']), f.repository.branch);
+});
+
 test('publish refuses dirty worktrees, the wrong branch, missing commits, and a mismatched PR', async (t) => {
   const f = await fixture(t);
   await prepareWorktree(f);
