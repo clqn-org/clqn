@@ -10,6 +10,7 @@ const guides = [
   ['policies', 'Agent policies'],
   ['database', 'Database setup'],
   ['hosting', 'GCP hosting'],
+  ['releases', 'Publishing a release'],
 ];
 
 // Only repository-authored Markdown enters this build. Render it once so the

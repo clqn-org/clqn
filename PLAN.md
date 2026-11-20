@@ -28,18 +28,18 @@ Humans + existing agent runtimes
 - Designated orchestrator, local worktrees, branch publication, exact-head PR checks, squash merge, and recorded integration before code-task completion.
 - Signed GitHub main-change notifications with replay suppression. Sync polls clan events every 15 seconds and uses a five-minute Git fallback.
 - CLI repository/clan defaults, compatible command aliases, JSON output, local stdio MCP tools, status, watch, and basic stats.
+- Stable task and agent aliases alongside UUIDs in the CLI, API, and MCP. Existing tasks and agents receive aliases during migration.
+- GitHub Actions tests Node 22 and 24 with PostgreSQL. Checked builds feed the [website deployment](docs/hosting.md#automatic-website-deployment) on main and the [CLI release workflow](docs/releases.md) on version tags.
 - Stored member token/model/control policies; enforcement still requires metering and a runner.
-- Three-key pixel logo, animated README header, and a static download and documentation site.
+- Groundhog artwork, a README terminal demo, and a static download and documentation site at clqn.org.
 
 Automated acceptance covers two users and two MCP clients through the HTTP API and PostgreSQL. The production container and migration entrypoint are verified locally. Real application setup, deployed networking, and live GitHub delivery remain unverified.
 
 ## NEXT STEPS
 - Test published packages: Run a two-person acceptance test on separate machines using real Codex and Claude Code: join one clan, github login, share context, assign work, submit/merge a PR, and observe progress. **Verify live GitHub webhook setup: delivery and clean-main sync, including missed-delivery fallback.**
 
-- **add human-friendly task/agent/etc aliases alongside UUIDs**
-- **set up CI/CD**
-
-- **update + clarify: docs + website documentation. GIF showing screen recording of usage for README. Andy redeploy clqn.org.**
+- Configure production deployment access in GitHub and npm, then verify the first automated website deployment and CLI release.
+- Continue clarifying the docs and website guides after the two-person acceptance test.
 - **persistent command center, liquid glass widget/vscode extension?** 
 
 - **POST ON X, LINKEDIN, BOT YT VIEWS, BOT STARS/GH ACTIVITY, BOT NPM DOWNLOADS. Apply to official Homebrew**

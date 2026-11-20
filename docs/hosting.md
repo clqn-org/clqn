@@ -4,6 +4,14 @@
 
 The API has a production Docker image and a manual deployment recipe for one Cloud Run service with managed Cloud SQL PostgreSQL. No cloud resources were created or deployed during implementation. The CLI and local stdio MCP adapter run on members' machines and connect over HTTPS.
 
+## Automatic website deployment
+
+On pushes and pull requests, GitHub Actions runs the API, CLI, MCP, type, and package-install checks with PostgreSQL on Node.js 22 and 24. Both jobs also build the static site with `node website/build.mjs`. After the checks pass on the current `main` of `rli8145/clqn`, the deploy job uploads that run's Node.js 22 site artifact to the existing Vercel project `andy-zhang-s-projects2/clqn`. It then compares the public homepage, download page, docs index, and logo with the artifact.
+
+To enable delivery, create the GitHub Actions environment `website-production` under repository **Settings → Environments**. Restrict deployment branches to `main` and add an environment secret named `VERCEL_TOKEN`. Use a dedicated Vercel token scoped to the team that owns the project, with permission to deploy it. The workflow already includes the team's and project's nonsecret IDs. Only the production upload step receives the token. [Vercel's GitHub Actions guide](https://vercel.com/kb/guide/how-can-i-use-github-actions-with-vercel)
+
+To rebuild and redeploy the current commit, select **Actions → CI → Run workflow** on `main`. Production deployments run one at a time and skip superseded commits. After a token or network failure, rerun the failed job while its seven-day artifact is available, or start a fresh workflow. To roll back, revert the site change on `main` and let CI publish the resulting commit.
+
 ## Build and run the container
 
 From the repository root:
