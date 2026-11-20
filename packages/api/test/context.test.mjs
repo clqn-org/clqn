@@ -57,6 +57,7 @@ test('PostgreSQL: context isolation, immutable revisions, and concurrent compare
   assert.equal((await app.request(path, { headers: auth(alice.token) })).status, 404);
   const denied = await write('cannot write', 0, bob.token);
   assert.equal(denied.status, 404);
+  assert.equal((await write('no entry yet', 1)).status, 404);
   const [first, race] = await Promise.all([write('original', 0), write('racing create', 0)]);
   assert.deepEqual([first.status, race.status].sort(), [201, 409]);
   const created = contextEntrySchema.parse(await (first.status === 201 ? first : race).json());

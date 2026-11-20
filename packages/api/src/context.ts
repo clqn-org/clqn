@@ -66,7 +66,12 @@ export function createContextRoutes(db: WorkspaceDb) {
         ? await tx.insert(contextEntries).values(values).onConflictDoNothing().returning()
         : await tx.update(contextEntries).set({ text, revision, updatedAt })
           .where(and(entryWhere(clanId, key), eq(contextEntries.revision, expectedRevision))).returning();
-      if (!saved) throw new ApiError(409, 'REVISION_CONFLICT', 'Context revision changed; read the entry and retry with its current revision');
+      if (!saved) {
+        if (expectedRevision > 0 && !(await tx.select({ key: contextEntries.key }).from(contextEntries).where(entryWhere(clanId, key))).length) {
+          throw new ApiError(404, 'NOT_FOUND', 'Context entry not found; use expectedRevision 0 to create it');
+        }
+        throw new ApiError(409, 'REVISION_CONFLICT', 'Context revision changed; read the entry and retry with its current revision');
+      }
       await tx.insert(contextRevisions).values(values);
       await appendEvent(tx, { clanId, actorId: actor.id, agentId: actor.agentId, type: 'context.written', resourceId: key });
       return view(saved);
