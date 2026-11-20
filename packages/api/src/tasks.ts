@@ -100,7 +100,7 @@ export function createTaskRoutes(db: WorkspaceDb) {
     const task = await db.transaction(async (tx) => {
       const [agent] = await tx.select({ id: agents.id }).from(agents).innerJoin(memberships,
         and(eq(memberships.userId, agents.ownerId), eq(memberships.clanId, agents.clanId)))
-        .where(resourceFilter(agents, clanId, body.data.agentId));
+        .where(resourceFilter(agents, clanId, body.data.agentId)).for('share', { of: agents });
       if (!agent) throw new ApiError(404, 'NOT_FOUND', 'Agent not found');
       const [row] = await tx.select().from(tasks).where(filter).for('update');
       if (!row) throw missingTask();

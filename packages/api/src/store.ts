@@ -63,7 +63,7 @@ export function createStore(url: string) {
         if (cause?.code === '23505' && cause.constraint_name === 'agents_one_orchestrator_per_clan') {
           throw new ApiError(409, 'ORCHESTRATOR_EXISTS', 'This clan already has an orchestrator');
         }
-        return rethrowAliasConflict(error);
+        rethrowAliasConflict(error);
       }
     },
     async setAgentAlias(actor, clanId, reference, alias) {
