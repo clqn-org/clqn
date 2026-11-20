@@ -1,60 +1,37 @@
 # Agent policies
 
-Each human member can save one policy per clan. It applies to all of that member's agents in the clan. The API stores the policy with the membership. It does not store provider credentials.
-
-## Current behavior
-
-Policies are saved preferences. There is no runner, model gateway, usage meter, or execution approval flow yet. Policies do not currently stop model calls or grant execution access. Repository commands can prepare worktrees and publish code using local Git/GitHub permissions, but do not launch model processes or enforce these saved limits. CLI output and API responses report `enforcement: "unavailable"`.
-
-Existing clan and task permissions stay in effect. For example, a leader can still release a claimed task. A saved control level does not change task ownership rules.
+Each member can save preferences for all their agents in a clan. **These settings are not enforced yet:** there is no model runner, usage meter, or execution approval flow. Responses report `enforcement: "unavailable"`.
 
 ## Commands
 
 ```sh
-# Read your policy in the selected clan.
-clqn limits --json
-
-# Save a cap and an exact model allowlist. Replace the example model identifiers.
+clqn limits
 clqn limits --tokens 100000 --models provider/model-a provider/model-b --control approve
-
-# Select another clan for this command.
-clqn limits --clan <clan-id>
-
-# Withdraw permission for the leader to start work.
-clqn limits --control manual
-
-# Remove the cap and model restriction. Keep the current control level.
 clqn limits --tokens none --models any
 ```
 
-| Setting | Meaning for a future runner | Default |
-| --- | --- | --- |
-| `--tokens <tokens>` | Total input plus output tokens across your agents in this clan. Nonnegative integer; `0` requests no usage. The cap has no time window or automatic reset. | `none` (no cap) |
-| `--models <ids...>` | Exact, case-sensitive model identifiers separated by spaces. `any` removes the restriction. Model availability is not checked. | `any` |
-| `--control manual` | You start work. The leader cannot start your agents. | `manual` |
-| `--control approve` | The leader requests work. You approve each request before execution. | — |
-| `--control automatic` | The leader requests work without approval for each request, within your limits and local permissions. | — |
+Updates preserve unspecified fields. Use `--clan <id>` to select a clan and `--json` for scripting.
 
-Each update preserves unspecified settings. Removing a token cap does not reset a usage counter: no usage counter exists yet. There is no `full` control level. These settings never authorize access to provider keys or bypass local tool and filesystem permissions.
+| Setting | Intended behavior for a future runner | Default |
+| --- | --- | --- |
+| `--tokens <n>` | Total input/output tokens across your agents in this clan; no time window or reset. `0` requests no usage; `none` removes the cap. | `none` |
+| `--models <ids...>` | Exact, case-sensitive model IDs; availability is not checked. `any` removes the restriction. | `any` |
+| `--control manual` | You start work. | `manual` |
+| `--control approve` | The leader requests work; you approve each request. | — |
+| `--control automatic` | The leader requests work within limits and local permissions, without per-request approval. | — |
+
+Policies never grant access to provider keys, override local permissions, or change task ownership rules.
 
 ## Authorization and concurrent edits
 
-Only a member's personal credential can change their own policy. Agent credentials can read their owner's policy for their registered clan. There is no route to change another member's policy, including for leaders.
+Only a personal credential can edit its own member policy; leaders cannot edit others' policies. Agents can read their owner's policy in their registered clan.
 
-The CLI reads the current revision before it submits a change. The API checks that revision while holding a lock on the membership row. If another update has committed, it returns `409 REVISION_CONFLICT`. Run `clqn limits`, review the change, then try again.
-
-An audit event named `policy.updated` commits in the same transaction as each successful update. Rejected updates do not produce an event.
+The CLI reads the current revision before updating. A concurrent change returns `409 REVISION_CONFLICT`; run `clqn limits`, review, and retry. Successful updates increment the revision and atomically record `policy.updated`. New memberships start at revision `0`.
 
 ## API and MCP
 
-- `GET /v1/clans/:clanId/policy`: Read the authenticated member's policy.
-- `POST /v1/clans/:clanId/policy`: Update the authenticated member's policy with a personal credential. Supply `expectedRevision` and at least one of `tokenLimit`, `allowedModels`, or `control`. Use JSON `null` to remove a token or model restriction.
-- MCP tool `clqn_get_policy`: Read the authenticated agent owner's policy. No policy update tool is exposed.
+- `GET /v1/clans/:clanId/policy`: read your policy.
+- `POST /v1/clans/:clanId/policy`: send `expectedRevision` and at least one of `tokenLimit`, `allowedModels`, or `control`. JSON `null` removes a cap or model restriction.
+- MCP `clqn_get_policy`: read only; no update tool.
 
-New memberships read as revision `0` with no token cap, no model restriction, and manual control. Each successful edit increments the revision. Apply database migrations before using these routes.
-
-## Enforcement work still required
-
-Before clqn can promise hard limits, a runner or model gateway must check policies before execution and route all covered model calls through metering. It must reserve token capacity atomically across concurrent agents, reconcile actual usage, and account for failed or interrupted calls. It must also enforce model identifiers, bind approvals to specific work, and recheck permission changes before starting more work.
-
-The member must configure local execution permissions. A leader's request or shared context cannot override those permissions. Model calls outside that runner or gateway remain outside clqn's control.
+Hard enforcement requires a runner or gateway that meters calls, reserves capacity across concurrent agents, and checks models and approvals. Calls outside it remain outside clqn's control.

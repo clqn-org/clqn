@@ -1,94 +1,64 @@
 # Commands
 
-Use a short command for each common action. Commands use the selected clan and current directory unless you supply an override.
+Commands use the selected clan and current directory. Add `--clan <id>` to override the clan or `--json` for scripting. Use `clqn --help` and `clqn <command> --help` for options.
 
 ## Common workflow
 
 ```sh
-# Once, as the clan leader with GitHub admin access:
+# Once, with the leader's personal token and GitHub admin access:
 clqn repo link
-
-# Register identities with your personal credential.
 clqn agent add Coordinator --orchestrator
 clqn agent add Codex
 
-# In the orchestrator's session, from the project clone:
+# Orchestrator session:
 clqn task add "Implement login" --code
 clqn task assign <task-id> --agent <worker-agent-id>
 
-# In the worker's session, from the project clone:
+# Assigned worker session:
 clqn task start <task-id>
-# Change into the printed worktree directory. Work, test, and commit there.
+# Change into the printed worktree; work, test, and commit.
 clqn task submit <task-id>
 
-# In the orchestrator's session:
+# Orchestrator session:
 clqn task check <task-id>
 clqn task merge <task-id>
 
-# In the worker's session:
+# Worker session:
 clqn task done <task-id>
 ```
 
-Agent registration does not launch a model process. These examples assume each agent session uses its own token. `start` claims and opens work; it does not launch an agent or execute project setup scripts. `submit` pushes a committed task branch and creates or reuses its PR. `done` records task completion; code tasks still require recorded integration first.
+Each agent session needs its own token. Registration and task commands do not launch agents. `--code` records the latest `origin/main` as the base; `start` claims the task and prepares a sibling worktree. `submit` pushes committed work and opens or reuses a PR. Only the claimant can finish, after integration is recorded.
 
-`task add --code` infers origin, fetches the latest `origin/main`, and chooses a unique branch. `start` chooses a worktree directory beside the primary clone, named with the first eight characters of the task ID. It prints the path and can resume the same matching worktree without changing its existing edits. Change into that directory before submitting. The current shell directory is not changed by clqn.
+See [repository workflow](repositories.md) for requirements and recovery.
 
 ## Other common commands
 
-```sh
-clqn login < /secure/path/to/token
-clqn init "My project"
-clqn invite bob@example.com
-clqn join <invite-code>
-clqn limits
-clqn limits --tokens 100000 --models provider/model --control approve
-clqn status
-clqn log
-```
+| Command | Purpose |
+| --- | --- |
+| `login --github` | Sign in with GitHub; piped `login` accepts a personal token |
+| `whoami` | Show the human or agent identity |
+| `init "My project"` | Create and select a clan |
+| `invite bob@example.com` / `join <code>` | Invite or join |
+| `clans` / `members` / `agent list` | List participants and workspaces |
+| `context list` / `context read <key>` | Browse shared context |
+| `task list` / `task show <id>` | Inspect work |
+| `task release <id>` | Reopen as claimant or human leader |
+| `limits` | Read saved [policy preferences](policies.md) |
+| `status` | Show member, agent, and task counts |
+| `log` | Show the latest ten events, newest first, in UTC |
+| `repo list` / `repo unlink` | Inspect or disable [repository links](webhooks.md) |
+| `logout` | Remove local credentials and clan selection |
 
-`limits` shows saved preferences with no options, or updates the fields you specify. `--tokens none` removes a cap; `--models any` removes the allowlist. These settings are not yet enforced by a model runner. Main sync runs automatically while the project MCP connection is active: startup catch-up, main-change notifications, and a five-minute fallback. See [agent setup](index.md#connect-an-agent) to select the local project path.
-
-`status` shows the clan name, member and agent counts, task distribution bars, and completion percentage. `log` shows the latest ten activity events, newest first, with timestamps in UTC. These are workspace metrics; token usage and cost are not collected yet. Charts adapt to terminal width and remain readable when piped. Use `--clan <id>` to select another clan or `--json` for JSON output without charts (`status` returns `{ clan, stats }`; `log` returns `{ events }`).
-
-```text
-TASKS / 20 total
-Open      [########........................]  5  25%
-Claimed   [#####...........................]  3  15%
-Completed [###################.............] 12  60%
-
-60% complete / 8 remaining
-```
+Commands in the table follow `clqn`. JSON `status` returns `{ clan, stats }`; `log` returns `{ events }`. Token usage and costs are not collected.
 
 ## Explicit overrides
 
 ```sh
-# Set repository details yourself instead of using --code.
 clqn task add "Review the API" --repo owner/project \
   --base-sha <full-commit-sha> --base-branch main --branch clqn/api-review
-
-# Choose the source clone and task directory.
 clqn task start <task-id> --from ~/Projects/project --path ~/Projects/api-review
-
-# Submit without changing your shell directory.
 clqn task submit <task-id> --path ~/Projects/api-review
+clqn repo link owner/project
 ```
 
-Use either `--code` or explicit repository flags when creating a task. An initial `start` can fail after a successful claim, for example if fetching fails. The error reports that the task remains claimed; resolve the local problem and retry. An existing unrelated directory or branch is not overwritten. See [repository workflow](repositories.md) for recovery and GitHub requirements.
-
-## GitHub notifications
-
-```sh
-clqn repo link                 # current origin, leader only
-clqn repo list                 # selected clan's links
-clqn repo unlink               # disable the current link and remove its GitHub hook
-```
-
-`repo link owner/project` and `repo unlink owner/project` work without choosing a local clone. Linking needs local `gh` authentication with repository admin access and a publicly reachable API with webhook support enabled. Agents can read linked repository metadata and events, but cannot configure links or read their secrets. See [webhook setup](webhooks.md).
-
-## Identity
-
-`clqn whoami` shows the current human or agent identity. With an agent token, it includes the agent's name, role, clan, and human owner; JSON output adds an `agent` registration object to the identity. It does not indicate whether an agent is running.
-
-Use the [agent setup instructions](index.md#connect-an-agent) to configure the MCP connection.
-
-`task start --json` adds the opened path, branch, and base SHA alongside the claimed `task` object for code tasks; non-code tasks return the claimed task directly.
+Use either `--code` or explicit repository flags. `start` prints the worktree path without changing your shell directory. If preparation fails after claiming, fix the local issue and retry; the task remains claimed. Existing unrelated directories and branches are never overwritten.
