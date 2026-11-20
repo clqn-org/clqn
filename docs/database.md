@@ -10,6 +10,8 @@ The committed Drizzle migrations create users, credentials, clans, memberships, 
 
 Migrations are explicit and use a single connection suitable for the migration endpoint supplied by your database provider. Run migrations before starting the updated API. Application startup does not apply them automatically.
 
+Migration `0008_resource_aliases` assigns stable aliases to existing tasks and agents. PostgreSQL allocates each new alias from a sequence. Numbers can have gaps. The API resolves aliases within the requested clan and keeps UUIDs for ownership, assignments and audit events.
+
 ## Schema changes
 
 Edit the feature schema in `packages/api/src/db/schema.ts`, `context.ts`, or `tasks.ts`, then generate a migration:

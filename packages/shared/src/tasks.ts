@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { agentReferenceSchema } from './agents.js';
 
 export const gitShaSchema = z.string().regex(/^[0-9a-f]{40}$/, 'Use a full lowercase Git commit SHA');
 export const repositorySlugSchema = z.string().max(200)
@@ -33,13 +34,16 @@ export const repositoryReportSchema = z.object({
 export type RepositoryReport = z.infer<typeof repositoryReportSchema>;
 export const integrationReportSchema = z.object({ headSha: gitShaSchema, mergeCommitSha: gitShaSchema }).strict();
 export type IntegrationReport = z.infer<typeof integrationReportSchema>;
-export const assignTaskSchema = z.object({ agentId: z.uuid() }).strict();
+export const taskAliasSchema = z.string().regex(/^task-[1-9][0-9]{0,18}$/);
+export const taskReferenceSchema = z.union([z.uuid(), taskAliasSchema]).describe('Task UUID or alias, e.g. task-12');
+export const assignTaskSchema = z.object({ agentId: agentReferenceSchema }).strict();
 export const createTaskSchema = z.object({
   description: z.string().trim().min(1).max(4000).refine((text) => !text.includes('\0'), 'Task descriptions cannot contain NUL'),
   repository: repositoryInputSchema.optional(),
 }).strict();
 export const taskSchema = z.object({
   id: z.uuid(),
+  alias: taskAliasSchema.optional(),
   clanId: z.uuid(),
   description: z.string(),
   status: z.enum(['open', 'claimed', 'completed']),

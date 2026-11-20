@@ -49,7 +49,7 @@ Syncing main does not update task base SHAs, mark integration, or complete tasks
 
 ## Create and assign a task
 
-From the orchestrator's project clone:
+Run these commands from the orchestrator's project clone. Use the task and agent aliases printed by `clqn task list` and `clqn agent list`, or their full UUIDs.
 
 ```sh
 clqn task add "Implement the API endpoint" --code

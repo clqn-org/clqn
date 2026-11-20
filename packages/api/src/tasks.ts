@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { ApiError, createTaskSchema, assignTaskSchema, repositoryReportSchema, integrationReportSchema,
+import { ApiError, createTaskSchema, assignTaskSchema, taskReferenceSchema, repositoryReportSchema, integrationReportSchema,
   type Actor, type Task, type TaskRepository } from '@clqn/shared';
 import { requireClan, appendEvent, type WorkspaceDb } from './access.js';
 import { tasks } from './db/tasks.js';
@@ -15,11 +15,18 @@ const missingTask = () => new ApiError(404, 'NOT_FOUND', 'Task not found');
 const conflict = () => new ApiError(409, 'TASK_CONFLICT', 'Task state or ownership does not allow this action');
 const ownTask = (task: typeof tasks.$inferSelect, actor: Actor) =>
   task.ownerId === actor.id && task.ownerAgentId === (actor.agentId ?? null);
-const taskId = (value: string | undefined) => {
-  const parsed = z.uuid().safeParse(value);
+function taskFilter(clanId: string, value: string | undefined) {
+  const parsed = taskReferenceSchema.safeParse(value);
   if (!parsed.success) throw missingTask();
-  return parsed.data;
-};
+  const reference = parsed.data;
+  const column = reference.startsWith('task-') ? tasks.alias : tasks.id;
+  return and(eq(tasks.clanId, clanId), eq(column, reference));
+}
+
+function agentFilter(clanId: string, reference: string) {
+  const column = reference.startsWith('agent-') ? agents.alias : agents.id;
+  return and(eq(agents.clanId, clanId), eq(column, reference));
+}
 
 async function requireCoordinator(db: WorkspaceDb, actor: Actor, clanId: string) {
   const membership = await requireClan(db, actor, clanId);
@@ -45,8 +52,8 @@ export function createTaskRoutes(db: WorkspaceDb) {
   app.get('/:taskId', async (c) => {
     const clanId = c.req.param('clanId')!;
     await requireClan(db, c.get('user'), clanId);
-    const id = taskId(c.req.param('taskId'));
-    const [row] = await db.select().from(tasks).where(and(eq(tasks.clanId, clanId), eq(tasks.id, id)));
+    const filter = taskFilter(clanId, c.req.param('taskId'));
+    const [row] = await db.select().from(tasks).where(filter);
     if (!row) throw missingTask();
     return c.json(taskView(row));
   });
@@ -79,21 +86,21 @@ export function createTaskRoutes(db: WorkspaceDb) {
     const actor = c.get('user');
     const clanId = c.req.param('clanId')!;
     await requireCoordinator(db, actor, clanId);
-    const id = taskId(c.req.param('taskId'));
+    const filter = taskFilter(clanId, c.req.param('taskId'));
     const body = assignTaskSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) throw new ApiError(400, 'INVALID_REQUEST', 'Provide an agentId');
     const task = await db.transaction(async (tx) => {
       const [agent] = await tx.select({ id: agents.id }).from(agents).innerJoin(memberships,
-        and(eq(memberships.userId, agents.ownerId), eq(memberships.clanId, agents.clanId))).where(and(
-        eq(agents.id, body.data.agentId), eq(agents.clanId, clanId)));
+        and(eq(memberships.userId, agents.ownerId), eq(memberships.clanId, agents.clanId)))
+        .where(agentFilter(clanId, body.data.agentId));
       if (!agent) throw new ApiError(404, 'NOT_FOUND', 'Agent not found');
-      const [row] = await tx.select().from(tasks).where(and(eq(tasks.clanId, clanId), eq(tasks.id, id))).for('update');
+      const [row] = await tx.select().from(tasks).where(filter).for('update');
       if (!row) throw missingTask();
       if (row.status !== 'open' || (row.assignedAgentId && row.assignedAgentId !== agent.id)) throw conflict();
       if (row.assignedAgentId === agent.id) return taskView(row);
       const [updated] = await tx.update(tasks).set({ assignedAgentId: agent.id, updatedAt: sql`now()` })
-        .where(eq(tasks.id, id)).returning();
-      await appendEvent(tx, { clanId, actorId: actor.id, agentId: actor.agentId ?? null, type: 'task.assigned', resourceId: id });
+        .where(eq(tasks.id, row.id)).returning();
+      await appendEvent(tx, { clanId, actorId: actor.id, agentId: actor.agentId ?? null, type: 'task.assigned', resourceId: row.id });
       return taskView(updated!);
     });
     return c.json(task);
@@ -102,16 +109,19 @@ export function createTaskRoutes(db: WorkspaceDb) {
     const actor = c.get('user');
     const clanId = c.req.param('clanId')!;
     await requireCoordinator(db, actor, clanId);
-    const id = taskId(c.req.param('taskId'));
+    const filter = taskFilter(clanId, c.req.param('taskId'));
     const body = assignTaskSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) throw new ApiError(400, 'INVALID_REQUEST', 'Provide the currently assigned agentId');
     const task = await db.transaction(async (tx) => {
-      const [row] = await tx.select().from(tasks).where(and(eq(tasks.clanId, clanId), eq(tasks.id, id))).for('update');
+      const [row] = await tx.select().from(tasks).where(filter).for('update');
       if (!row) throw missingTask();
-      if (row.status !== 'open' || row.assignedAgentId !== body.data.agentId) throw conflict();
+      if (row.status !== 'open' || !row.assignedAgentId) throw conflict();
+      const [assigned] = await tx.select({ id: agents.id }).from(agents)
+        .where(and(eq(agents.id, row.assignedAgentId), agentFilter(clanId, body.data.agentId)));
+      if (!assigned) throw conflict();
       const [updated] = await tx.update(tasks).set({ assignedAgentId: null, updatedAt: sql`now()` })
-        .where(eq(tasks.id, id)).returning();
-      await appendEvent(tx, { clanId, actorId: actor.id, agentId: actor.agentId ?? null, type: 'task.unassigned', resourceId: id });
+        .where(eq(tasks.id, row.id)).returning();
+      await appendEvent(tx, { clanId, actorId: actor.id, agentId: actor.agentId ?? null, type: 'task.unassigned', resourceId: row.id });
       return taskView(updated!);
     });
     return c.json(task);
@@ -120,11 +130,11 @@ export function createTaskRoutes(db: WorkspaceDb) {
     const actor = c.get('user');
     const clanId = c.req.param('clanId')!;
     await requireClan(db, actor, clanId);
-    const id = taskId(c.req.param('taskId'));
+    const filter = taskFilter(clanId, c.req.param('taskId'));
     const body = repositoryReportSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) throw new ApiError(400, 'INVALID_REQUEST', 'Provide expectedHeadSha, headSha and optional PR number and URL');
     const task = await db.transaction(async (tx) => {
-      const [row] = await tx.select().from(tasks).where(and(eq(tasks.clanId, clanId), eq(tasks.id, id))).for('update');
+      const [row] = await tx.select().from(tasks).where(filter).for('update');
       if (!row) throw missingTask();
       if (row.status !== 'claimed' || !ownTask(row, actor) || !row.repository || row.repository.state === 'merged') throw conflict();
       if (row.repository.headSha !== body.data.expectedHeadSha) {
@@ -138,8 +148,8 @@ export function createTaskRoutes(db: WorkspaceDb) {
       const repository: TaskRepository = { ...row.repository, headSha: body.data.headSha,
         prNumber: body.data.prNumber ?? row.repository.prNumber, prUrl: body.data.prUrl ?? row.repository.prUrl,
         state: body.data.prNumber !== undefined || row.repository.prNumber !== null ? 'open' : 'pushed' };
-      const [updated] = await tx.update(tasks).set({ repository, updatedAt: sql`now()` }).where(eq(tasks.id, id)).returning();
-      await appendEvent(tx, { clanId, actorId: actor.id, agentId: actor.agentId ?? null, type: 'task.repository_updated', resourceId: id });
+      const [updated] = await tx.update(tasks).set({ repository, updatedAt: sql`now()` }).where(eq(tasks.id, row.id)).returning();
+      await appendEvent(tx, { clanId, actorId: actor.id, agentId: actor.agentId ?? null, type: 'task.repository_updated', resourceId: row.id });
       return taskView(updated!);
     });
     return c.json(task);
@@ -148,11 +158,11 @@ export function createTaskRoutes(db: WorkspaceDb) {
     const actor = c.get('user');
     const clanId = c.req.param('clanId')!;
     await requireCoordinator(db, actor, clanId);
-    const id = taskId(c.req.param('taskId'));
+    const filter = taskFilter(clanId, c.req.param('taskId'));
     const body = integrationReportSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) throw new ApiError(400, 'INVALID_REQUEST', 'Provide headSha and mergeCommitSha');
     const task = await db.transaction(async (tx) => {
-      const [row] = await tx.select().from(tasks).where(and(eq(tasks.clanId, clanId), eq(tasks.id, id))).for('update');
+      const [row] = await tx.select().from(tasks).where(filter).for('update');
       if (!row) throw missingTask();
       if (row.status !== 'claimed' || !row.repository || row.repository.prNumber === null || row.repository.headSha !== body.data.headSha) throw conflict();
       if (row.repository.state === 'merged') {
@@ -160,8 +170,8 @@ export function createTaskRoutes(db: WorkspaceDb) {
         return taskView(row);
       }
       const repository: TaskRepository = { ...row.repository, state: 'merged', mergeCommitSha: body.data.mergeCommitSha };
-      const [updated] = await tx.update(tasks).set({ repository, updatedAt: sql`now()` }).where(eq(tasks.id, id)).returning();
-      await appendEvent(tx, { clanId, actorId: actor.id, agentId: actor.agentId ?? null, type: 'task.integrated', resourceId: id });
+      const [updated] = await tx.update(tasks).set({ repository, updatedAt: sql`now()` }).where(eq(tasks.id, row.id)).returning();
+      await appendEvent(tx, { clanId, actorId: actor.id, agentId: actor.agentId ?? null, type: 'task.integrated', resourceId: row.id });
       return taskView(updated!);
     });
     return c.json(task);
@@ -171,11 +181,11 @@ export function createTaskRoutes(db: WorkspaceDb) {
       const actor = c.get('user');
       const clanId = c.req.param('clanId')!;
       const membership = await requireClan(db, actor, clanId);
-      const id = taskId(c.req.param('taskId'));
+      const filter = taskFilter(clanId, c.req.param('taskId'));
       const body = z.object({}).strict().safeParse(await c.req.json().catch(() => null));
       if (!body.success) throw new ApiError(400, 'INVALID_REQUEST', 'Expected an empty JSON object');
       const task = await db.transaction(async (tx) => {
-        const [row] = await tx.select().from(tasks).where(and(eq(tasks.clanId, clanId), eq(tasks.id, id))).for('update');
+        const [row] = await tx.select().from(tasks).where(filter).for('update');
         if (!row) throw missingTask();
         const leaderReset = action === 'release' && !actor.agentId && membership.role === 'leader';
         if (row.status !== (action === 'claim' ? 'open' : 'claimed')) throw conflict();
@@ -188,9 +198,9 @@ export function createTaskRoutes(db: WorkspaceDb) {
           : action === 'release'
             ? { status: 'open' as const, ownerId: null, ownerAgentId: null, assignedAgentId: null, updatedAt: sql`now()` }
             : { status: 'completed' as const, updatedAt: sql`now()` };
-        const [updated] = await tx.update(tasks).set(update).where(eq(tasks.id, id)).returning();
+        const [updated] = await tx.update(tasks).set(update).where(eq(tasks.id, row.id)).returning();
         const type = { claim: 'task.claimed', release: 'task.released', complete: 'task.completed' }[action];
-        await appendEvent(tx, { clanId, actorId: actor.id, agentId: actor.agentId ?? null, type, resourceId: id });
+        await appendEvent(tx, { clanId, actorId: actor.id, agentId: actor.agentId ?? null, type, resourceId: row.id });
         return taskView(updated!);
       });
       return c.json(task);

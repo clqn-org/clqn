@@ -5,8 +5,10 @@ export const actorSchema = z.object({
 });
 export type Actor = z.infer<typeof actorSchema>;
 export const agentRoleSchema = z.enum(['worker', 'orchestrator']);
+export const agentAliasSchema = z.string().regex(/^agent-[1-9][0-9]{0,18}$/);
+export const agentReferenceSchema = z.union([z.uuid(), agentAliasSchema]).describe('Agent UUID or alias, e.g. agent-3');
 export const agentSchema = z.object({
-  id: z.uuid(), clanId: z.uuid(), ownerId: z.uuid(), name: z.string(), createdAt: z.iso.datetime(),
+  id: z.uuid(), alias: agentAliasSchema.optional(), clanId: z.uuid(), ownerId: z.uuid(), name: z.string(), createdAt: z.iso.datetime(),
   role: agentRoleSchema.default('worker'),
 });
 export type Agent = z.infer<typeof agentSchema>;

@@ -55,8 +55,10 @@ test('PostgreSQL: orchestrator delegates isolated repository work and integratio
   await sql`insert into memberships (clan_id, user_id) values (${clan.id}, ${bob.user.id})`;
   const orchestrator = await connection.store.registerAgent(alice.user, clan.id, 'Coordinator', 'orchestrator');
   const regular = await connection.store.registerAgent(alice.user, clan.id, 'Leader worker');
-  const worker = await connection.store.registerAgent(bob.user, clan.id, 'Worker');
-  const secondWorker = await connection.store.registerAgent(bob.user, clan.id, 'Second worker');
+  const [worker, secondWorker] = await Promise.all(['Worker', 'Second worker'].map(
+    (name) => connection.store.registerAgent(bob.user, clan.id, name)));
+  assert.match(worker.agent.alias, /^agent-[1-9][0-9]*$/);
+  assert.notEqual(worker.agent.alias, secondWorker.agent.alias);
   const outsideWorker = await connection.store.registerAgent(bob.user, other.id, 'Outside worker');
   const app = createApp(connection.store, connection.db);
   const request = (token, suffix = '', body, clanId = clan.id) => app.request(`/v1/clans/${clanId}/tasks${suffix}`, {
@@ -70,13 +72,15 @@ test('PostgreSQL: orchestrator delegates isolated repository work and integratio
     prNumber: null, prUrl: null, mergeCommitSha: null, state: 'pending' });
   assert.equal(task.assignedAgentId, null);
   assert.deepEqual(taskSchema.parse(await (await request(worker.token, `/${task.id}`)).json()), task);
+  assert.deepEqual(taskSchema.parse(await (await request(worker.token, `/${task.alias}`)).json()), task);
   assert.equal((await request(alice.token, `/${task.id}`, undefined, other.id)).status, 404);
   assert.equal((await request(alice.token, '', { description: 'Duplicate branch', repository: { ...repository, slug: 'EXAMPLE/PROJECT' } })).status, 409);
-  const assign = (token, agentId) => request(token, `/${task.id}/assign`, { agentId });
+  const assign = (token, agentId) => request(token, `/${task.alias}/assign`, { agentId });
   assert.equal((await assign(bob.token, worker.agent.id)).status, 403);
   assert.equal((await assign(regular.token, worker.agent.id)).status, 403);
   assert.equal((await assign(orchestrator.token, outsideWorker.agent.id)).status, 404);
-  const assignments = await Promise.all([assign(orchestrator.token, worker.agent.id), assign(alice.token, secondWorker.agent.id)]);
+  assert.equal((await assign(orchestrator.token, outsideWorker.agent.alias)).status, 404);
+  const assignments = await Promise.all([assign(orchestrator.token, worker.agent.alias), assign(alice.token, secondWorker.agent.alias)]);
   assert.deepEqual(assignments.map((r) => r.status).sort(), [200, 409]);
   const assigned = await assignments.find((r) => r.status === 200).json();
   const owner = assigned.assignedAgentId === worker.agent.id ? worker : secondWorker;
@@ -86,7 +90,7 @@ test('PostgreSQL: orchestrator delegates isolated repository work and integratio
   assert.equal((await request(loser.token, `/${task.id}/claim`, {})).status, 409);
   assert.equal((await request(owner.token, `/${task.id}/claim`, {})).status, 200);
   assert.equal((await request(owner.token, `/${task.id}/complete`, {})).status, 409);
-  const report = (token, body) => request(token, `/${task.id}/repository`, body);
+  const report = (token, body) => request(token, `/${task.alias}/repository`, body);
   assert.equal((await report(loser.token, { expectedHeadSha: null, headSha: 'b'.repeat(40) })).status, 409);
   const heads = await Promise.all(['b', 'c'].map((letter) => report(owner.token, { expectedHeadSha: null, headSha: letter.repeat(40) })));
   assert.deepEqual(heads.map((r) => r.status).sort(), [200, 409]);
@@ -99,7 +103,7 @@ test('PostgreSQL: orchestrator delegates isolated repository work and integratio
   const pr = { expectedHeadSha: pushed.repository.headSha, headSha: pushed.repository.headSha,
     prNumber: 1, prUrl: 'https://github.com/example/project/pull/1' };
   assert.equal((await report(owner.token, pr)).status, 200);
-  const integrate = (token, headSha = pushed.repository.headSha) => request(token, `/${task.id}/integration`, {
+  const integrate = (token, headSha = pushed.repository.headSha) => request(token, `/${task.alias}/integration`, {
     headSha, mergeCommitSha: 'd'.repeat(40),
   });
   assert.equal((await integrate(owner.token)).status, 403);
@@ -115,13 +119,13 @@ test('PostgreSQL: orchestrator delegates isolated repository work and integratio
   const resetTask = await (await request(alice.token, '', { description: 'Release assignment' })).json();
   assert.equal((await request(alice.token, `/${resetTask.id}/assign`, { agentId: worker.agent.id })).status, 200);
   assert.equal((await request(worker.token, `/${resetTask.id}/claim`, {})).status, 200);
-  const released = await request(alice.token, `/${resetTask.id}/release`, {});
+  const released = await request(alice.token, `/${resetTask.alias}/release`, {});
   assert.equal(released.status, 200);
   assert.equal((await released.json()).assignedAgentId, null);
   assert.equal((await request(orchestrator.token, `/${resetTask.id}/assign`, { agentId: secondWorker.agent.id })).status, 200);
   assert.equal((await request(regular.token, `/${resetTask.id}/unassign`, { agentId: secondWorker.agent.id })).status, 403);
-  assert.equal((await request(alice.token, `/${resetTask.id}/unassign`, { agentId: worker.agent.id })).status, 409);
-  assert.equal((await request(orchestrator.token, `/${resetTask.id}/unassign`, { agentId: secondWorker.agent.id })).status, 200);
+  assert.equal((await request(alice.token, `/${resetTask.alias}/unassign`, { agentId: worker.agent.alias })).status, 409);
+  assert.equal((await request(orchestrator.token, `/${resetTask.alias}/unassign`, { agentId: secondWorker.agent.alias })).status, 200);
   assert.equal((await request(orchestrator.token, `/${resetTask.id}/unassign`, { agentId: secondWorker.agent.id })).status, 409);
   const [counts] = await sql`select
     count(*) filter (where type = 'task.assigned')::integer as assignments,

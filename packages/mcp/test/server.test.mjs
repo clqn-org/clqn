@@ -18,7 +18,7 @@ test('MCP discovers and calls the health tool through the protocol', async (t) =
   await server.connect(serverTransport);
   await client.connect(clientTransport);
   const { tools } = await client.listTools();
-  assert.equal(tools.length, 17);
+  assert.ok(tools.some((tool) => tool.name === 'clqn_list_agents' && tool.annotations.readOnlyHint));
   assert.ok(tools.some((tool) => tool.name === 'clqn_get_policy'));
   assert.ok(!tools.some((tool) => /set_policy|update_policy/.test(tool.name)));
   assert.ok(tools.some((tool) => tool.name === 'clqn_get_status'));
@@ -78,7 +78,7 @@ test('MCP forwards repository assignments and authenticated reports with the exa
   const integration = { headSha: report.headSha, mergeCommitSha: 'c'.repeat(40) };
   for (const [name, args] of [
     ['clqn_create_task', { description: 'Work', repository }], ['clqn_get_task', { taskId }],
-    ['clqn_assign_task', { taskId, agentId }], ['clqn_unassign_task', { taskId, agentId }],
+    ['clqn_assign_task', { taskId: 'task-12', agentId: 'agent-3' }], ['clqn_unassign_task', { taskId, agentId }],
     ['clqn_report_task_repository', { taskId, ...report }], ['clqn_record_task_integration', { taskId, ...integration }],
   ]) {
     const result = await client.callTool({ name, arguments: args });
@@ -86,7 +86,7 @@ test('MCP forwards repository assignments and authenticated reports with the exa
   }
   assert.deepEqual(calls, [
     { name: 'createTask', args: [clanId, 'Work', repository] }, { name: 'task', args: [clanId, taskId] },
-    { name: 'assignTask', args: [clanId, taskId, agentId] }, { name: 'unassignTask', args: [clanId, taskId, agentId] },
+    { name: 'assignTask', args: [clanId, 'task-12', 'agent-3'] }, { name: 'unassignTask', args: [clanId, taskId, agentId] },
     { name: 'reportTaskRepository', args: [clanId, taskId, report] }, { name: 'integrateTask', args: [clanId, taskId, integration] },
   ]);
 });

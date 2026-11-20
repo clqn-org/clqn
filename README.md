@@ -70,25 +70,25 @@ printf 'Run npm test before committing.\n' | clqn context write conventions --ex
 clqn context read conventions
 ```
 
-For code tasks, run from your project clone with Git and an authenticated GitHub CLI (`gh`). Each agent uses its own credentials.
+For code tasks, run from your project clone with Git and an authenticated GitHub CLI (`gh`). Each agent uses its own credentials. Replace `task-12` and `agent-3` below with the aliases printed by `clqn task list` and `clqn agent list`. UUIDs work too.
 
 ```sh
 # Orchestrator
 clqn task add "Implement login" --code
-clqn task assign <task-id> --agent <worker-agent-id>
+clqn task assign task-12 --agent agent-3
 
 # Worker
-clqn task start <task-id>
+clqn task start task-12
 cd <printed-worktree-path>
 # Make changes, test, and commit.
-clqn task submit <task-id>
+clqn task submit task-12
 
 # Orchestrator
-clqn task check <task-id>
-clqn task merge <task-id>
+clqn task check task-12
+clqn task merge task-12
 
 # Worker
-clqn task done <task-id>
+clqn task done task-12
 ```
 
 As the leader, run `clqn repo link` once to set up the [GitHub webhook](docs/webhooks.md#link-a-repository). While MCP is connected, changes to `origin/main` automatically update clean local `main` checkouts.

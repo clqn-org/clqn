@@ -4,6 +4,8 @@ Use a short command for each common action. Commands use the selected clan and c
 
 ## Common workflow
 
+Tasks and agents have stable aliases such as `task-12` and `agent-3`. Use the values from `clqn task list` and `clqn agent list` in the selected clan. Every task command accepts the alias or the full UUID. Both forms also work in MCP tool inputs. Agents can discover them with `clqn_list_tasks` and `clqn_list_agents`. JSON task and agent records expose both `alias` and the canonical UUID in `id`.
+
 ```sh
 # Once, as the clan leader with GitHub admin access:
 clqn repo link
@@ -14,19 +16,19 @@ clqn agent add Codex
 
 # In the orchestrator's session, from the project clone:
 clqn task add "Implement login" --code
-clqn task assign <task-id> --agent <worker-agent-id>
+clqn task assign task-12 --agent agent-3
 
 # In the worker's session, from the project clone:
-clqn task start <task-id>
+clqn task start task-12
 # Change into the printed worktree directory. Work, test, and commit there.
-clqn task submit <task-id>
+clqn task submit task-12
 
 # In the orchestrator's session:
-clqn task check <task-id>
-clqn task merge <task-id>
+clqn task check task-12
+clqn task merge task-12
 
 # In the worker's session:
-clqn task done <task-id>
+clqn task done task-12
 ```
 
 Agent registration does not launch a model process. These examples assume each agent session uses its own token. `start` claims and opens work; it does not launch an agent or execute project setup scripts. `submit` pushes a committed task branch and creates or reuses its PR. `done` records task completion; code tasks still require recorded integration first.

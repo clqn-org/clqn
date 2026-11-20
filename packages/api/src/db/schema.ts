@@ -1,6 +1,6 @@
 import type { PolicySettings } from '@clqn/shared';
 import { sql } from 'drizzle-orm';
-import { pgTable, uuid, text, timestamp, primaryKey, pgEnum, bigserial, jsonb, integer, bigint, check, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, pgSequence, uuid, text, timestamp, primaryKey, pgEnum, bigserial, jsonb, integer, bigint, check, uniqueIndex } from 'drizzle-orm/pg-core';
 
 export const membershipRole = pgEnum('membership_role', ['leader', 'member']);
 
@@ -28,8 +28,10 @@ export const memberships = pgTable('memberships', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [primaryKey({ columns: [table.clanId, table.userId] })]);
 
+export const agentAliasSequence = pgSequence('agent_alias_seq');
 export const agents = pgTable('agents', {
   id: uuid('id').primaryKey().defaultRandom(),
+  alias: text('alias').notNull().unique().default(sql`'agent-' || nextval('agent_alias_seq')`),
   clanId: uuid('clan_id').notNull().references(() => clans.id),
   ownerId: uuid('owner_id').notNull().references(() => users.id),
   name: text('name').notNull(),

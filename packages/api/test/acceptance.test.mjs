@@ -128,7 +128,12 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
   assert.equal((await run(claudeEnv, ['context', 'history', 'implementation'])).revisions.length, 2);
   assert.equal((await call(aliceMcp, 'clqn_list_context')).entries.length, 1);
   const task = await call(aliceMcp, 'clqn_create_task', { description: 'Review shared implementation' });
-  assert.equal((await call(bobMcp, 'clqn_claim_task', { taskId: task.id })).ownerAgentId, claude.agent.id);
+  const { agents } = await call(aliceMcp, 'clqn_list_agents');
+  const worker = agents.find((agent) => agent.id === claude.agent.id);
+  assert.match(worker.alias, /^agent-[1-9][0-9]*$/);
+  assert.match(task.alias, /^task-[1-9][0-9]*$/);
+  assert.equal((await run(aliceEnv, ['task', 'assign', task.alias, '--agent', worker.alias])).assignedAgentId, worker.id);
+  assert.equal((await call(bobMcp, 'clqn_claim_task', { taskId: task.alias })).ownerAgentId, claude.agent.id);
   const denied = await aliceMcp.callTool({ name: 'clqn_complete_task', arguments: { taskId: task.id } });
   assert.equal(denied.isError, true);
   assert.equal((await run(claudeEnv, ['task', 'release', task.id])).status, 'open');
