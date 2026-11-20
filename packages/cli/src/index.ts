@@ -2,7 +2,7 @@
 import { Command } from 'commander';
 import { ApiError, ClqnClient, VERSION, updatePolicySchema, type UpdatePolicy, registerAgentSchema, repositoryInputSchema, repositorySlugSchema, resourceAliasSchema, type Task } from '@clqn/shared';
 import { serveMcp } from '@clqn/mcp';
-import { readConfig, removeConfig, writeConfig } from './config.js';
+import { readConfig, removeConfig, writeConfig, type Config } from './config.js';
 import { runMcpSync } from './mcp-sync.js';
 import { renderMetrics, renderActivity } from './metrics.js';
 import { configureGithubWebhook, removeGithubWebhook } from './github-hooks.js';
@@ -22,6 +22,11 @@ const output = (value: unknown, human: string) => verbatim(value, human.replace(
 const displayId = (value: { id: string; alias?: string | null | undefined }) =>
   value.alias ? `${value.alias} (${value.id})` : value.id;
 const defaultAlias = (name: string) => resourceAliasSchema.safeParse(name.trim()).data;
+// Keep the selected clan across logins; the API still checks membership on every request.
+const saveToken = async (token: string) => {
+  const { clanId } = await readConfig(apiUrl()).catch((): Config => ({}));
+  await writeConfig(apiUrl(), clanId ? { token, clanId } : { token });
+};
 const client = async () => new ClqnClient(apiUrl(), process.env.CLQN_TOKEN ?? (await readConfig(apiUrl())).token);
 
 program.command('health').description('Check API liveness (not clan status or database readiness)').action(async () => {
@@ -86,7 +91,7 @@ program.command('login').description('Log in with GitHub or a personal token fro
         const result = await api.pollGithubLogin(attempt.handle);
         if (result.status === 'pending') { interval = result.interval; continue; }
         if (result.status !== 'complete') throw new Error(`GitHub login ${result.status}. Start again or contact the operator for account conflicts.`);
-        await writeConfig(apiUrl(), { token: result.token });
+        await saveToken(result.token);
         output(result.user, `Logged in as ${result.user.email}`);
         return;
       }
@@ -103,7 +108,7 @@ program.command('login').description('Log in with GitHub or a personal token fro
     const token = Buffer.concat(chunks).toString('utf8').trim();
     if (!token || /\s/.test(token)) throw new Error('Provide one nonempty token on standard input');
     const user = await new ClqnClient(apiUrl(), token).whoami();
-    await writeConfig(apiUrl(), { token });
+    await saveToken(token);
     output(user, `Logged in as ${user.email}`);
   });
 

@@ -143,6 +143,9 @@ test('CLI login, clan creation, membership, and logout persist API-scoped privat
   assert.deepEqual(JSON.parse((await f.call(['members', '--json'])).stdout), f.members);
   assert.deepEqual(JSON.parse((await f.call(['members', '--clan', f.clan.id, '--json'])).stdout), f.members);
   assert.match((await f.call(['members'])).stdout, /alice@example.com  leader/);
+  // Logging in again keeps the selected clan.
+  await f.call(['login'], { input: f.token });
+  assert.deepEqual(JSON.parse((await f.call(['members', '--json'])).stdout), f.members);
   const logout = JSON.parse((await f.call(['logout', '--json'])).stdout);
   assert.deepEqual(logout, { credentialsRemoved: true, environmentTokenActive: false });
   assert.deepEqual(await readdir(f.directory), []);
