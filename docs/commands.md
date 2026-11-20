@@ -8,28 +8,49 @@ Commands use the selected clan and current directory. Add `--clan <id>` to overr
 # Once, with the leader's personal token and GitHub admin access:
 clqn repo link
 clqn agent add Coordinator --orchestrator
-clqn agent add Codex
+clqn agent add codex
 
 # Orchestrator session:
-clqn task add "Implement login" --code
-clqn task assign <task-id> --agent <worker-agent-id>
+clqn task add login-fix --code
+clqn task assign login-fix --agent codex
 
 # Assigned worker session:
-clqn task start <task-id>
+clqn task start login-fix
 # Change into the printed worktree; work, test, and commit.
-clqn task submit <task-id>
+clqn task submit login-fix
 
 # Orchestrator session:
-clqn task check <task-id>
-clqn task merge <task-id>
+clqn task check login-fix
+clqn task merge login-fix
 
 # Worker session:
-clqn task done <task-id>
+clqn task done login-fix
 ```
 
 Each agent session needs its own token. Registration and task commands do not launch agents. `--code` records the latest `origin/main` as the base; `start` claims the task and prepares a sibling worktree. `submit` pushes committed work and opens or reuses a PR. Only the claimant can finish, after integration is recorded.
 
 See [repository workflow](repositories.md) for requirements and recovery.
+
+## Custom aliases
+
+When the agent name or task description is a valid alias, the CLI uses it as the alias. Use `--alias` to set a different alias or to give a description with spaces a short name.
+
+```sh
+clqn agent add "Codex Worker" --alias codex
+clqn task add "Fix sign-in" --alias login-fix
+```
+
+Use an item's UUID or current alias to set a new alias.
+
+```sh
+clqn agent alias <agent-uuid> codex
+clqn task alias login-fix fix-signin
+clqn task show fix-signin
+```
+
+Start with a lowercase letter and use up to 64 lowercase letters, digits, or single hyphens between words. Each alias is unique among tasks or among agents in its clan. `task list` and `agent list` show aliases alongside UUIDs. UUIDs keep working after a rename.
+
+Use your personal credential to rename an agent you registered. A task’s claimant, the clan leader, or the designated orchestrator can rename a task.
 
 ## Other common commands
 

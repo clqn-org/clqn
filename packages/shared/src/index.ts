@@ -7,6 +7,8 @@ import { actorSchema, agentSchema, agentsSchema, agentRegistrationSchema, regist
 import { contextKeySchema, contextEntrySchema, contextListSchema, contextHistorySchema, writeContextSchema } from './context.js';
 import { taskSchema, tasksSchema, createTaskSchema, assignTaskSchema, repositoryReportSchema, integrationReportSchema, type RepositoryInput, type RepositoryReport, type IntegrationReport } from './tasks.js';
 import { eventsSchema, statsSchema, statusSchema } from './activity.js';
+import { setAliasSchema } from './aliases.js';
+export * from './aliases.js';
 export * from './activity.js';
 export * from './agents.js';
 export * from './context.js';
@@ -99,8 +101,11 @@ export class ClqnClient {
   joinClan(code: string): Promise<Clan> {
     return this.request('/v1/invitations/join', clanSchema, joinInvitationSchema.parse({ code }));
   }
-  registerAgent(clanId: string, name: string, role: 'worker' | 'orchestrator' = 'worker') {
-    return this.request(`/v1/clans/${encodeURIComponent(clanId)}/agents`, agentRegistrationSchema, registerAgentSchema.parse({ name, role }));
+  registerAgent(clanId: string, name: string, role: 'worker' | 'orchestrator' = 'worker', alias?: string) {
+    return this.request(`/v1/clans/${encodeURIComponent(clanId)}/agents`, agentRegistrationSchema, registerAgentSchema.parse({ name, role, alias }));
+  }
+  setAgentAlias(clanId: string, agentId: string, alias: string) {
+    return this.request(`/v1/clans/${encodeURIComponent(clanId)}/agents/${encodeURIComponent(agentId)}/alias`, agentSchema, setAliasSchema.parse({ alias }));
   }
   listAgents(clanId: string) { return this.request(`/v1/clans/${encodeURIComponent(clanId)}/agents`, agentsSchema); }
   agentStatus() { return this.request('/v1/agent', agentSchema); }
@@ -134,8 +139,11 @@ export class ClqnClient {
     contextKeySchema.parse(key);
     return this.request(`/v1/clans/${encodeURIComponent(clanId)}/context/${encodeURIComponent(key)}/history`, contextHistorySchema);
   }
-  createTask(clanId: string, description: string, repository?: RepositoryInput) {
-    return this.request(`/v1/clans/${encodeURIComponent(clanId)}/tasks`, taskSchema, createTaskSchema.parse({ description, ...(repository ? { repository } : {}) }));
+  createTask(clanId: string, description: string, repository?: RepositoryInput, alias?: string) {
+    return this.request(`/v1/clans/${encodeURIComponent(clanId)}/tasks`, taskSchema, createTaskSchema.parse({ description, repository, alias }));
+  }
+  setTaskAlias(clanId: string, taskId: string, alias: string) {
+    return this.request(`/v1/clans/${encodeURIComponent(clanId)}/tasks/${encodeURIComponent(taskId)}/alias`, taskSchema, setAliasSchema.parse({ alias }));
   }
   task(clanId: string, taskId: string) {
     return this.request(`/v1/clans/${encodeURIComponent(clanId)}/tasks/${encodeURIComponent(taskId)}`, taskSchema);

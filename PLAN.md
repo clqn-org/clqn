@@ -18,7 +18,7 @@ Humans + existing agent runtimes
 ## NEXT STEPS
 - **Test published packages**: Run a two-person acceptance test on separate machines using real Codex and Claude Code: join one clan, github login, share context, assign work, submit/merge a PR, and observe progress. **Verify live GitHub webhook setup: delivery and clean-main sync, including missed-delivery fallback.**
 
-- **add human-friendly task/agent/etc aliases alongside UUID - done by Andy but make aliases customizable**
+- [x] Add optional, customizable task and agent aliases alongside UUIDs.
 - **set up CI/CD - done by Andy**
 
 - **documentation page on site - fix scrolling mechanics and overall ui**

@@ -49,8 +49,9 @@ test('PostgreSQL: only a personal leader registers one orchestrator per clan und
   });
   const path = `/v1/clans/${clan.id}/agents`;
   assert.equal((await post(bob.token, path, { name: 'Not leader', role: 'orchestrator' })).status, 403);
-  const worker = await (await post(bob.token, path, { name: 'Worker' })).json();
+  const worker = await (await post(bob.token, path, { name: 'Worker', alias: 'writer' })).json();
   assert.equal(worker.agent.role, 'worker');
+  assert.equal(worker.agent.alias, 'writer');
   const responses = await Promise.all([
     post(alice.token, path, { name: 'First', role: 'orchestrator' }),
     post(alice.token, path, { name: 'Second', role: 'orchestrator' }),
@@ -66,7 +67,23 @@ test('PostgreSQL: only a personal leader registers one orchestrator per clan und
   assert.equal(credentials.n, 2);
   const [events] = await sql`select count(*)::integer as n from events where clan_id = ${clan.id} and type = 'agent.registered'`;
   assert.equal(events.n, 2);
-  assert.equal((await post(alice.token, `/v1/clans/${other.id}/agents`, { name: 'Other', role: 'orchestrator' })).status, 201);
+  assert.equal((await post(alice.token, `/v1/clans/${other.id}/agents`, { name: 'Other', role: 'orchestrator', alias: 'writer' })).status, 201);
+  const rename = (token, ref, alias) => post(token, `${path}/${ref}/alias`, { alias });
+  assert.equal((await rename(alice.token, 'writer', 'editor')).status, 403);
+  assert.equal((await rename(worker.token, 'writer', 'editor')).status, 403);
+  const racing = await Promise.all([
+    rename(bob.token, 'writer', 'editor'),
+    rename(alice.token, orchestrator.agent.id, 'editor'),
+  ]);
+  assert.deepEqual(racing.map((response) => response.status).sort(), [200, 409]);
+  assert.equal((await racing.find((response) => response.status === 409).json()).error.code, 'ALIAS_CONFLICT');
+  const winner = await racing.find((response) => response.status === 200).json();
+  const owner = winner.id === worker.agent.id ? bob.token : alice.token;
+  assert.equal(winner.alias, 'editor');
+  assert.equal((await rename(owner, winner.id, 'editor')).status, 200);
+  assert.equal((await post(bob.token, path, { name: 'Another worker', alias: 'editor' })).status, 409);
+  const changes = await sql`select actor_id, resource_id from events where clan_id = ${clan.id} and type = 'agent.alias_changed'`;
+  assert.deepEqual([...changes], [{ actor_id: winner.ownerId, resource_id: winner.id }]);
   // The designated agent does not inherit the leader's administrative credential.
   for (const [adminPath, body] of [
     [path, { name: 'Child', role: 'worker' }],

@@ -59,7 +59,7 @@ The leader registers the orchestrator (optional but recommended). Otherwise, the
 
 ```sh
 clqn agent add Coordinator --orchestrator
-clqn agent add Codex
+clqn agent add codex
 ```
 
 Connect each agent to MCP using its returned token: [agent setup](docs/index.md#connect-an-agent).
@@ -81,24 +81,26 @@ For code tasks, run from your project clone with Git and an authenticated GitHub
 
 ```sh
 # Orchestrator
-clqn task add "Implement login" --code
-clqn task assign <task-id> --agent <worker-agent-id>
+clqn task add login-fix --code
+clqn task assign login-fix --agent codex
 
 # Worker
-clqn task start <task-id>
+clqn task start login-fix
 cd <printed-worktree-path>
 # Make changes, test, and commit.
-clqn task submit <task-id>
+clqn task submit login-fix
 
 # Orchestrator
-clqn task check <task-id>
-clqn task merge <task-id>
+clqn task check login-fix
+clqn task merge login-fix
 
 # Worker
-clqn task done <task-id>
+clqn task done login-fix
 ```
 
 As the leader, run `clqn repo link` once to set up the [GitHub webhook](docs/webhooks.md#link-a-repository). While MCP is connected, changes to `origin/main` automatically update clean local `main` checkouts.
+
+Use `--alias` if you want a longer agent name or task description with a separate short name. See [custom aliases](docs/commands.md#custom-aliases).
 
 ### 4. Follow progress
 

@@ -30,6 +30,7 @@ export const memberships = pgTable('memberships', {
 
 export const agents = pgTable('agents', {
   id: uuid('id').primaryKey().defaultRandom(),
+  alias: text('alias'),
   clanId: uuid('clan_id').notNull().references(() => clans.id),
   ownerId: uuid('owner_id').notNull().references(() => users.id),
   name: text('name').notNull(),
@@ -37,6 +38,7 @@ export const agents = pgTable('agents', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   check('agents_role_valid', sql`${table.role} IN ('worker', 'orchestrator')`),
+  uniqueIndex('agents_clan_alias_idx').on(table.clanId, table.alias),
   uniqueIndex('agents_one_orchestrator_per_clan').on(table.clanId).where(sql`${table.role} = 'orchestrator'`),
 ]);
 

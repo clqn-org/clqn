@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { ApiError, type Clan, type User, type Actor, type Agent } from '@clqn/shared';
 import { requireClan, appendEvent, requirePersonal } from './access.js';
+import { resourceFilter, rethrowAliasConflict } from './aliases.js';
 import * as schema from './db/schema.js';
 
 export const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
@@ -11,7 +12,8 @@ export type Member = { userId: string; email: string; role: 'leader' | 'member';
 export interface WorkspaceStore {
   createInvitation(userId: string, clanId: string, email: string): Promise<{ code: string; clanId: string; email: string; expiresAt: string } | undefined>;
   joinInvitation(user: User, code: string): Promise<Clan | undefined>;
-  registerAgent(actor: Actor, clanId: string, name: string, role?: Agent['role']): Promise<{ agent: Agent; token: string }>;
+  registerAgent(actor: Actor, clanId: string, name: string, role?: Agent['role'], alias?: string): Promise<{ agent: Agent; token: string }>;
+  setAgentAlias(actor: Actor, clanId: string, reference: string, alias: string): Promise<Agent>;
   listAgents(actor: Actor, clanId: string): Promise<Agent[]>;
   agentStatus(actor: Actor): Promise<Agent | undefined>;
   authenticate(tokenHash: string): Promise<Actor | undefined>;
@@ -41,7 +43,7 @@ export function createStore(url: string) {
       }
       return actor;
     },
-    async registerAgent(actor, clanId, name, role = 'worker') {
+    async registerAgent(actor, clanId, name, role = 'worker', alias) {
       requirePersonal(actor);
       const token = `clqn_${randomBytes(32).toString('base64url')}`;
       try {
@@ -50,7 +52,7 @@ export function createStore(url: string) {
           if (role === 'orchestrator' && membership.role !== 'leader') {
             throw new ApiError(403, 'FORBIDDEN', 'Only the clan leader can register the orchestrator');
           }
-          const [agent] = await tx.insert(schema.agents).values({ clanId, ownerId: actor.id, name, role }).returning();
+          const [agent] = await tx.insert(schema.agents).values({ clanId, ownerId: actor.id, name, role, alias }).returning();
           if (!agent) throw new Error('Agent creation returned no row');
           await tx.insert(schema.credentials).values({ userId: actor.id, agentId: agent.id, tokenHash: hashToken(token) });
           await appendEvent(tx, { clanId, actorId: actor.id, type: 'agent.registered', resourceId: agent.id });
@@ -61,8 +63,22 @@ export function createStore(url: string) {
         if (cause?.code === '23505' && cause.constraint_name === 'agents_one_orchestrator_per_clan') {
           throw new ApiError(409, 'ORCHESTRATOR_EXISTS', 'This clan already has an orchestrator');
         }
-        throw error;
+        rethrowAliasConflict(error);
       }
+    },
+    async setAgentAlias(actor, clanId, reference, alias) {
+      requirePersonal(actor);
+      return db.transaction(async (tx) => {
+        await requireClan(tx, actor, clanId);
+        const [agent] = await tx.select().from(schema.agents)
+          .where(resourceFilter(schema.agents, clanId, reference)).for('update');
+        if (!agent) throw new ApiError(404, 'NOT_FOUND', 'Agent not found');
+        if (agent.ownerId !== actor.id) throw new ApiError(403, 'FORBIDDEN', 'Only the registered owner can rename an agent');
+        if (agent.alias === alias) return agentView(agent);
+        const [updated] = await tx.update(schema.agents).set({ alias }).where(eq(schema.agents.id, agent.id)).returning();
+        await appendEvent(tx, { clanId, actorId: actor.id, type: 'agent.alias_changed', resourceId: agent.id });
+        return agentView(updated!);
+      }).catch(rethrowAliasConflict);
     },
     async listAgents(actor, clanId) {
       await requireClan(db, actor, clanId);
