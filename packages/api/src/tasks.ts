@@ -148,13 +148,15 @@ export function createTaskRoutes(db: WorkspaceDb) {
       if (row.repository.headSha !== body.data.expectedHeadSha) {
         throw new ApiError(409, 'REVISION_CONFLICT', 'Repository head changed; read the task before reporting again');
       }
+      // GitHub returns owner/repository casing as created; stored slugs are lowercase.
+      const prUrl = body.data.prUrl?.toLowerCase();
       if (body.data.prNumber !== undefined) {
         const expectedUrl = `https://github.com/${row.repository.slug}/pull/${body.data.prNumber}`;
-        if (body.data.prUrl !== expectedUrl) throw new ApiError(400, 'INVALID_REQUEST', 'PR URL must match the task repository and PR number');
+        if (prUrl !== expectedUrl) throw new ApiError(400, 'INVALID_REQUEST', 'PR URL must match the task repository and PR number');
         if (row.repository.prNumber && row.repository.prNumber !== body.data.prNumber) throw conflict();
       }
       const repository: TaskRepository = { ...row.repository, headSha: body.data.headSha,
-        prNumber: body.data.prNumber ?? row.repository.prNumber, prUrl: body.data.prUrl ?? row.repository.prUrl,
+        prNumber: body.data.prNumber ?? row.repository.prNumber, prUrl: prUrl ?? row.repository.prUrl,
         state: body.data.prNumber !== undefined || row.repository.prNumber !== null ? 'open' : 'pushed' };
       const [updated] = await tx.update(tasks).set({ repository, updatedAt: sql`now()` }).where(eq(tasks.id, row.id)).returning();
       await appendEvent(tx, { clanId, actorId: actor.id, agentId: actor.agentId ?? null, type: 'task.repository_updated', resourceId: row.id });

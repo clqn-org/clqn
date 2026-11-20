@@ -101,8 +101,10 @@ test('PostgreSQL: orchestrator delegates isolated repository work and integratio
   assert.equal((await report(owner.token, { expectedHeadSha: pushed.repository.headSha, headSha: pushed.repository.headSha,
     baseSha: 'd'.repeat(40) })).status, 400);
   const pr = { expectedHeadSha: pushed.repository.headSha, headSha: pushed.repository.headSha,
-    prNumber: 1, prUrl: 'https://github.com/example/project/pull/1' };
-  assert.equal((await report(owner.token, pr)).status, 200);
+    prNumber: 1, prUrl: 'https://github.com/Example/Project/pull/1' };
+  const reported = await report(owner.token, pr);
+  assert.equal(reported.status, 200);
+  assert.equal((await reported.json()).repository.prUrl, 'https://github.com/example/project/pull/1');
   const integrate = (token, headSha = pushed.repository.headSha) => request(token, '/ship/integration', {
     headSha, mergeCommitSha: 'd'.repeat(40),
   });
