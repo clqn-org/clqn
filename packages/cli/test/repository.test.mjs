@@ -57,7 +57,11 @@ async function fixture(t, { actor = { id: userId, email: 'member@example.com' },
     } else if (request.url === `/v1/clans/${clanId}/tasks/${taskId}/assign` && request.method === 'POST') {
       value = { ...value, assignedAgentId: body.agentId };
       response.end(JSON.stringify(value));
-    } else if (request.url === `/v1/clans/${clanId}/tasks/${taskId}` && request.method === 'GET') response.end(JSON.stringify(value));
+    } else if (request.url === `/v1/clans/${clanId}/tasks/${taskId}/claim` && request.method === 'POST') {
+      value = { ...value, status: 'claimed', ownerId: actor.id };
+      response.end(JSON.stringify(value));
+    } else if (request.method === 'GET' && [value.id, value.alias].filter(Boolean)
+      .some((ref) => request.url === `/v1/clans/${clanId}/tasks/${ref}`)) response.end(JSON.stringify(value));
     else { response.writeHead(404); response.end(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Not found' } })); }
   });
   server.listen(0, '127.0.0.1');
@@ -109,6 +113,15 @@ test('partial or unsafe repository arguments fail before API or Git access', asy
   });
   assert.equal(f.requests.length, 0);
   await f.assertNoExecutions();
+});
+
+test('starting work by alias claims the UUID returned by the lookup', async (t) => {
+  const f = await fixture(t, { task: { ...initialTask, alias: 'login-fix' } });
+  const started = await f.call(['task', 'start', 'login-fix']);
+  assert.ok(started.stdout.includes(`login-fix (${taskId})`));
+  assert.deepEqual(f.requests.map((req) => req.path), [
+    `/v1/clans/${clanId}/tasks/login-fix`, '/v1/me', `/v1/clans/${clanId}/tasks/${taskId}/claim`,
+  ]);
 });
 
 test('agent add forwards an explicit orchestrator role and defaults to worker', async (t) => {
