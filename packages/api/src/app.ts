@@ -8,7 +8,7 @@ import type { WorkspaceDb } from './access.js';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
-import { VERSION, healthSchema, createClanSchema, createInvitationSchema, joinInvitationSchema, ApiError, registerAgentSchema, type Actor } from '@clqn/shared';
+import { VERSION, healthSchema, createClanSchema, createInvitationSchema, joinInvitationSchema, ApiError, registerAgentSchema, setAliasSchema, type Actor } from '@clqn/shared';
 import { requirePersonal } from './access.js';
 import { hashToken, type WorkspaceStore } from './store.js';
 
@@ -75,8 +75,13 @@ export function createApp(store?: WorkspaceStore, db?: WorkspaceDb, options: { g
     const id = z.uuid().safeParse(c.req.param('clanId'));
     if (!id.success) return c.json({ error: { code: 'NOT_FOUND', message: 'Clan not found' } }, 404);
     const parsed = registerAgentSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) return c.json({ error: { code: 'INVALID_REQUEST', message: 'Provide an agent name between 1 and 100 characters' } }, 400);
-    return c.json(await store!.registerAgent(c.get('user'), id.data, parsed.data.name, parsed.data.role), 201);
+    if (!parsed.success) return c.json({ error: { code: 'INVALID_REQUEST', message: 'Provide a valid agent name, role and optional alias' } }, 400);
+    return c.json(await store!.registerAgent(c.get('user'), id.data, parsed.data.name, parsed.data.role, parsed.data.alias), 201);
+  });
+  app.post('/v1/clans/:clanId/agents/:agentId/alias', invitationBodyLimit, async (c) => {
+    const parsed = setAliasSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) throw new ApiError(400, 'INVALID_REQUEST', 'Provide a valid agent alias');
+    return c.json(await store!.setAgentAlias(c.get('user'), c.req.param('clanId'), c.req.param('agentId'), parsed.data.alias));
   });
   app.get('/v1/clans/:clanId/agents', async (c) => {
     const id = z.uuid().safeParse(c.req.param('clanId'));

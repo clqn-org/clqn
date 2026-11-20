@@ -61,10 +61,20 @@ test('PostgreSQL: task claims serialize and only the owning human or agent compl
   const create = await post(app, path, 'alice', { description: ' Shared work ' });
   assert.equal(create.status, 201);
   const task = taskSchema.parse(await create.json());
+  assert.equal(task.alias, null);
   assert.equal(task.description, 'Shared work');
   assert.equal(task.status, 'open');
   assert.equal(task.ownerId, null);
-  const claims = await Promise.all(['alice', 'bob'].map((actor) => post(app, `${path}/${task.id}/claim`, actor)));
+  const rename = (ref, actor, alias) => post(app, `${path}/${ref}/alias`, actor, { alias });
+  assert.equal((await rename(task.id, 'bob', 'shared-work')).status, 403);
+  assert.equal((await rename(task.id, 'alice', task.id)).status, 400);
+  const named = await rename(task.id, 'alice', 'shared-work');
+  assert.equal(named.status, 200);
+  assert.equal((await named.json()).id, task.id);
+  const claims = await Promise.all([
+    post(app, `${path}/shared-work/claim`, 'alice'),
+    post(app, `${path}/${task.id}/claim`, 'bob'),
+  ]);
   assert.deepEqual(claims.map((r) => r.status).sort(), [200, 409]);
   const winner = claims[0].status === 200 ? 'alice' : 'bob';
   const loser = winner === 'alice' ? 'bob' : 'alice';
@@ -73,13 +83,19 @@ test('PostgreSQL: task claims serialize and only the owning human or agent compl
   assert.equal(completed.status, 200);
   assert.equal((await completed.json()).status, 'completed');
   assert.equal((await post(app, `${path}/${task.id}/release`, winner)).status, 409);
-  const agentTask = await (await post(app, path, 'one', { description: 'Agent work' })).json();
+  const agentTask = await (await post(app, path, 'one', { description: 'Agent work', alias: 'draft' })).json();
+  assert.equal(agentTask.alias, 'draft');
   assert.equal((await post(app, `${path}/${agentTask.id}/claim`, 'one')).status, 200);
   for (const actor of ['bob', 'two']) {
+    assert.equal((await rename('draft', actor, 'revised')).status, 403);
     assert.equal((await post(app, `${path}/${agentTask.id}/complete`, actor)).status, 409);
     assert.equal((await post(app, `${path}/${agentTask.id}/release`, actor)).status, 409);
   }
-  assert.equal((await post(app, `${path}/${agentTask.id}/release`, 'alice')).status, 200);
+  assert.equal((await rename('draft', 'one', 'shared-work')).status, 409);
+  assert.equal((await rename('draft', 'one', 'revised')).status, 200);
+  assert.equal((await rename(agentTask.id, 'one', 'revised')).status, 200);
+  assert.equal((await app.request(`${path}/draft`)).status, 404);
+  assert.equal((await post(app, `${path}/revised/release`, 'alice')).status, 200);
   assert.equal((await post(app, `${path}/${agentTask.id}/claim`, 'two')).status, 200);
   assert.equal((await post(app, `${path}/${agentTask.id}/complete`, 'two')).status, 200);
   const [audit] = await sql`select count(*)::integer as n from events where clan_id = ${clan.id} and type = 'task.claimed'`;
@@ -87,11 +103,26 @@ test('PostgreSQL: task claims serialize and only the owning human or agent compl
   const [agentAudit] = await sql`select agent_id, resource_id from events where clan_id = ${clan.id} and type = 'task.completed' and agent_id is not null`;
   assert.equal(agentAudit.agent_id, agentTwo.id);
   assert.equal(agentAudit.resource_id, agentTask.id);
+  const aliasEvents = await sql`select agent_id, resource_id from events where clan_id = ${clan.id} and type = 'task.alias_changed' order by sequence`;
+  assert.deepEqual([...aliasEvents], [
+    { agent_id: null, resource_id: task.id },
+    { agent_id: agentOne.id, resource_id: agentTask.id },
+  ]);
   assert.equal((await post(app, `/v1/clans/${other.id}/tasks/${task.id}/claim`, 'bob')).status, 404);
+  assert.equal((await post(app, `/v1/clans/${other.id}/tasks/shared-work/claim`, 'bob')).status, 404);
+  const local = await post(app, `/v1/clans/${other.id}/tasks`, 'bob', { description: 'Other clan', alias: 'shared-work' });
+  assert.equal(local.status, 201);
+  const otherTask = await local.json();
+  const otherView = await app.request(`/v1/clans/${other.id}/tasks/shared-work`, { headers: { 'x-test-actor': 'bob' } });
+  assert.equal((await otherView.json()).id, otherTask.id);
+  assert.notEqual(otherTask.id, task.id);
   assert.equal((await post(app, `/v1/clans/${other.id}/tasks`, 'one', { description: 'Escape' })).status, 404);
   assert.equal((await post(app, `${path}/not-a-uuid/claim`, 'alice')).status, 404);
   assert.equal((await post(app, path, 'alice', { description: ' ', ownerId: bob.user.id })).status, 400);
   assert.equal((await post(app, `${path}/${agentTask.id}/claim`, 'one', { ownerId: bob.user.id })).status, 400);
   const listing = await app.request(path, { headers: { 'x-test-actor': 'bob' } });
-  assert.equal((await listing.json()).tasks.length, 2);
+  assert.deepEqual((await listing.json()).tasks.map((entry) => entry.alias).sort(), ['revised', 'shared-work']);
+  const racing = await Promise.all(['alice', 'bob'].map((actor) => post(app, path, actor, { description: 'New', alias: 'one-name' })));
+  assert.deepEqual(racing.map((response) => response.status).sort(), [201, 409]);
+  assert.equal((await racing.find((response) => response.status === 409).json()).error.code, 'ALIAS_CONFLICT');
 });
