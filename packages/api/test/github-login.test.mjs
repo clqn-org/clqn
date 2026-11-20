@@ -48,12 +48,17 @@ test('PostgreSQL: GitHub single use, concurrent completion, identity conflicts, 
   let githubId = Math.floor(Math.random() * 1e12) + 1;
   let polls = 0;
   let mode = 'complete';
+  let gate;
   const app = createGithubLoginRoutes(connection.db, 'client', async (path, body, token) => {
     if (path === '/login/device/code') {
       assert.equal(body.scope, 'user:email');
       return { device_code: 'private-device-code', user_code: 'ABCD-EFGH', verification_uri: 'https://github.com/login/device', expires_in: 900, interval: 5 };
     }
-    if (path === '/login/oauth/access_token') { polls++; return mode === 'complete' ? { access_token: 'private-github-token', token_type: 'bearer' } : { error: mode }; }
+    if (path === '/login/oauth/access_token') {
+      polls++;
+      await gate;
+      return mode === 'complete' ? { access_token: 'private-github-token', token_type: 'bearer' } : { error: mode };
+    }
     assert.equal(token, 'private-github-token');
     return path === '/user' ? { id: githubId } : [{ email, primary: true, verified: true }];
   });
@@ -65,9 +70,17 @@ test('PostgreSQL: GitHub single use, concurrent completion, identity conflicts, 
   assert.equal((await post('/poll', { handle: first.handle })).status, 'pending');
   assert.equal(polls, 0);
   await ready(first.handle);
-  const results = await Promise.all([post('/poll', { handle: first.handle }), post('/poll', { handle: first.handle })]);
-  assert.deepEqual(results.map(x => x.status).sort(), ['complete', 'expired']);
-  const complete = results.find(x => x.status === 'complete');
+  // A slow GitHub response must not hold a lock: a concurrent poll returns immediately instead of waiting.
+  let open;
+  gate = new Promise((resolve) => { open = resolve; });
+  const inFlight = post('/poll', { handle: first.handle });
+  while (polls === 0) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal((await post('/poll', { handle: first.handle })).status, 'pending');
+  open(); gate = undefined;
+  const complete = await inFlight;
+  assert.equal(complete.status, 'complete');
+  assert.equal(polls, 1);
+  assert.equal((await post('/poll', { handle: first.handle })).status, 'expired');
   ids.push(complete.user.id);
   assert.equal((await connection.store.authenticate((await import('../dist/store.js')).hashToken(complete.token))).id, complete.user.id);
   const [credential] = await sql`select id from credentials where user_id = ${complete.user.id}`;

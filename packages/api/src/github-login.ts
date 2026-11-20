@@ -66,39 +66,47 @@ export function createGithubLoginRoutes(db?: WorkspaceDb, clientId?: string, req
   app.post('/poll', async (c) => {
     const input = z.object({ handle: z.string().regex(/^[A-Za-z0-9_-]{43}$/) }).strict().safeParse(await c.req.json().catch(() => null));
     if (!input.success) return c.json({ error: { code: 'INVALID_REQUEST', message: 'Invalid login handle' } }, 400);
+    const key = hashToken(input.data.handle);
+    const terminal = async (status: string) => { await db!.delete(githubLogins).where(eq(githubLogins.handleHash, key)); return c.json({ status }); };
+    // Reserve the poll slot in a short transaction. GitHub calls run outside it so slow responses cannot hold pool connections.
+    const attempt = await db!.transaction(async (tx) => {
+      const [row] = await tx.select().from(githubLogins).where(eq(githubLogins.handleHash, key)).for('update');
+      if (!row || row.expiresAt.getTime() <= Date.now()) return undefined;
+      if (row.nextPollAt.getTime() > Date.now()) return { ...row, due: false };
+      await tx.update(githubLogins).set({ nextPollAt: new Date(Date.now() + row.interval * 1000) }).where(eq(githubLogins.handleHash, key));
+      return { ...row, due: true };
+    });
+    if (!attempt) return terminal('expired');
+    if (!attempt.due) return c.json({ status: 'pending', interval: attempt.interval });
+    const response = z.object({ error: z.string().optional(), access_token: z.string().min(1).optional(), token_type: z.string().optional() })
+      .parse(await request('/login/oauth/access_token', { client_id: clientId!, device_code: attempt.deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' }));
+    if (response.error === 'authorization_pending' || response.error === 'slow_down') {
+      const interval = Math.min(300, attempt.interval + (response.error === 'slow_down' ? 5 : 0));
+      await db!.update(githubLogins).set({ interval, nextPollAt: new Date(Date.now() + interval * 1000) }).where(eq(githubLogins.handleHash, key));
+      return c.json({ status: 'pending', interval });
+    }
+    if (response.error || !response.access_token || response.token_type !== 'bearer') return terminal('denied');
+    let identity: ReturnType<typeof verifiedIdentity>;
+    try {
+      identity = verifiedIdentity(await request('/user', undefined, response.access_token), await request('/user/emails', undefined, response.access_token));
+    } catch { return terminal('denied'); }
     const result = await db!.transaction(async (tx) => {
-      const key = hashToken(input.data.handle);
-      const [attempt] = await tx.select().from(githubLogins).where(eq(githubLogins.handleHash, key)).for('update');
-      const terminal = async (status: string) => { await tx.delete(githubLogins).where(eq(githubLogins.handleHash, key)); return { status }; };
-      if (!attempt || attempt.expiresAt.getTime() <= Date.now()) return terminal('expired');
-      if (attempt.nextPollAt.getTime() > Date.now()) return { status: 'pending', interval: attempt.interval };
-      const response = z.object({ error: z.string().optional(), access_token: z.string().min(1).optional(), token_type: z.string().optional() })
-        .parse(await request('/login/oauth/access_token', { client_id: clientId!, device_code: attempt.deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' }));
-      if (response.error === 'authorization_pending' || response.error === 'slow_down') {
-        const interval = Math.min(300, attempt.interval + (response.error === 'slow_down' ? 5 : 0));
-        await tx.update(githubLogins).set({ interval, nextPollAt: new Date(Date.now() + interval * 1000) }).where(eq(githubLogins.handleHash, key));
-        return { status: 'pending', interval };
-      }
-      if (response.error || !response.access_token || response.token_type !== 'bearer') return terminal('denied');
-      let identity;
-      try {
-        identity = verifiedIdentity(await request('/user', undefined, response.access_token), await request('/user/emails', undefined, response.access_token));
-      } catch { return terminal('denied'); }
-      if (attempt.expiresAt.getTime() <= Date.now()) return terminal('expired');
+      // Consume the attempt exactly once; the credential and the deletion commit together.
+      const [current] = await tx.delete(githubLogins).where(eq(githubLogins.handleHash, key)).returning();
+      if (!current || current.expiresAt.getTime() <= Date.now()) return { status: 'expired' };
       // Serialize logins for the same identity, even across API instances.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${identity.githubId}, 1))`);
       let [user] = await tx.select().from(users).where(eq(users.githubId, identity.githubId));
       if (!user) {
         // Do not adopt operator accounts or other GitHub identities by email.
         [user] = await tx.insert(users).values({ id: randomUUID(), ...identity }).onConflictDoNothing().returning();
-        if (!user) return terminal('account_conflict');
+        if (!user) return { status: 'account_conflict' };
       } else {
         // Email changes require deliberate operator reconciliation; stale addresses cannot accept invitations.
-        if (user.email !== identity.email) return terminal('account_conflict');
+        if (user.email !== identity.email) return { status: 'account_conflict' };
       }
       const token = `clqn_${randomBytes(32).toString('base64url')}`;
       await tx.insert(credentials).values({ userId: user.id, tokenHash: hashToken(token) });
-      await terminal('complete');
       return { status: 'complete', token, user: { id: user.id, email: user.email } };
     });
     return c.json(result);
