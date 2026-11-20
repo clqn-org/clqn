@@ -26,8 +26,8 @@ Humans + existing agent runtimes
 - **update + clarify: docs + website documentation + contributing.md + agents.md. make sure nothing is overengineered and repo structure is clean. add back docs/assets/demo.gif to README?**
 - **persistent command center, liquid glass widget/vscode extension?** 
 
-- **POST ON X, LINKEDIN, BOT YT VIEWS, BOT STARS/GH ACTIVITY, BOT NPM DOWNLOADS. Apply to official Homebrew**
-- **purge gh history of PLAN.md and bot plan**
+- **POST ON X, LINKEDIN. Apply to official Homebrew**
+- **purge gh history of PLAN.md**
 
 
 
