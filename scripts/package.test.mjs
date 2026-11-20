@@ -25,15 +25,18 @@ test('release installs without workspace dependencies and serves CLI and MCP', {
   const formula = await readFile(new URL('dist/clqn.rb', root), 'utf8');
   assert.ok(formula.includes(`releases/download/v${manifest.version}/clqn-cli-${manifest.version}.tgz`));
   assert.ok(formula.includes(createHash('sha256').update(await readFile(archive)).digest('hex')));
-  await exec('npm', ['install', '--global', '--prefix', directory, '--cache', join(directory, 'cache'),
+  const npmCli = process.env.npm_execpath;
+  await exec(npmCli ? process.execPath : 'npm', [...(npmCli ? [npmCli] : []), 'install', '--global', '--prefix', directory, '--cache', join(directory, 'cache'),
     '--offline', '--ignore-scripts', '--no-audit', '--no-fund', archive], { cwd: directory });
-  const cli = join(directory, 'bin', 'clqn');
+  // Windows places the npm command shim directly in the installation prefix.
+  const cli = process.platform === 'win32' ? 'cmd.exe' : join(directory, 'bin', 'clqn');
+  const launcher = process.platform === 'win32' ? ['/d', '/c', '.\\clqn.cmd'] : [];
   const env = { ...process.env, CLQN_CONFIG_DIR: join(directory, 'config') };
   delete env.CLQN_TOKEN;
   delete env.CLQN_CLAN_ID;
   const options = { cwd: directory, env };
-  assert.equal((await exec(cli, ['--version'], options)).stdout.trim(), manifest.version);
-  assert.match((await exec(cli, ['--help'], options)).stdout, /Your agents\. My agents\. One workspace\./);
+  assert.equal((await exec(cli, [...launcher, '--version'], options)).stdout.trim(), manifest.version);
+  assert.match((await exec(cli, [...launcher, '--help'], options)).stdout, /Your agents\. My agents\. One workspace\./);
 
   const health = { status: 'ok', service: 'clqn-api', version: manifest.version };
   const server = createServer((request, response) => {
@@ -45,9 +48,9 @@ test('release installs without workspace dependencies and serves CLI and MCP', {
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const apiUrl = `http://127.0.0.1:${server.address().port}`;
-  assert.deepEqual(JSON.parse((await exec(cli, ['--api-url', apiUrl, '--json', 'health'], options)).stdout), health);
+  assert.deepEqual(JSON.parse((await exec(cli, [...launcher, '--api-url', apiUrl, '--json', 'health'], options)).stdout), health);
 
-  const child = spawn(cli, ['--api-url', apiUrl, 'mcp', '--path', directory], {
+  const child = spawn(cli, [...launcher, '--api-url', apiUrl, 'mcp', '--path', '.'], {
     ...options, stdio: ['pipe', 'pipe', 'pipe'],
   });
   t.after(() => child.kill());
