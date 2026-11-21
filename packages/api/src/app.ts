@@ -8,6 +8,7 @@ import { createClanRoutes } from './clans.js';
 import { createContextRoutes } from './context.js';
 import { createGithubLoginRoutes } from './github-login.js';
 import { createPolicyRoutes } from './policy.js';
+import { createRateLimiter } from './rate-limit.js';
 import { createGithubWebhookRoutes, createRepositoryRoutes } from './repositories.js';
 import { hashToken, type WorkspaceStore } from './store.js';
 import { createTaskRoutes } from './tasks.js';
@@ -15,12 +16,17 @@ import { createTaskRoutes } from './tasks.js';
 export function createApp(
   store?: WorkspaceStore,
   db?: WorkspaceDb,
-  options: { githubWebhookSecret?: string | undefined; githubClientId?: string | undefined } = {},
+  options: {
+    githubWebhookSecret?: string | undefined;
+    githubClientId?: string | undefined;
+    requestsPerMinute?: number;
+  } = {},
 ) {
   if (options.githubWebhookSecret !== undefined && options.githubWebhookSecret.trim().length < 32) {
     throw new Error('GITHUB_WEBHOOK_SECRET must contain at least 32 non-padding characters');
   }
   const app = new Hono<{ Variables: { user: Actor } }>();
+  const rateLimit = createRateLimiter(options.requestsPerMinute ?? 300);
   // Liveness only: this endpoint intentionally does not connect to the database.
   app.get('/health', (c) => c.json(healthSchema.parse({ status: 'ok', service: 'clqn-api', version: VERSION })));
   app.route('/hooks/github', createGithubWebhookRoutes(db, options.githubWebhookSecret));
@@ -32,7 +38,14 @@ export function createApp(
     if (!token)
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'A valid bearer credential is required' } }, 401);
     if (!store) return c.json({ error: { code: 'UNAVAILABLE', message: 'Database is not configured' } }, 503);
-    const user = await store.authenticate(hashToken(token));
+    const tokenHash = hashToken(token);
+    // Limit before authenticating so a runaway client cannot exhaust the database pool.
+    const retryAfter = rateLimit(tokenHash);
+    if (retryAfter) {
+      c.header('Retry-After', String(retryAfter));
+      return c.json({ error: { code: 'RATE_LIMITED', message: 'Too many requests; try again later' } }, 429);
+    }
+    const user = await store.authenticate(tokenHash);
     if (!user)
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'A valid bearer credential is required' } }, 401);
     if (user.agentId) {

@@ -76,6 +76,8 @@ Public transport lets clients send clqn bearer tokens; the API still authenticat
 
 Each instance opens up to `DATABASE_POOL_SIZE` database connections (default 10), so the service can use max instances × pool size connections: 40 with the flags above. Keep that below your Cloud SQL instance's `max_connections`, with room for the migration job and admin tools. Requests wait for a free connection when an instance's pool is busy. To serve more traffic, raise the database tier first, then `--max-instances` or `DATABASE_POOL_SIZE` (set it with `--update-env-vars`).
 
+Each instance allows 300 `/v1` requests per minute per credential and answers `429` with `Retry-After` beyond that, before any database work. Instances count separately, so the service-wide limit is up to max instances × 300. Unauthenticated floods need limits at the edge, such as Cloud Armor in front of a load balancer.
+
 Set clients' `CLQN_API_URL` to the returned service URL. Keep `DATABASE_URL` server-side.
 
 ## GitHub webhook secret
