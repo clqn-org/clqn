@@ -1,20 +1,10 @@
-import {
-  type Actor,
-  ApiError,
-  createClanSchema,
-  createInvitationSchema,
-  healthSchema,
-  joinInvitationSchema,
-  registerAgentSchema,
-  setAliasSchema,
-  VERSION,
-} from '@clqn/shared';
+import { type Actor, ApiError, healthSchema, VERSION } from '@clqn/shared';
 import { Hono } from 'hono';
-import { bodyLimit } from 'hono/body-limit';
-import { z } from 'zod';
 import type { WorkspaceDb } from './access.js';
 import { requirePersonal } from './access.js';
 import { createActivityRoutes } from './activity.js';
+import { createAgentRoutes } from './agents.js';
+import { createClanRoutes } from './clans.js';
 import { createContextRoutes } from './context.js';
 import { createGithubLoginRoutes } from './github-login.js';
 import { createPolicyRoutes } from './policy.js';
@@ -61,93 +51,10 @@ export function createApp(
     await next();
   });
   app.get('/v1/me', (c) => c.json(c.get('user')));
-  app.get('/v1/clans', async (c) => {
-    const actor = c.get('user');
-    const clans = await store!.listClans(actor.id);
-    return c.json({ clans: actor.agentId ? clans.filter((clan) => clan.id === actor.clanId) : clans });
-  });
-  app.post(
-    '/v1/clans',
-    bodyLimit({
-      maxSize: 4096,
-      onError: (c) => c.json({ error: { code: 'INVALID_REQUEST', message: 'Request body is too large' } }, 413),
-    }),
-    async (c) => {
-      const raw = await c.req.text();
-      let body: unknown;
-      try {
-        body = JSON.parse(raw);
-      } catch {
-        return c.json({ error: { code: 'INVALID_REQUEST', message: 'Expected a JSON body' } }, 400);
-      }
-      const parsed = createClanSchema.safeParse(body);
-      if (!parsed.success)
-        return c.json(
-          { error: { code: 'INVALID_REQUEST', message: 'Provide a clan name between 1 and 100 characters' } },
-          400,
-        );
-      return c.json(await store!.createClan(c.get('user').id, parsed.data.name), 201);
-    },
-  );
-  const invitationBodyLimit = bodyLimit({
-    maxSize: 4096,
-    onError: (c) => c.json({ error: { code: 'INVALID_REQUEST', message: 'Request body is too large' } }, 413),
-  });
-  app.post('/v1/clans/:clanId/invitations', invitationBodyLimit, async (c) => {
-    const id = z.uuid().safeParse(c.req.param('clanId'));
-    if (!id.success) return c.json({ error: { code: 'NOT_FOUND', message: 'Clan not found' } }, 404);
-    const parsed = createInvitationSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success)
-      return c.json({ error: { code: 'INVALID_REQUEST', message: 'Provide a valid email address' } }, 400);
-    const invitation = await store!.createInvitation(c.get('user').id, id.data, parsed.data.email);
-    if (!invitation) return c.json({ error: { code: 'NOT_FOUND', message: 'Clan not found' } }, 404);
-    return c.json(invitation, 201);
-  });
-  app.post('/v1/invitations/join', invitationBodyLimit, async (c) => {
-    const parsed = joinInvitationSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success)
-      return c.json({ error: { code: 'INVALID_REQUEST', message: 'Provide a valid invitation code' } }, 400);
-    const clan = await store!.joinInvitation(c.get('user'), parsed.data.code);
-    if (!clan) return c.json({ error: { code: 'NOT_FOUND', message: 'Invitation not found' } }, 404);
-    return c.json(clan);
-  });
-  app.post('/v1/clans/:clanId/agents', invitationBodyLimit, async (c) => {
-    const id = z.uuid().safeParse(c.req.param('clanId'));
-    if (!id.success) return c.json({ error: { code: 'NOT_FOUND', message: 'Clan not found' } }, 404);
-    const parsed = registerAgentSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success)
-      return c.json(
-        { error: { code: 'INVALID_REQUEST', message: 'Provide a valid agent name, role and optional alias' } },
-        400,
-      );
-    return c.json(
-      await store!.registerAgent(c.get('user'), id.data, parsed.data.name, parsed.data.role, parsed.data.alias),
-      201,
-    );
-  });
-  app.post('/v1/clans/:clanId/agents/:agentId/alias', invitationBodyLimit, async (c) => {
-    const parsed = setAliasSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) throw new ApiError(400, 'INVALID_REQUEST', 'Provide a valid agent alias');
-    return c.json(
-      await store!.setAgentAlias(c.get('user'), c.req.param('clanId'), c.req.param('agentId'), parsed.data.alias),
-    );
-  });
-  app.get('/v1/clans/:clanId/agents', async (c) => {
-    const id = z.uuid().safeParse(c.req.param('clanId'));
-    if (!id.success) return c.json({ error: { code: 'NOT_FOUND', message: 'Clan not found' } }, 404);
-    return c.json({ agents: await store!.listAgents(c.get('user'), id.data) });
-  });
-  app.get('/v1/agent', async (c) => {
-    const agent = await store!.agentStatus(c.get('user'));
-    if (!agent) return c.json({ error: { code: 'NOT_FOUND', message: 'Agent registration not found' } }, 404);
-    return c.json(agent);
-  });
-  app.get('/v1/clans/:clanId/members', async (c) => {
-    const id = z.uuid().safeParse(c.req.param('clanId'));
-    const members = id.success ? await store!.members(c.get('user').id, id.data) : undefined;
-    if (!members) return c.json({ error: { code: 'NOT_FOUND', message: 'Clan not found' } }, 404);
-    return c.json({ members });
-  });
+  if (store) {
+    app.route('/v1', createClanRoutes(store));
+    app.route('/v1', createAgentRoutes(store));
+  }
   if (db) {
     app.route('/v1/clans/:clanId/repositories', createRepositoryRoutes(db, options.githubWebhookSecret));
     app.route('/v1/clans/:clanId/policy', createPolicyRoutes(db));
