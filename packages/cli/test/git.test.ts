@@ -3,13 +3,16 @@ import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { devNull, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import type { ClqnClient } from '@clqn/shared';
 import {
   inspectPullRequest,
+  type MainSyncResult,
   mergePullRequest,
   openTaskWorktree,
   prepareWorktree,
@@ -17,12 +20,15 @@ import {
   repositoryForNewTask,
   syncMain,
   taskWorktreeLocation,
-} from '../dist/git.js';
-import { runMcpSync } from '../dist/mcp-sync.js';
+} from '../src/git.js';
+import { runMcpSync } from '../src/mcp-sync.js';
 
 const execute = promisify(execFile);
-const git = async (cwd, args) => (await execute('git', args, { cwd, encoding: 'utf8' })).stdout.trim();
-async function fixture(t) {
+const git = async (cwd: string, args: string[]) =>
+  (await execute('git', args, { cwd, encoding: 'utf8' })).stdout.trim();
+type Fixture = Awaited<ReturnType<typeof fixture>>;
+
+async function fixture(t: TestContext) {
   const actualGit = (await execute('which', ['git'], { encoding: 'utf8' })).stdout.trim();
   const root = await realpath(await mkdtemp(join(tmpdir(), 'clqn-git-')));
   const saved = { ...process.env };
@@ -94,7 +100,7 @@ process.exit(result.status ?? 1);
   delete process.env.CLQN_TEST_MERGE_PENDING;
   const repository = { slug: 'test/project', baseBranch: 'main', baseSha, branch: 'clqn/task-123' };
   const worktreePath = join(root, 'task');
-  const pr = (headSha, overrides = {}) => ({
+  const pr = (headSha: string, overrides: Record<string, unknown> = {}) => ({
     number: 7,
     url: 'https://github.com/test/project/pull/7',
     state: 'OPEN',
@@ -108,8 +114,13 @@ process.exit(result.status ?? 1);
     statusCheckRollup: [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' }],
     ...overrides,
   });
-  const savePr = (value) => writeFile(prPath, JSON.stringify(value));
-  const commands = async () => (await readFile(logPath, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
+  const savePr = (value: unknown) => writeFile(prPath, JSON.stringify(value));
+  const commands = async () =>
+    (await readFile(logPath, 'utf8'))
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line): { file: string; args: string[] } => JSON.parse(line));
   return { root, repoPath, worktreePath, repository, baseSha, savePr, pr, commands, remote };
 }
 
@@ -155,7 +166,7 @@ test('preparing refuses the wrong origin, unsafe refs, existing paths and an unr
   );
 });
 
-async function taskCommit(f) {
+async function taskCommit(f: Fixture) {
   await prepareWorktree(f);
   await writeFile(join(f.worktreePath, 'task.txt'), 'task changes');
   await git(f.worktreePath, ['add', '.']);
@@ -271,7 +282,7 @@ test('merge matches the reviewed head, respects pending queues, and reports only
   );
 });
 
-async function advanceMain(f) {
+async function advanceMain(f: Fixture) {
   const writer = join(f.root, 'writer');
   await git(f.root, ['clone', '--branch', 'main', f.remote, writer]);
   await git(writer, ['config', 'user.email', 'test@example.com']);
@@ -395,17 +406,17 @@ test('MCP sync follows notifications from a dirty feature worktree without movin
   await writeFile(join(f.worktreePath, 'draft.txt'), 'unfinished work\n');
   const controller = new AbortController();
   t.after(() => controller.abort());
-  const results = [];
-  const cursors = [];
-  const errors = [];
-  let remoteSha;
+  const results: MainSyncResult[] = [];
+  const cursors: number[] = [];
+  const errors: unknown[] = [];
+  let remoteSha: string | undefined;
   const before = (await f.commands()).filter(({ args }) => args.includes('fetch')).length;
   const api = {
     repositories: async () => {
       assert.equal((await f.commands()).filter(({ args }) => args.includes('fetch')).length, before);
       return { repositories: [{ slug: 'test/project', lastEventSequence: 7 }] };
     },
-    events: async (clanId, cursor) => {
+    events: async (clanId: string, cursor: number) => {
       assert.equal(clanId, 'test-clan');
       cursors.push(cursor);
       if (cursor === 7) {
@@ -419,13 +430,13 @@ test('MCP sync follows notifications from a dirty feature worktree without movin
       return { events: [], nextCursor: cursor };
     },
   };
-  await runMcpSync(api, 'test-clan', {
+  await runMcpSync(api as unknown as ClqnClient, 'test-clan', {
     repoPath: f.worktreePath,
     signal: controller.signal,
     pollIntervalMs: 10,
     fallbackIntervalMs: 60000,
-    onResult: (value) => results.push(value),
-    onError: (error) => errors.push(error),
+    onResult: (value: MainSyncResult) => results.push(value),
+    onError: (error: unknown) => errors.push(error),
   });
   assert.deepEqual(errors, []);
   assert.deepEqual(cursors, [7, 8]);
@@ -442,12 +453,13 @@ test('MCP sync follows notifications from a dirty feature worktree without movin
 test('automatic sync reports a non-project directory without fetching or polling', async (t) => {
   const f = await fixture(t);
   const controller = new AbortController();
-  const errors = [];
-  await runMcpSync({ repositories: () => assert.fail('No clan request without a repository') }, 'test-clan', {
+  const errors: unknown[] = [];
+  const api = { repositories: () => assert.fail('No clan request without a repository') };
+  await runMcpSync(api as unknown as ClqnClient, 'test-clan', {
     repoPath: f.root,
     signal: controller.signal,
     onResult: () => assert.fail('No sync result outside a repository'),
-    onError: (error) => errors.push(error),
+    onError: (error: unknown) => errors.push(error),
   });
   assert.equal(errors.length, 1);
   assert.equal((await f.commands()).filter(({ args }) => args.includes('fetch')).length, 0);
@@ -461,8 +473,8 @@ test('MCP automatically catches up main and stops syncing on stdin close or SIGT
   const server = createServer((request, response) => {
     response.setHeader('content-type', 'application/json');
     if (request.url === '/v1/me') response.end(JSON.stringify({ id: clanId, email: 'test@example.com', clanId }));
-    else if (request.url.endsWith('/repositories')) response.end(JSON.stringify({ repositories: [] }));
-    else if (request.url.includes('/events')) response.end(JSON.stringify({ events: [], nextCursor: 0 }));
+    else if (request.url?.endsWith('/repositories')) response.end(JSON.stringify({ repositories: [] }));
+    else if (request.url?.includes('/events')) response.end(JSON.stringify({ events: [], nextCursor: 0 }));
     else if (request.url === '/health')
       response.end(JSON.stringify({ status: 'ok', service: 'clqn-api', version: '0.1.0' }));
     else {
@@ -480,7 +492,7 @@ test('MCP automatically catches up main and stops syncing on stdin close or SIGT
       [
         cli,
         '--api-url',
-        `http://127.0.0.1:${server.address().port}`,
+        `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
         'mcp',
         ...(mode === 'stdin' ? ['--path', f.worktreePath] : []),
       ],

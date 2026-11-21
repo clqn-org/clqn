@@ -3,14 +3,19 @@ import { execFile } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import type { Actor, Task, TaskRepository } from '@clqn/shared';
 
 const run = promisify(execFile);
 const cli = fileURLToPath(new URL('../dist/index.js', import.meta.url));
+
+// execFile rejects with the exit code and captured output.
+type ExecError = Error & { code: number; stdout: string; stderr: string };
 const clanId = 'bf689cc3-c719-4ce6-a681-d56b43526fed';
 const userId = '59b55e8d-0eb5-42fb-aead-f9e665406277';
 const otherUserId = '579019b4-aefc-46df-a268-b67c591d5cd0';
@@ -18,7 +23,7 @@ const taskId = '7630f779-401b-4fe3-b7ba-b624dfc0e92d';
 const agentId = 'e0d647e2-03ef-484c-94af-872964e2bfec';
 const otherAgentId = '07f58917-2325-43db-9dd4-9d5a38ff1d40';
 const baseSha = 'a'.repeat(40);
-const repository = {
+const repository: TaskRepository = {
   slug: 'example/project',
   baseBranch: 'main',
   baseSha,
@@ -29,7 +34,7 @@ const repository = {
   mergeCommitSha: null,
   state: 'pending',
 };
-const initialTask = {
+const initialTask: Task = {
   id: taskId,
   clanId,
   description: 'Implement endpoint',
@@ -43,13 +48,22 @@ const initialTask = {
 };
 
 async function fixture(
-  t,
-  { actor = { id: userId, email: 'member@example.com' }, task = initialTask, role = 'member' } = {},
+  t: TestContext,
+  {
+    actor = { id: userId, email: 'member@example.com' },
+    task = initialTask,
+    role = 'member',
+  }: { actor?: Actor; task?: Task; role?: string } = {},
 ) {
   const directory = await mkdtemp(join(tmpdir(), 'clqn-repository-cli-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const token = `clqn_${'r'.repeat(43)}`;
-  const requests = [];
+  const requests: {
+    method: string | undefined;
+    path: string | undefined;
+    authorization: string | undefined;
+    body: unknown;
+  }[] = [];
   let value = { ...task };
   const server = createServer(async (request, response) => {
     let raw = '';
@@ -129,7 +143,7 @@ async function fixture(
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
-  const apiUrl = `http://127.0.0.1:${server.address().port}`;
+  const apiUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const bin = join(directory, 'bin');
   await mkdir(bin);
   const executions = join(directory, 'executions');
@@ -138,7 +152,7 @@ async function fixture(
     await writeFile(join(bin, executable), '#!/bin/sh\necho invoked >> "$CLQN_TEST_EXECUTIONS"\nexit 91\n', {
       mode: 0o700,
     });
-  const call = (args) =>
+  const call = (args: string[]) =>
     run(process.execPath, [cli, '--api-url', apiUrl, ...args], {
       env: {
         ...process.env,
@@ -187,8 +201,8 @@ test('repository task creation and assignment send structured API requests', asy
   });
   assert.deepEqual(created.repository, repository);
   const assigned = JSON.parse((await f.call(['task', 'assign', taskId, '--agent', agentId, '--json'])).stdout);
-  assert.deepEqual(f.requests[1].body, { agentId });
-  assert.equal(f.requests[1].path, `/v1/clans/${clanId}/tasks/${taskId}/assign`);
+  assert.deepEqual(f.requests[1]?.body, { agentId });
+  assert.equal(f.requests[1]?.path, `/v1/clans/${clanId}/tasks/${taskId}/assign`);
   assert.equal(assigned.assignedAgentId, agentId);
   const shown = JSON.parse((await f.call(['task', 'show', taskId, '--json'])).stdout);
   assert.deepEqual(shown, assigned);
@@ -206,7 +220,8 @@ test('partial or unsafe repository arguments fail before API or Git access', asy
     ['--repo', 'example/project', '--base-sha', baseSha, '--branch', 'main'],
     ['--repo', 'example/project', '--base-sha', baseSha, '--branch', 'task/../other'],
   ])
-    await assert.rejects(f.call(['task', 'add', 'Invalid task', ...options, '--json']), (error) => {
+    await assert.rejects(f.call(['task', 'add', 'Invalid task', ...options, '--json']), (thrown) => {
+      const error = thrown as ExecError;
       assert.equal(error.code, 1);
       assert.equal(error.stdout, '');
       assert.equal(JSON.parse(error.stderr).error.code, 'COMMAND_FAILED');
@@ -229,10 +244,10 @@ test('starting work by alias claims the UUID returned by the lookup', async (t) 
 test('agent add forwards an explicit orchestrator role and defaults to worker', async (t) => {
   const f = await fixture(t);
   const orchestrator = JSON.parse((await f.call(['agent', 'add', 'Coordinator', '--orchestrator', '--json'])).stdout);
-  assert.deepEqual(f.requests[0].body, { name: 'Coordinator', role: 'orchestrator' });
+  assert.deepEqual(f.requests[0]?.body, { name: 'Coordinator', role: 'orchestrator' });
   assert.equal(orchestrator.agent.role, 'orchestrator');
   const worker = JSON.parse((await f.call(['agent', 'add', 'Worker', '--json'])).stdout);
-  assert.deepEqual(f.requests[1].body, { name: 'Worker', role: 'worker' });
+  assert.deepEqual(f.requests[1]?.body, { name: 'Worker', role: 'worker' });
   assert.equal(worker.agent.role, 'worker');
 });
 
@@ -241,7 +256,8 @@ test('start and submit reject another owner before invoking Git or GitHub', asyn
   for (const action of ['start', 'submit'])
     await assert.rejects(
       f.call(['task', action, taskId, '--path', join(f.directory, 'worktree'), '--json']),
-      (error) => {
+      (thrown) => {
+        const error = thrown as ExecError;
         assert.equal(error.code, 1);
         assert.equal(error.stdout, '');
         assert.match(JSON.parse(error.stderr).error.message, /same credential/);
@@ -265,7 +281,8 @@ test('a human owner cannot start work claimed by their agent', async (t) => {
   });
   await assert.rejects(
     f.call(['task', 'start', taskId, '--path', join(f.directory, 'worktree'), '--json']),
-    (error) => {
+    (thrown) => {
+      const error = thrown as ExecError;
       assert.match(JSON.parse(error.stderr).error.message, /same credential/);
       return true;
     },
@@ -279,14 +296,15 @@ test('merge rejects a non-leader before invoking GitHub or changing task state',
     { id: userId, email: 'member@example.com', agentId: otherAgentId, clanId },
   ]) {
     const f = await fixture(t, { actor, task: { ...initialTask, status: 'claimed', ownerId: userId, repository } });
-    await assert.rejects(f.call(['task', 'merge', taskId, '--json']), (error) => {
+    await assert.rejects(f.call(['task', 'merge', taskId, '--json']), (thrown) => {
+      const error = thrown as ExecError;
       assert.equal(error.code, 1);
       assert.equal(error.stdout, '');
       assert.match(JSON.parse(error.stderr).error.message, /Only the clan leader/);
       return true;
     });
     assert.ok(f.requests.every((request) => request.method === 'GET'));
-    assert.ok(!f.requests.some((request) => request.path.includes('/tasks/')));
+    assert.ok(!f.requests.some((request) => request.path?.includes('/tasks/')));
     await f.assertNoExecutions();
   }
 });

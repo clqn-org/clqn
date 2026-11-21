@@ -3,9 +3,10 @@ import { execFile } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
@@ -18,7 +19,10 @@ const agentId = '9608d1b9-bcaf-4f20-adab-10305cf5474f';
 const taskId = 'feeb7372-1243-423f-9f3c-9ed8d5a24b57';
 const createdAt = '2026-11-14T12:00:00.000Z';
 
-async function fixture(t) {
+// execFile rejects with the exit code and captured output.
+type ExecError = Error & { code: number; stdout: string; stderr: string };
+
+async function fixture(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), 'clqn-simple-cli-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const token = `clqn_${'s'.repeat(43)}`;
@@ -54,7 +58,12 @@ async function fixture(t) {
     revision: 3,
     enforcement: 'unavailable',
   };
-  const requests = [];
+  const requests: {
+    method: string | undefined;
+    path: string | undefined;
+    authorization: string | undefined;
+    body: unknown;
+  }[] = [];
   const server = createServer(async (request, response) => {
     let raw = '';
     for await (const chunk of request) raw += chunk;
@@ -90,7 +99,7 @@ async function fixture(t) {
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
-  const apiUrl = `http://127.0.0.1:${server.address().port}`;
+  const apiUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const bin = join(directory, 'bin');
   await mkdir(bin);
   const executions = join(directory, 'executions');
@@ -98,8 +107,8 @@ async function fixture(t) {
     await writeFile(join(bin, executable), '#!/bin/sh\necho invoked >> "$CLQN_TEST_EXECUTIONS"\nexit 91\n', {
       mode: 0o700,
     });
-  const call = (args, options = {}) => {
-    const env = {
+  const call = (args: string[], options: { savedLogin?: boolean; input?: string } = {}) => {
+    const env: NodeJS.ProcessEnv = {
       ...process.env,
       CLQN_CONFIG_DIR: join(directory, 'config'),
       CLQN_TOKEN: token,
@@ -109,7 +118,7 @@ async function fixture(t) {
     };
     if (options.savedLogin) delete env.CLQN_TOKEN;
     const result = run(process.execPath, [cli, '--api-url', apiUrl, ...args], { env, cwd: directory });
-    result.child.stdin.end(options.input);
+    result.child.stdin?.end(options.input);
     return result;
   };
   return { call, requests, directory, token, user, executions, task };
@@ -154,7 +163,7 @@ test('limits shows current settings or updates them directly', async (t) => {
     f.requests.map((request) => request.method),
     ['GET', 'GET', 'POST'],
   );
-  assert.deepEqual(f.requests[2].body, {
+  assert.deepEqual(f.requests[2]?.body, {
     tokenLimit: 100000,
     allowedModels: ['provider/model'],
     control: 'approve',
@@ -172,7 +181,8 @@ test('simple commands reject invalid names and limit values before HTTP access',
     ['limits', '--models', 'same', 'same'],
     ['limits', '--control', 'full'],
   ])
-    await assert.rejects(f.call([...args, '--json']), (error) => {
+    await assert.rejects(f.call([...args, '--json']), (thrown) => {
+      const error = thrown as ExecError;
       assert.equal(error.code, 1);
       assert.equal(error.stdout, '');
       assert.equal(JSON.parse(error.stderr).error.code, 'COMMAND_FAILED');
@@ -198,14 +208,15 @@ test('task done uses the completion endpoint and JSON contract', async (t) => {
 
 test('task submit defaults to the current directory but preserves the ownership preflight', async (t) => {
   const f = await fixture(t);
-  await assert.rejects(f.call(['task', 'submit', taskId, '--json']), (error) => {
+  await assert.rejects(f.call(['task', 'submit', taskId, '--json']), (thrown) => {
+    const error = thrown as ExecError;
     assert.equal(error.code, 1);
     assert.equal(error.stdout, '');
     assert.match(JSON.parse(error.stderr).error.message, /same credential/);
     return true;
   });
   assert.ok(f.requests.every((request) => request.method === 'GET'));
-  assert.equal(f.requests[0].path, `/v1/clans/${clanId}/tasks/${taskId}`);
+  assert.equal(f.requests[0]?.path, `/v1/clans/${clanId}/tasks/${taskId}`);
   await assert.rejects(readFile(f.executions), { code: 'ENOENT' });
 });
 
@@ -232,7 +243,8 @@ test('removed commands and flags fail before API or Git access', async (t) => {
     ['login', '--token-stdin'],
     ['limits', '--token-limit', '10'],
   ])
-    await assert.rejects(f.call(args), (error) => {
+    await assert.rejects(f.call(args), (thrown) => {
+      const error = thrown as ExecError;
       assert.equal(error.code, 1);
       assert.match(error.stderr, /unknown (command|option)/);
       return true;

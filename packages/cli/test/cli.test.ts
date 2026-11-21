@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import test from 'node:test';
+import type { AddressInfo } from 'node:net';
+import test, { type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { ApiError, ClqnClient } from '@clqn/shared';
@@ -10,7 +11,10 @@ import { ApiError, ClqnClient } from '@clqn/shared';
 const run = promisify(execFile);
 const cli = fileURLToPath(new URL('../dist/index.js', import.meta.url));
 
-async function fixture(t, status, body) {
+// execFile rejects with the exit code and captured output.
+type ExecError = Error & { code: number; stdout: string; stderr: string };
+
+async function fixture(t: TestContext, status: number, body: unknown) {
   const server = createServer((_request, response) => {
     response.writeHead(status, { 'content-type': 'application/json' });
     response.end(JSON.stringify(body));
@@ -18,7 +22,7 @@ async function fixture(t, status, body) {
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
-  return `http://127.0.0.1:${server.address().port}`;
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 }
 
 test('CLI emits parseable JSON from an HTTP response', async (t) => {
@@ -32,7 +36,8 @@ test('CLI emits parseable JSON from an HTTP response', async (t) => {
 test('CLI returns nonzero and structured errors when the API fails', async (t) => {
   const body = { error: { code: 'UNAVAILABLE', message: 'Try again later' } };
   const url = await fixture(t, 503, body);
-  await assert.rejects(run(process.execPath, [cli, '--json', '--api-url', url, 'health']), (error) => {
+  await assert.rejects(run(process.execPath, [cli, '--json', '--api-url', url, 'health']), (thrown) => {
+    const error = thrown as ExecError;
     assert.equal(error.code, 1);
     assert.equal(error.stdout, '');
     assert.deepEqual(JSON.parse(error.stderr), body);
@@ -46,7 +51,7 @@ test('client rejects invalid server response contracts', async (t) => {
   await assert.rejects(new ClqnClient(url).health());
 });
 
-async function workspaceFixture(t) {
+async function workspaceFixture(t: TestContext) {
   const { mkdtemp, rm } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
@@ -66,7 +71,7 @@ async function workspaceFixture(t) {
     email: 'bob@example.com',
     expiresAt: '2026-11-21T12:00:00.000Z',
   };
-  const requests = [];
+  const requests: { path: string | undefined; authorization: string | undefined }[] = [];
   const token = 'clqn_example_secret';
   const server = createServer(async (request, response) => {
     requests.push({ path: request.url, authorization: request.headers.authorization });
@@ -104,13 +109,13 @@ async function workspaceFixture(t) {
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
-  const url = `http://127.0.0.1:${server.address().port}`;
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   // Leave CLQN_TOKEN absent by default so persisted credentials are exercised.
-  const call = (args, options = {}) => {
-    const environment = { ...process.env, CLQN_CONFIG_DIR: directory, ...options.env };
+  const call = (args: string[], options: { env?: Record<string, string>; input?: string } = {}) => {
+    const environment: NodeJS.ProcessEnv = { ...process.env, CLQN_CONFIG_DIR: directory, ...options.env };
     if (!options.env || !Object.hasOwn(options.env, 'CLQN_TOKEN')) delete environment.CLQN_TOKEN;
     const result = run(process.execPath, [cli, '--api-url', url, ...args], { env: environment });
-    result.child.stdin.end(options.input);
+    result.child.stdin?.end(options.input);
     return result;
   };
   return { call, directory, user, clan, members, invitation, token, requests, url };
@@ -135,7 +140,8 @@ test('CLI rejects malformed invitation input before making an HTTP request', asy
     ['invite', 'invalid-email', '--clan', f.clan.id],
     ['join', 'invalid-code'],
   ]) {
-    await assert.rejects(f.call([...args, '--json']), (error) => {
+    await assert.rejects(f.call([...args, '--json']), (thrown) => {
+      const error = thrown as ExecError;
       assert.equal(JSON.parse(error.stderr).error.code, 'COMMAND_FAILED');
       return true;
     });
@@ -152,6 +158,7 @@ test('CLI login, clan creation, membership, and logout persist API-scoped privat
   assert.equal(loggedIn.stderr, '');
   assert.ok(!loggedIn.stdout.includes(f.token));
   const [filename] = await readdir(f.directory);
+  assert.ok(filename);
   assert.equal((await stat(f.directory)).mode & 0o777, 0o700);
   assert.equal((await stat(join(f.directory, filename))).mode & 0o777, 0o600);
   assert.equal(JSON.parse(await readFile(join(f.directory, filename), 'utf8')).token, f.token);
@@ -172,7 +179,8 @@ test('CLI login, clan creation, membership, and logout persist API-scoped privat
   const logout = JSON.parse((await f.call(['logout', '--json'])).stdout);
   assert.deepEqual(logout, { credentialsRemoved: true, environmentTokenActive: false });
   assert.deepEqual(await readdir(f.directory), []);
-  await assert.rejects(f.call(['whoami', '--json']), (error) => {
+  await assert.rejects(f.call(['whoami', '--json']), (thrown) => {
+    const error = thrown as ExecError;
     assert.equal(error.code, 1);
     assert.equal(JSON.parse(error.stderr).error.code, 'UNAUTHENTICATED');
     return true;
@@ -182,24 +190,25 @@ test('CLI login, clan creation, membership, and logout persist API-scoped privat
 test('failed login preserves credentials, environment override works, and another API receives no saved token', async (t) => {
   const f = await workspaceFixture(t);
   await f.call(['login'], { input: f.token });
-  await assert.rejects(f.call(['login', '--json'], { input: 'invalid_token' }), (error) => {
+  await assert.rejects(f.call(['login', '--json'], { input: 'invalid_token' }), (thrown) => {
+    const error = thrown as ExecError;
     assert.equal(JSON.parse(error.stderr).error.code, 'UNAUTHENTICATED');
     assert.ok(!error.stderr.includes('invalid_token'));
     return true;
   });
   await f.call(['whoami']);
-  assert.equal(f.requests.at(-1).authorization, `Bearer ${f.token}`);
+  assert.equal(f.requests.at(-1)?.authorization, `Bearer ${f.token}`);
   await f.call(['whoami'], { env: { CLQN_TOKEN: 'env_token' } });
-  assert.equal(f.requests.at(-1).authorization, 'Bearer env_token');
+  assert.equal(f.requests.at(-1)?.authorization, 'Bearer env_token');
   const other = await workspaceFixture(t);
-  const otherEnvironment = { ...process.env, CLQN_CONFIG_DIR: f.directory };
+  const otherEnvironment: NodeJS.ProcessEnv = { ...process.env, CLQN_CONFIG_DIR: f.directory };
   delete otherEnvironment.CLQN_TOKEN;
   await assert.rejects(
     run(process.execPath, [cli, '--api-url', other.url, 'whoami', '--json'], {
       env: otherEnvironment,
     }),
   );
-  assert.equal(other.requests.at(-1).authorization, undefined);
+  assert.equal(other.requests.at(-1)?.authorization, undefined);
   const result = await f.call(['logout', '--json'], { env: { CLQN_TOKEN: 'env_token' } });
   assert.equal(JSON.parse(result.stdout).environmentTokenActive, true);
 });
@@ -207,7 +216,8 @@ test('failed login preserves credentials, environment override works, and anothe
 test('login requires token input and members requires a selected clan', async (t) => {
   const f = await workspaceFixture(t);
   for (const args of [['login'], ['members']]) {
-    await assert.rejects(f.call([...args, '--json']), (error) => {
+    await assert.rejects(f.call([...args, '--json']), (thrown) => {
+      const error = thrown as ExecError;
       assert.equal(JSON.parse(error.stderr).error.code, 'COMMAND_FAILED');
       return true;
     });

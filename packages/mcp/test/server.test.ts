@@ -1,17 +1,23 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import type { ClqnClient } from '@clqn/shared';
 import { serve } from '@hono/node-server';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { createApp } from '../../api/dist/app.js';
-import { createMcpServer } from '../dist/index.js';
+import { createApp } from '../../api/src/app.js';
+import { createMcpServer } from '../src/index.js';
+
+// Tests stub only the client methods each tool uses.
+const stub = (methods: Partial<ClqnClient>) => methods as unknown as ClqnClient;
+const resultJson = (result: object) => JSON.parse((result as { content: [{ text: string }] }).content[0].text);
 
 test('MCP discovers and calls the health tool through the protocol', async (t) => {
-  const health = { status: 'ok', service: 'clqn-api', version: '0.1.0' };
-  const server = createMcpServer({ health: async () => health });
+  const health = { status: 'ok' as const, service: 'clqn-api' as const, version: '0.1.0' };
+  const server = createMcpServer(stub({ health: async () => health }));
   const client = new Client({ name: 'test', version: '1.0.0' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   t.after(async () => {
@@ -21,13 +27,13 @@ test('MCP discovers and calls the health tool through the protocol', async (t) =
   await server.connect(serverTransport);
   await client.connect(clientTransport);
   const { tools } = await client.listTools();
-  assert.ok(tools.some((tool) => tool.name === 'clqn_list_agents' && tool.annotations.readOnlyHint));
+  assert.ok(tools.some((tool) => tool.name === 'clqn_list_agents' && tool.annotations?.readOnlyHint));
   assert.ok(tools.some((tool) => tool.name === 'clqn_get_policy'));
   assert.ok(!tools.some((tool) => /set_policy|update_policy/.test(tool.name)));
   assert.ok(tools.some((tool) => tool.name === 'clqn_get_status'));
   assert.ok(tools.some((tool) => tool.name === 'clqn_write_context'));
   const result = await client.callTool({ name: 'clqn_health', arguments: {} });
-  assert.deepEqual(JSON.parse(result.content[0].text), health);
+  assert.deepEqual(resultJson(result), health);
 });
 
 test('CLI stdio MCP process reaches the real HTTP API', async (t) => {
@@ -39,7 +45,7 @@ test('CLI stdio MCP process reaches the real HTTP API', async (t) => {
     args: [
       fileURLToPath(new URL('../../cli/dist/index.js', import.meta.url)),
       '--api-url',
-      `http://127.0.0.1:${http.address().port}`,
+      `http://127.0.0.1:${(http.address() as AddressInfo).port}`,
       'mcp',
     ],
     stderr: 'pipe',
@@ -49,7 +55,7 @@ test('CLI stdio MCP process reaches the real HTTP API', async (t) => {
   await client.connect(transport);
   const result = await client.callTool({ name: 'clqn_health', arguments: {} });
   assert.equal(result.isError, undefined);
-  assert.equal(JSON.parse(result.content[0].text).service, 'clqn-api');
+  assert.equal(resultJson(result).service, 'clqn-api');
 });
 
 test('MCP reads the owner policy without exposing policy mutation', async (t) => {
@@ -57,16 +63,16 @@ test('MCP reads the owner policy without exposing policy mutation', async (t) =>
   const policy = {
     tokenLimit: 1000,
     allowedModels: ['provider/model'],
-    control: 'approve',
-    enforcement: 'unavailable',
+    control: 'approve' as const,
+    enforcement: 'unavailable' as const,
   };
   const server = createMcpServer(
-    {
+    stub({
       policy: async (id) => {
         assert.equal(id, clanId);
-        return policy;
+        return { ...policy, clanId, userId: clanId, revision: 0 };
       },
-    },
+    }),
     clanId,
   );
   const client = new Client({ name: 'policy-test', version: '1.0.0' });
@@ -79,7 +85,7 @@ test('MCP reads the owner policy without exposing policy mutation', async (t) =>
   await client.connect(clientTransport);
   const result = await client.callTool({ name: 'clqn_get_policy', arguments: {} });
   assert.equal(result.isError, undefined);
-  assert.deepEqual(JSON.parse(result.content[0].text), policy);
+  assert.deepEqual(resultJson(result), { ...policy, clanId, userId: clanId, revision: 0 });
 });
 
 test('MCP forwards repository assignments and authenticated reports with the exact head revisions', async (t) => {
@@ -87,19 +93,19 @@ test('MCP forwards repository assignments and authenticated reports with the exa
   const taskId = 'f1796d17-12d5-4620-ad88-e285713350a1';
   const agentId = '2ab811b5-a0aa-4310-9ee8-63191d37acfa';
   const repository = { slug: 'test/project', baseBranch: 'main', baseSha: 'a'.repeat(40), branch: 'clqn/task-one' };
-  const calls = [];
+  const calls: { name: string; args: unknown[] }[] = [];
   const api = Object.fromEntries(
     ['createTask', 'task', 'assignTask', 'unassignTask', 'setTaskAlias', 'reportTaskRepository', 'integrateTask'].map(
       (name) => [
         name,
-        async (...args) => {
+        async (...args: unknown[]) => {
           calls.push({ name, args });
           return { ok: true };
         },
       ],
     ),
   );
-  const server = createMcpServer(api, clanId);
+  const server = createMcpServer(stub(api), clanId);
   const client = new Client({ name: 'repository-test', version: '1.0.0' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   t.after(async () => {
@@ -115,7 +121,7 @@ test('MCP forwards repository assignments and authenticated reports with the exa
     prUrl: 'https://github.com/test/project/pull/7',
   };
   const integration = { headSha: report.headSha, mergeCommitSha: 'c'.repeat(40) };
-  for (const [name, args] of [
+  for (const [name, args] of <[string, Record<string, unknown>][]>[
     ['clqn_create_task', { description: 'Work', repository, alias: 'login-fix' }],
     ['clqn_get_task', { taskId }],
     ['clqn_assign_task', { taskId: 'login-fix', agentId: 'codex' }],

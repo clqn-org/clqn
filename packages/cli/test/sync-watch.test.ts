@@ -1,28 +1,29 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runSyncWatch } from '../dist/sync-watch.js';
+import type { MainSyncResult } from '../src/git.js';
+import { runSyncWatch, type SyncWatchOptions } from '../src/sync-watch.js';
 
-const result = (status = 'unchanged') => ({
+const result = (status: MainSyncResult['status'] = 'unchanged'): MainSyncResult => ({
   repository: 'owner/project',
   path: '/fixture',
-  branch: 'main',
+  branch: 'main' as const,
   status,
   previousSha: 'a'.repeat(40),
   headSha: 'a'.repeat(40),
   remoteSha: 'a'.repeat(40),
-  ...(status === 'skipped' ? { reason: 'dirty' } : {}),
+  ...(status === 'skipped' ? { reason: 'dirty' as const } : {}),
 });
-const event = (sequence, resourceId = 'owner/project', type = 'repository.main_changed') => ({
+const event = (sequence: number, resourceId: string | null = 'owner/project', type = 'repository.main_changed') => ({
   sequence,
   resourceId,
   type,
 });
 
-function setup(overrides = {}) {
+function setup(overrides: Partial<SyncWatchOptions> = {}) {
   const controller = new AbortController();
-  const errors = [];
-  const results = [];
-  const calls = [];
+  const errors: unknown[] = [];
+  const results: MainSyncResult[] = [];
+  const calls: object[] = [];
   return {
     controller,
     errors,
@@ -34,12 +35,12 @@ function setup(overrides = {}) {
       signal: controller.signal,
       pollIntervalMs: 10,
       fallbackIntervalMs: 1000,
-      sync: async (input) => {
+      sync: async (input: object) => {
         calls.push(input);
         return result();
       },
-      onError: (error) => errors.push(error),
-      onResult: (value) => results.push(value),
+      onError: (error: unknown) => errors.push(error),
+      onResult: (value: MainSyncResult) => results.push(value),
       ...overrides,
     },
   };
@@ -50,7 +51,7 @@ test('event watcher performs startup sync but does not fetch Git for empty or un
 }, async () => {
   const f = setup();
   let polls = 0;
-  const cursors = [];
+  const cursors: number[] = [];
   await runSyncWatch({
     ...f.options,
     getEvents: async (cursor, signal) => {
@@ -74,7 +75,7 @@ test('matching changes across event pages are coalesced into one Git sync and ac
   timeout: 2000,
 }, async () => {
   const f = setup();
-  const cursors = [];
+  const cursors: number[] = [];
   await runSyncWatch({
     ...f.options,
     getEvents: async (cursor) => {
@@ -99,8 +100,8 @@ test('matching changes across event pages are coalesced into one Git sync and ac
 
 test('a failed Git notification sync retains its cursor and retries with backoff', { timeout: 2000 }, async () => {
   const f = setup();
-  const cursors = [];
-  const attempts = [];
+  const cursors: number[] = [];
+  const attempts: number[] = [];
   let count = 0;
   await runSyncWatch({
     ...f.options,
@@ -121,7 +122,7 @@ test('a failed Git notification sync retains its cursor and retries with backoff
   assert.equal(f.errors.length, 2);
   assert.ok(cursors.filter((cursor) => cursor === 0).length >= 3);
   assert.equal(cursors.at(-1), 1);
-  assert.ok(attempts[3] - attempts[2] >= 18, 'second failure backs off beyond one poll');
+  assert.ok(attempts[3]! - attempts[2]! >= 18, 'second failure backs off beyond one poll');
 });
 
 test('skipped dirty main is acknowledged and retried only at fallback, not on every API poll', {
@@ -142,7 +143,7 @@ test('skipped dirty main is acknowledged and retried only at fallback, not on ev
     },
   });
   assert.equal(f.calls.length, 2);
-  assert.equal(f.results[1].reason, 'dirty');
+  assert.equal(f.results[1]?.reason, 'dirty');
   assert.equal(f.errors.length, 0);
 });
 
@@ -193,7 +194,7 @@ test('local-only mode performs startup and slow fallback syncs without an event 
   timeout: 2000,
 }, async () => {
   const f = setup({ fallbackIntervalMs: 25 });
-  const times = [];
+  const times: number[] = [];
   await runSyncWatch({
     ...f.options,
     sync: async (input) => {
@@ -204,8 +205,8 @@ test('local-only mode performs startup and slow fallback syncs without an event 
     },
   });
   assert.equal(f.calls.length, 3);
-  assert.ok(times[1] - times[0] >= 24);
-  assert.ok(times[2] - times[1] >= 24);
+  assert.ok(times[1]! - times[0]! >= 24);
+  assert.ok(times[2]! - times[1]! >= 24);
 });
 
 test('cancellation stops an outstanding event read promptly', { timeout: 2000 }, async () => {
@@ -225,7 +226,7 @@ test('busy event logs are bounded per tick and malformed cursors do not cause a 
 }, async () => {
   const f = setup();
   let pages = 0;
-  const times = [];
+  const times: number[] = [];
   await runSyncWatch({
     ...f.options,
     getEvents: async (cursor) => {
@@ -242,7 +243,7 @@ test('busy event logs are bounded per tick and malformed cursors do not cause a 
     },
   });
   assert.equal(pages, 11);
-  assert.ok(times[10] - times[9] >= 9);
+  assert.ok(times[10]! - times[9]! >= 9);
   const invalid = setup();
   await runSyncWatch({
     ...invalid.options,

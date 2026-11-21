@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test from 'node:test';
-import { configureGithubWebhook, removeGithubWebhook } from '../dist/github-hooks.js';
+import test, { type TestContext } from 'node:test';
+import { configureGithubWebhook, removeGithubWebhook } from '../src/github-hooks.js';
 
 const repository = 'example/project';
 const url = 'https://clqn.example/hooks/github/2c753d10-6378-4b86-963d-be68a816366c';
 const secret = 'test-only-webhook-secret-'.repeat(3);
 
-async function fixture(t, hooks = []) {
+async function fixture(t: TestContext, hooks: unknown[] = []) {
   const directory = await mkdtemp(join(tmpdir(), 'clqn-github-hooks-'));
   const saved = { ...process.env };
   t.after(async () => {
@@ -54,16 +54,20 @@ process.stdin.on('end', () => {
   delete process.env.CLQN_TEST_HOOK_ERROR;
   const requests = async () => {
     try {
-      return (await readFile(logPath, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
+      return (await readFile(logPath, 'utf8'))
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
     } catch (error) {
-      if (error.code === 'ENOENT') return [];
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
       throw error;
     }
   };
   return { directory, bin, logPath, hooksPath, requests };
 }
 
-function assertHostAndNoSecret(request) {
+function assertHostAndNoSecret(request: { args: string[] }) {
   assert.equal(request.args[0], 'api');
   assert.equal(request.args[request.args.indexOf('--hostname') + 1], 'github.com');
   assert.ok(!request.args.some((arg) => arg.includes(secret)));
@@ -144,6 +148,7 @@ test('GitHub errors never expose the secret or raw child stderr', async (t) => {
   const f = await fixture(t, [[]]);
   process.env.CLQN_TEST_HOOK_ERROR = `raw private GitHub failure: ${secret}`;
   await assert.rejects(configureGithubWebhook({ repository, url, secret }), (error) => {
+    assert.ok(error instanceof Error);
     assert.ok(!error.message.includes(secret));
     assert.ok(!error.message.includes('raw private GitHub failure'));
     assert.match(error.message, /GitHub|gh|webhook/i);
@@ -182,6 +187,7 @@ test('a missing GitHub CLI produces an actionable error without exposing setup v
   const f = await fixture(t, [[]]);
   await rm(join(f.bin, 'gh'));
   await assert.rejects(configureGithubWebhook({ repository, url, secret }), (error) => {
+    assert.ok(error instanceof Error);
     assert.match(error.message, /gh|GitHub CLI/i);
     assert.match(error.message, /install|required|PATH|available/i);
     assert.ok(!error.message.includes(secret));
