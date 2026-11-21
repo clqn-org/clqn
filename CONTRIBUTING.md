@@ -38,11 +38,12 @@ Workspaces build in dependency order with strict TypeScript checking and ESM out
 ## Checks
 
 ```sh
+npm run lint
 npm test
 npm run typecheck
 ```
 
-`npm test` builds all workspaces and runs Node's built-in test runner. Tests cover HTTP contracts, CLI JSON and failure behavior, MCP discovery and invocation, and a real stdio-to-HTTP flow. Default tests require local loopback access but no database. PostgreSQL integration tests are skipped unless `TEST_DATABASE_URL` is set to a dedicated test database; CI supplies PostgreSQL and runs all checks on Node 22 and 24. See [database setup](docs/database.md).
+`npm run lint` checks formatting and lint rules with Biome; `npm run format` fixes what it can. `npm test` builds all workspaces and runs Node's built-in test runner. Tests cover HTTP contracts, CLI JSON and failure behavior, MCP discovery and invocation, and a real stdio-to-HTTP flow. Default tests require local loopback access but no database. PostgreSQL integration tests are skipped unless `TEST_DATABASE_URL` is set to a dedicated test database; CI supplies PostgreSQL and runs all checks on Node 22 and 24. See [database setup](docs/database.md).
 
 Checks cover authorization, credential revocation, concurrent clan/context/task/policy writes, orchestrator registration, assignment ownership, and integration gating. Repository acceptance uses real HTTP, PostgreSQL, CLI, local Git branches/pushes, and a fake `gh` that performs a local squash merge. It verifies that a dependent task starts from integrated main and that personal dirty files are preserved. Webhook tests cover raw-body HMAC validation, repository/clan binding, replay races, and unlink ordering. Webhook-to-sync acceptance uses signed HTTP and real API/CLI/Git to prove idle, unrelated, and duplicate events do not trigger Git fetches. Live GitHub hook configuration/delivery, permissions, CI, protected branches, merge queues, and real agent runtimes still require operator acceptance. Local Git helper tests use temporary repositories and fake GitHub responses without network access. For documentation-only changes, check formatting and relative links.
 
