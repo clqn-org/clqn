@@ -17,7 +17,11 @@ const guides = [
 const markdown = new Marked({
   renderer: {
     heading({ tokens, text, depth }) {
-      const id = text.toLowerCase().replace(/[^a-z0-9 -]/g, '').trim().replace(/\s+/g, '-');
+      const id = text
+        .toLowerCase()
+        .replace(/[^a-z0-9 -]/g, '')
+        .trim()
+        .replace(/\s+/g, '-');
       return `<h${depth} id="${id}">${this.parser.parseInline(tokens)}</h${depth}>\n`;
     },
   },
@@ -31,7 +35,7 @@ const markdown = new Marked({
 export async function buildDocs(source, output) {
   await mkdir(output, { recursive: true });
   for (const [slug, title] of guides) {
-    const sourceText = await readFile(new URL(slug + '.md', source), 'utf8');
+    const sourceText = await readFile(new URL(`${slug}.md`, source), 'utf8');
     const canonicalPath = slug === 'index' ? '/docs/' : `/docs/${slug}.html`;
     const links = guides.map(([page, name]) => {
       const current = page === slug ? ' aria-current="page"' : '';
@@ -66,6 +70,6 @@ export async function buildDocs(source, output) {
 </body>
 </html>
 `;
-    await writeFile(new URL(slug + '.html', output), page);
+    await writeFile(new URL(`${slug}.html`, output), page);
   }
 }

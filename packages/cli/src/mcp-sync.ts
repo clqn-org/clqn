@@ -3,8 +3,11 @@ import { localRepository } from './git.js';
 import { runSyncWatch, type SyncWatchOptions } from './sync-watch.js';
 
 // One MCP connection follows its own local project, without scanning or storing paths.
-export async function runMcpSync(api: ClqnClient, clanId: string,
-  options: Omit<SyncWatchOptions, 'repository' | 'getEvents' | 'sync' | 'initialCursor'>): Promise<void> {
+export async function runMcpSync(
+  api: ClqnClient,
+  clanId: string,
+  options: Omit<SyncWatchOptions, 'repository' | 'getEvents' | 'sync' | 'initialCursor'>,
+): Promise<void> {
   try {
     if (options.signal.aborted) return;
     const { root, repository } = await localRepository(options.repoPath, options.signal);
@@ -18,8 +21,13 @@ export async function runMcpSync(api: ClqnClient, clanId: string,
       if (options.signal.aborted) return;
       options.onError(error);
     }
-    await runSyncWatch({ ...options, repoPath: root, repository, initialCursor,
-      getEvents: (cursor, signal) => api.events(clanId, cursor, 100, signal) });
+    await runSyncWatch({
+      ...options,
+      repoPath: root,
+      repository,
+      initialCursor,
+      getEvents: (cursor, signal) => api.events(clanId, cursor, 100, signal),
+    });
   } catch (error) {
     if (!options.signal.aborted) options.onError(error);
   }

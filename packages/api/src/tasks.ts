@@ -1,16 +1,27 @@
+import {
+  type Actor,
+  ApiError,
+  assignTaskSchema,
+  createTaskSchema,
+  integrationReportSchema,
+  repositoryReportSchema,
+  setAliasSchema,
+  type Task,
+  type TaskRepository,
+} from '@clqn/shared';
+import { and, eq, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { ApiError, createTaskSchema, assignTaskSchema, setAliasSchema, repositoryReportSchema, integrationReportSchema,
-  type Actor, type Task, type TaskRepository } from '@clqn/shared';
-import { requireClan, appendEvent, type WorkspaceDb } from './access.js';
-import { tasks } from './db/tasks.js';
-import { agents, memberships } from './db/schema.js';
+import { appendEvent, requireClan, type WorkspaceDb } from './access.js';
 import { resourceFilter, rethrowAliasConflict } from './aliases.js';
+import { agents, memberships } from './db/schema.js';
+import { tasks } from './db/tasks.js';
 
 const taskView = (row: typeof tasks.$inferSelect): Task => ({
-  ...row, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(),
+  ...row,
+  createdAt: row.createdAt.toISOString(),
+  updatedAt: row.updatedAt.toISOString(),
 });
 const missingTask = () => new ApiError(404, 'NOT_FOUND', 'Task not found');
 const conflict = () => new ApiError(409, 'TASK_CONFLICT', 'Task state or ownership does not allow this action');
@@ -21,8 +32,17 @@ async function requireCoordinator(db: WorkspaceDb, actor: Actor, clanId: string)
   const membership = await requireClan(db, actor, clanId);
   if (!actor.agentId && membership.role === 'leader') return;
   if (actor.agentId && membership.role === 'leader') {
-    const [agent] = await db.select({ id: agents.id }).from(agents).where(and(
-      eq(agents.id, actor.agentId), eq(agents.ownerId, actor.id), eq(agents.clanId, clanId), eq(agents.role, 'orchestrator')));
+    const [agent] = await db
+      .select({ id: agents.id })
+      .from(agents)
+      .where(
+        and(
+          eq(agents.id, actor.agentId),
+          eq(agents.ownerId, actor.id),
+          eq(agents.clanId, clanId),
+          eq(agents.role, 'orchestrator'),
+        ),
+      );
     if (agent) return;
   }
   throw new ApiError(403, 'FORBIDDEN', 'A clan leader or its registered orchestrator is required');
@@ -30,8 +50,13 @@ async function requireCoordinator(db: WorkspaceDb, actor: Actor, clanId: string)
 
 export function createTaskRoutes(db: WorkspaceDb) {
   const app = new Hono<{ Variables: { user: Actor } }>();
-  app.use('*', bodyLimit({ maxSize: 32 * 1024, onError: (c) =>
-    c.json({ error: { code: 'INVALID_REQUEST', message: 'Request body is too large' } }, 413) }));
+  app.use(
+    '*',
+    bodyLimit({
+      maxSize: 32 * 1024,
+      onError: (c) => c.json({ error: { code: 'INVALID_REQUEST', message: 'Request body is too large' } }, 413),
+    }),
+  );
   app.get('/', async (c) => {
     const clanId = c.req.param('clanId')!;
     await requireClan(db, c.get('user'), clanId);
@@ -51,15 +76,36 @@ export function createTaskRoutes(db: WorkspaceDb) {
     const clanId = c.req.param('clanId')!;
     await requireClan(db, actor, clanId);
     const parsed = createTaskSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) throw new ApiError(400, 'INVALID_REQUEST', 'Provide a valid task description, optional alias and repository details');
-    const repository: TaskRepository | null = parsed.data.repository ? {
-      ...parsed.data.repository, headSha: null, prNumber: null, prUrl: null, mergeCommitSha: null, state: 'pending',
-    } : null;
+    if (!parsed.success)
+      throw new ApiError(
+        400,
+        'INVALID_REQUEST',
+        'Provide a valid task description, optional alias and repository details',
+      );
+    const repository: TaskRepository | null = parsed.data.repository
+      ? {
+          ...parsed.data.repository,
+          headSha: null,
+          prNumber: null,
+          prUrl: null,
+          mergeCommitSha: null,
+          state: 'pending',
+        }
+      : null;
     try {
       const task = await db.transaction(async (tx) => {
-        const [row] = await tx.insert(tasks).values({ clanId, description: parsed.data.description, alias: parsed.data.alias, repository }).returning();
+        const [row] = await tx
+          .insert(tasks)
+          .values({ clanId, description: parsed.data.description, alias: parsed.data.alias, repository })
+          .returning();
         if (!row) throw new Error('Task creation returned no row');
-        await appendEvent(tx, { clanId, actorId: actor.id, agentId: actor.agentId ?? null, type: 'task.created', resourceId: row.id });
+        await appendEvent(tx, {
+          clanId,
+          actorId: actor.id,
+          agentId: actor.agentId ?? null,
+          type: 'task.created',
+          resourceId: row.id,
+        });
         return taskView(row);
       });
       return c.json(task, 201);
@@ -78,16 +124,27 @@ export function createTaskRoutes(db: WorkspaceDb) {
     const filter = resourceFilter(tasks, clanId, c.req.param('taskId'));
     const body = setAliasSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) throw new ApiError(400, 'INVALID_REQUEST', 'Provide a valid task alias');
-    const task = await db.transaction(async (tx) => {
-      const [row] = await tx.select().from(tasks).where(filter).for('update');
-      if (!row) throw missingTask();
-      if (!ownTask(row, actor)) await requireCoordinator(tx, actor, clanId);
-      if (row.alias === body.data.alias) return taskView(row);
-      const [updated] = await tx.update(tasks).set({ alias: body.data.alias, updatedAt: sql`now()` })
-        .where(eq(tasks.id, row.id)).returning();
-      await appendEvent(tx, { clanId, actorId: actor.id, agentId: actor.agentId ?? null, type: 'task.alias_changed', resourceId: row.id });
-      return taskView(updated!);
-    }).catch(rethrowAliasConflict);
+    const task = await db
+      .transaction(async (tx) => {
+        const [row] = await tx.select().from(tasks).where(filter).for('update');
+        if (!row) throw missingTask();
+        if (!ownTask(row, actor)) await requireCoordinator(tx, actor, clanId);
+        if (row.alias === body.data.alias) return taskView(row);
+        const [updated] = await tx
+          .update(tasks)
+          .set({ alias: body.data.alias, updatedAt: sql`now()` })
+          .where(eq(tasks.id, row.id))
+          .returning();
+        await appendEvent(tx, {
+          clanId,
+          actorId: actor.id,
+          agentId: actor.agentId ?? null,
+          type: 'task.alias_changed',
+          resourceId: row.id,
+        });
+        return taskView(updated!);
+      })
+      .catch(rethrowAliasConflict);
     return c.json(task);
   });
   app.post('/:taskId/assign', async (c) => {
@@ -98,17 +155,29 @@ export function createTaskRoutes(db: WorkspaceDb) {
     const body = assignTaskSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) throw new ApiError(400, 'INVALID_REQUEST', 'Provide an agentId');
     const task = await db.transaction(async (tx) => {
-      const [agent] = await tx.select({ id: agents.id }).from(agents).innerJoin(memberships,
-        and(eq(memberships.userId, agents.ownerId), eq(memberships.clanId, agents.clanId)))
-        .where(resourceFilter(agents, clanId, body.data.agentId)).for('share', { of: agents });
+      const [agent] = await tx
+        .select({ id: agents.id })
+        .from(agents)
+        .innerJoin(memberships, and(eq(memberships.userId, agents.ownerId), eq(memberships.clanId, agents.clanId)))
+        .where(resourceFilter(agents, clanId, body.data.agentId))
+        .for('share', { of: agents });
       if (!agent) throw new ApiError(404, 'NOT_FOUND', 'Agent not found');
       const [row] = await tx.select().from(tasks).where(filter).for('update');
       if (!row) throw missingTask();
       if (row.status !== 'open' || (row.assignedAgentId && row.assignedAgentId !== agent.id)) throw conflict();
       if (row.assignedAgentId === agent.id) return taskView(row);
-      const [updated] = await tx.update(tasks).set({ assignedAgentId: agent.id, updatedAt: sql`now()` })
-        .where(eq(tasks.id, row.id)).returning();
-      await appendEvent(tx, { clanId, actorId: actor.id, agentId: actor.agentId ?? null, type: 'task.assigned', resourceId: row.id });
+      const [updated] = await tx
+        .update(tasks)
+        .set({ assignedAgentId: agent.id, updatedAt: sql`now()` })
+        .where(eq(tasks.id, row.id))
+        .returning();
+      await appendEvent(tx, {
+        clanId,
+        actorId: actor.id,
+        agentId: actor.agentId ?? null,
+        type: 'task.assigned',
+        resourceId: row.id,
+      });
       return taskView(updated!);
     });
     return c.json(task);
@@ -124,12 +193,23 @@ export function createTaskRoutes(db: WorkspaceDb) {
       const [row] = await tx.select().from(tasks).where(filter).for('update');
       if (!row) throw missingTask();
       if (row.status !== 'open' || !row.assignedAgentId) throw conflict();
-      const [assigned] = await tx.select({ id: agents.id }).from(agents)
+      const [assigned] = await tx
+        .select({ id: agents.id })
+        .from(agents)
         .where(and(eq(agents.id, row.assignedAgentId), resourceFilter(agents, clanId, body.data.agentId)));
       if (!assigned) throw conflict();
-      const [updated] = await tx.update(tasks).set({ assignedAgentId: null, updatedAt: sql`now()` })
-        .where(eq(tasks.id, row.id)).returning();
-      await appendEvent(tx, { clanId, actorId: actor.id, agentId: actor.agentId ?? null, type: 'task.unassigned', resourceId: row.id });
+      const [updated] = await tx
+        .update(tasks)
+        .set({ assignedAgentId: null, updatedAt: sql`now()` })
+        .where(eq(tasks.id, row.id))
+        .returning();
+      await appendEvent(tx, {
+        clanId,
+        actorId: actor.id,
+        agentId: actor.agentId ?? null,
+        type: 'task.unassigned',
+        resourceId: row.id,
+      });
       return taskView(updated!);
     });
     return c.json(task);
@@ -140,11 +220,13 @@ export function createTaskRoutes(db: WorkspaceDb) {
     await requireClan(db, actor, clanId);
     const filter = resourceFilter(tasks, clanId, c.req.param('taskId'));
     const body = repositoryReportSchema.safeParse(await c.req.json().catch(() => null));
-    if (!body.success) throw new ApiError(400, 'INVALID_REQUEST', 'Provide expectedHeadSha, headSha and optional PR number and URL');
+    if (!body.success)
+      throw new ApiError(400, 'INVALID_REQUEST', 'Provide expectedHeadSha, headSha and optional PR number and URL');
     const task = await db.transaction(async (tx) => {
       const [row] = await tx.select().from(tasks).where(filter).for('update');
       if (!row) throw missingTask();
-      if (row.status !== 'claimed' || !ownTask(row, actor) || !row.repository || row.repository.state === 'merged') throw conflict();
+      if (row.status !== 'claimed' || !ownTask(row, actor) || !row.repository || row.repository.state === 'merged')
+        throw conflict();
       if (row.repository.headSha !== body.data.expectedHeadSha) {
         throw new ApiError(409, 'REVISION_CONFLICT', 'Repository head changed; read the task before reporting again');
       }
@@ -152,14 +234,29 @@ export function createTaskRoutes(db: WorkspaceDb) {
       const prUrl = body.data.prUrl?.toLowerCase();
       if (body.data.prNumber !== undefined) {
         const expectedUrl = `https://github.com/${row.repository.slug}/pull/${body.data.prNumber}`;
-        if (prUrl !== expectedUrl) throw new ApiError(400, 'INVALID_REQUEST', 'PR URL must match the task repository and PR number');
+        if (prUrl !== expectedUrl)
+          throw new ApiError(400, 'INVALID_REQUEST', 'PR URL must match the task repository and PR number');
         if (row.repository.prNumber && row.repository.prNumber !== body.data.prNumber) throw conflict();
       }
-      const repository: TaskRepository = { ...row.repository, headSha: body.data.headSha,
-        prNumber: body.data.prNumber ?? row.repository.prNumber, prUrl: prUrl ?? row.repository.prUrl,
-        state: body.data.prNumber !== undefined || row.repository.prNumber !== null ? 'open' : 'pushed' };
-      const [updated] = await tx.update(tasks).set({ repository, updatedAt: sql`now()` }).where(eq(tasks.id, row.id)).returning();
-      await appendEvent(tx, { clanId, actorId: actor.id, agentId: actor.agentId ?? null, type: 'task.repository_updated', resourceId: row.id });
+      const repository: TaskRepository = {
+        ...row.repository,
+        headSha: body.data.headSha,
+        prNumber: body.data.prNumber ?? row.repository.prNumber,
+        prUrl: prUrl ?? row.repository.prUrl,
+        state: body.data.prNumber !== undefined || row.repository.prNumber !== null ? 'open' : 'pushed',
+      };
+      const [updated] = await tx
+        .update(tasks)
+        .set({ repository, updatedAt: sql`now()` })
+        .where(eq(tasks.id, row.id))
+        .returning();
+      await appendEvent(tx, {
+        clanId,
+        actorId: actor.id,
+        agentId: actor.agentId ?? null,
+        type: 'task.repository_updated',
+        resourceId: row.id,
+      });
       return taskView(updated!);
     });
     return c.json(task);
@@ -174,14 +271,34 @@ export function createTaskRoutes(db: WorkspaceDb) {
     const task = await db.transaction(async (tx) => {
       const [row] = await tx.select().from(tasks).where(filter).for('update');
       if (!row) throw missingTask();
-      if (row.status !== 'claimed' || !row.repository || row.repository.prNumber === null || row.repository.headSha !== body.data.headSha) throw conflict();
+      if (
+        row.status !== 'claimed' ||
+        !row.repository ||
+        row.repository.prNumber === null ||
+        row.repository.headSha !== body.data.headSha
+      )
+        throw conflict();
       if (row.repository.state === 'merged') {
         if (row.repository.mergeCommitSha !== body.data.mergeCommitSha) throw conflict();
         return taskView(row);
       }
-      const repository: TaskRepository = { ...row.repository, state: 'merged', mergeCommitSha: body.data.mergeCommitSha };
-      const [updated] = await tx.update(tasks).set({ repository, updatedAt: sql`now()` }).where(eq(tasks.id, row.id)).returning();
-      await appendEvent(tx, { clanId, actorId: actor.id, agentId: actor.agentId ?? null, type: 'task.integrated', resourceId: row.id });
+      const repository: TaskRepository = {
+        ...row.repository,
+        state: 'merged',
+        mergeCommitSha: body.data.mergeCommitSha,
+      };
+      const [updated] = await tx
+        .update(tasks)
+        .set({ repository, updatedAt: sql`now()` })
+        .where(eq(tasks.id, row.id))
+        .returning();
+      await appendEvent(tx, {
+        clanId,
+        actorId: actor.id,
+        agentId: actor.agentId ?? null,
+        type: 'task.integrated',
+        resourceId: row.id,
+      });
       return taskView(updated!);
     });
     return c.json(task);
@@ -192,7 +309,10 @@ export function createTaskRoutes(db: WorkspaceDb) {
       const clanId = c.req.param('clanId')!;
       const membership = await requireClan(db, actor, clanId);
       const filter = resourceFilter(tasks, clanId, c.req.param('taskId'));
-      const body = z.object({}).strict().safeParse(await c.req.json().catch(() => null));
+      const body = z
+        .object({})
+        .strict()
+        .safeParse(await c.req.json().catch(() => null));
       if (!body.success) throw new ApiError(400, 'INVALID_REQUEST', 'Expected an empty JSON object');
       const task = await db.transaction(async (tx) => {
         const [row] = await tx.select().from(tasks).where(filter).for('update');
@@ -203,11 +323,23 @@ export function createTaskRoutes(db: WorkspaceDb) {
           if (row.assignedAgentId && row.assignedAgentId !== actor.agentId) throw conflict();
         } else if (!leaderReset && !ownTask(row, actor)) throw conflict();
         if (action === 'complete' && row.repository && row.repository.state !== 'merged') throw conflict();
-        const update = action === 'claim'
-          ? { status: 'claimed' as const, ownerId: actor.id, ownerAgentId: actor.agentId ?? null, updatedAt: sql`now()` }
-          : action === 'release'
-            ? { status: 'open' as const, ownerId: null, ownerAgentId: null, assignedAgentId: null, updatedAt: sql`now()` }
-            : { status: 'completed' as const, updatedAt: sql`now()` };
+        const update =
+          action === 'claim'
+            ? {
+                status: 'claimed' as const,
+                ownerId: actor.id,
+                ownerAgentId: actor.agentId ?? null,
+                updatedAt: sql`now()`,
+              }
+            : action === 'release'
+              ? {
+                  status: 'open' as const,
+                  ownerId: null,
+                  ownerAgentId: null,
+                  assignedAgentId: null,
+                  updatedAt: sql`now()`,
+                }
+              : { status: 'completed' as const, updatedAt: sql`now()` };
         const [updated] = await tx.update(tasks).set(update).where(eq(tasks.id, row.id)).returning();
         const type = { claim: 'task.claimed', release: 'task.released', complete: 'task.completed' }[action];
         await appendEvent(tx, { clanId, actorId: actor.id, agentId: actor.agentId ?? null, type, resourceId: row.id });

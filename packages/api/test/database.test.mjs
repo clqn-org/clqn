@@ -1,18 +1,18 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
-import postgres from 'postgres';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import { migrate } from 'drizzle-orm/postgres-js/migrator';
-import { createStore, hashToken } from '../dist/store.js';
-import { createApp } from '../dist/app.js';
-import { serve } from '@hono/node-server';
-import { promisify } from 'node:util';
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
+import { serve } from '@hono/node-server';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import { migrate } from 'drizzle-orm/postgres-js/migrator';
+import postgres from 'postgres';
+import { createApp } from '../dist/app.js';
+import { createStore, hashToken } from '../dist/store.js';
 
 // Use a dedicated database: migrations are applied, and only this test's users/clans are deleted.
 test('PostgreSQL: identity, clan isolation, concurrent creation, and credential revocation', {
@@ -33,7 +33,10 @@ test('PostgreSQL: identity, clan isolation, concurrent creation, and credential 
         await sql`delete from clans where created_by in ${sql(userIds)}`;
         await sql`delete from users where id in ${sql(userIds)}`;
       }
-    } finally { await connection.close(); await sql.end(); }
+    } finally {
+      await connection.close();
+      await sql.end();
+    }
   });
   await migrate(drizzle(sql), { migrationsFolder: fileURLToPath(new URL('../drizzle', import.meta.url)) });
   const email = `${randomUUID()}@example.com`;
@@ -48,9 +51,17 @@ test('PostgreSQL: identity, clan isolation, concurrent creation, and credential 
   assert.notEqual(stored.token_hash, alice.token);
   const app = createApp(connection.store, connection.db);
   const auth = (token) => ({ authorization: `Bearer ${token}`, 'content-type': 'application/json' });
-  const create = (token, name) => app.request('/v1/clans', { method: 'POST', headers: auth(token), body: JSON.stringify({ name }) });
-  const responses = await Promise.all([create(alice.token, 'Alice one'), create(alice.token, 'Alice two'), create(bob.token, 'Bob')]);
-  assert.deepEqual(responses.map((r) => r.status), [201, 201, 201]);
+  const create = (token, name) =>
+    app.request('/v1/clans', { method: 'POST', headers: auth(token), body: JSON.stringify({ name }) });
+  const responses = await Promise.all([
+    create(alice.token, 'Alice one'),
+    create(alice.token, 'Alice two'),
+    create(bob.token, 'Bob'),
+  ]);
+  assert.deepEqual(
+    responses.map((r) => r.status),
+    [201, 201, 201],
+  );
   const [one, two, other] = await Promise.all(responses.map((r) => r.json()));
   assert.notEqual(one.id, two.id);
   assert.equal(one.createdBy, alice.user.id);
@@ -64,19 +75,30 @@ test('PostgreSQL: identity, clan isolation, concurrent creation, and credential 
     const response = await app.request(`/v1/clans/${clanId}/members`, { headers: auth(alice.token) });
     assert.equal(response.status, 404);
   }
-  await assert.rejects(sql`insert into memberships (clan_id, user_id) values (${one.id}, ${alice.user.id})`, { code: '23505' });
+  await assert.rejects(sql`insert into memberships (clan_id, user_id) values (${one.id}, ${alice.user.id})`, {
+    code: '23505',
+  });
   // A failed write must not leave a clan behind.
   const rollbackName = `rollback-${randomUUID()}`;
-  await assert.rejects(connection.store.createClan(randomUUID(), rollbackName), (error) => error.cause?.code === '23503');
+  await assert.rejects(
+    connection.store.createClan(randomUUID(), rollbackName),
+    (error) => error.cause?.code === '23503',
+  );
   const [count] = await sql`select count(*)::integer as n from clans where name = ${rollbackName}`;
   assert.equal(count.n, 0);
   // Invitations must be leader-only, email-bound, expiring, and single-use under contention.
-  const invite = (token, clanId, email) => app.request(`/v1/clans/${clanId}/invitations`, {
-    method: 'POST', headers: auth(token), body: JSON.stringify({ email }),
-  });
-  const joinClan = (token, code) => app.request('/v1/invitations/join', {
-    method: 'POST', headers: auth(token), body: JSON.stringify({ code }),
-  });
+  const invite = (token, clanId, email) =>
+    app.request(`/v1/clans/${clanId}/invitations`, {
+      method: 'POST',
+      headers: auth(token),
+      body: JSON.stringify({ email }),
+    });
+  const joinClan = (token, code) =>
+    app.request('/v1/invitations/join', {
+      method: 'POST',
+      headers: auth(token),
+      body: JSON.stringify({ code }),
+    });
   assert.equal((await invite(bob.token, one.id, bob.user.email)).status, 404);
   const invitationResponse = await invite(alice.token, one.id, ` ${bob.user.email.toUpperCase()} `);
   assert.equal(invitationResponse.status, 201);
@@ -97,12 +119,16 @@ test('PostgreSQL: identity, clan isolation, concurrent creation, and credential 
   const expired = await (await invite(alice.token, two.id, bob.user.email)).json();
   await sql`update invitations set expires_at = now() - interval '1 second' where code_hash = ${hashToken(expired.code)}`;
   assert.equal((await joinClan(bob.token, expired.code)).status, 404);
-  const [joinedEvents] = await sql`select count(*)::integer as n from events where clan_id = ${one.id} and type = 'member.joined'`;
+  const [joinedEvents] =
+    await sql`select count(*)::integer as n from events where clan_id = ${one.id} and type = 'member.joined'`;
   assert.equal(joinedEvents.n, 1);
   // Agents inherit the human identity but have an independent, clan-scoped credential.
-  const register = (token, clanId, name) => app.request(`/v1/clans/${clanId}/agents`, {
-    method: 'POST', headers: auth(token), body: JSON.stringify({ name }),
-  });
+  const register = (token, clanId, name) =>
+    app.request(`/v1/clans/${clanId}/agents`, {
+      method: 'POST',
+      headers: auth(token),
+      body: JSON.stringify({ name }),
+    });
   assert.equal((await register(bob.token, two.id, 'Outsider')).status, 404);
   const registrationResponse = await register(alice.token, one.id, 'Codex');
   assert.equal(registrationResponse.status, 201);
@@ -117,7 +143,10 @@ test('PostgreSQL: identity, clan isolation, concurrent creation, and credential 
   assert.equal((await app.request(`/v1/clans/${one.id}/members`, { headers: auth(registration.token) })).status, 200);
   assert.equal((await app.request(`/v1/clans/${two.id}/members`, { headers: auth(registration.token) })).status, 404);
   const agentClans = await app.request('/v1/clans', { headers: auth(registration.token) });
-  assert.deepEqual((await agentClans.json()).clans.map((c) => c.id), [one.id]);
+  assert.deepEqual(
+    (await agentClans.json()).clans.map((c) => c.id),
+    [one.id],
+  );
   assert.equal((await register(registration.token, one.id, 'Nested')).status, 403);
   assert.equal((await invite(registration.token, one.id, bob.user.email)).status, 403);
   assert.equal((await create(registration.token, 'Forbidden')).status, 403);
@@ -138,10 +167,17 @@ test('PostgreSQL: identity, clan isolation, concurrent creation, and credential 
   const env = { ...process.env, CLQN_CONFIG_DIR: directory };
   delete env.CLQN_TOKEN;
   const runCli = (args, input) => {
-    const command = promisify(execFile)(process.execPath, [
-      fileURLToPath(new URL('../../cli/dist/index.js', import.meta.url)),
-      '--api-url', `http://127.0.0.1:${server.address().port}`, '--json', ...args,
-    ], { env });
+    const command = promisify(execFile)(
+      process.execPath,
+      [
+        fileURLToPath(new URL('../../cli/dist/index.js', import.meta.url)),
+        '--api-url',
+        `http://127.0.0.1:${server.address().port}`,
+        '--json',
+        ...args,
+      ],
+      { env },
+    );
     command.child.stdin.end(input);
     return command.then(({ stdout }) => JSON.parse(stdout));
   };

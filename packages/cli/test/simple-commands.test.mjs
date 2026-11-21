@@ -1,13 +1,13 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { fileURLToPath } from 'node:url';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 const cli = fileURLToPath(new URL('../dist/index.js', import.meta.url));
@@ -23,11 +23,37 @@ async function fixture(t) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   const token = `clqn_${'s'.repeat(43)}`;
   const user = { id: userId, email: 'member@example.com' };
-  const task = { id: taskId, clanId, description: 'Assigned work', status: 'claimed', ownerId: otherUserId,
-    ownerAgentId: null, assignedAgentId: null, repository: { slug: 'example/project', baseBranch: 'main',
-      baseSha: 'a'.repeat(40), branch: 'clqn/simple-task', headSha: null, prNumber: null, prUrl: null,
-      mergeCommitSha: null, state: 'pending' }, createdAt, updatedAt: createdAt };
-  let policy = { clanId, userId, tokenLimit: null, allowedModels: null, control: 'manual', revision: 3, enforcement: 'unavailable' };
+  const task = {
+    id: taskId,
+    clanId,
+    description: 'Assigned work',
+    status: 'claimed',
+    ownerId: otherUserId,
+    ownerAgentId: null,
+    assignedAgentId: null,
+    repository: {
+      slug: 'example/project',
+      baseBranch: 'main',
+      baseSha: 'a'.repeat(40),
+      branch: 'clqn/simple-task',
+      headSha: null,
+      prNumber: null,
+      prUrl: null,
+      mergeCommitSha: null,
+      state: 'pending',
+    },
+    createdAt,
+    updatedAt: createdAt,
+  };
+  let policy = {
+    clanId,
+    userId,
+    tokenLimit: null,
+    allowedModels: null,
+    control: 'manual',
+    revision: 3,
+    enforcement: 'unavailable',
+  };
   const requests = [];
   const server = createServer(async (request, response) => {
     let raw = '';
@@ -36,12 +62,17 @@ async function fixture(t) {
     requests.push({ method: request.method, path: request.url, authorization: request.headers.authorization, body });
     response.setHeader('content-type', 'application/json');
     if (request.headers.authorization !== `Bearer ${token}`) {
-      response.writeHead(401); response.end(JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'Token required' } }));
+      response.writeHead(401);
+      response.end(JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'Token required' } }));
     } else if (request.url === '/v1/me') response.end(JSON.stringify(user));
     else if (request.url === `/v1/clans/${clanId}/agents` && request.method === 'POST') {
       response.writeHead(201);
-      response.end(JSON.stringify({ agent: { id: agentId, ownerId: userId, clanId, name: body.name,
-        role: body.role, createdAt }, token }));
+      response.end(
+        JSON.stringify({
+          agent: { id: agentId, ownerId: userId, clanId, name: body.name, role: body.role, createdAt },
+          token,
+        }),
+      );
     } else if (request.url === `/v1/clans/${clanId}/policy`) {
       if (request.method === 'POST') {
         const { expectedRevision, ...changes } = body;
@@ -52,7 +83,8 @@ async function fixture(t) {
     else if (request.url === `/v1/clans/${clanId}/tasks/${taskId}/complete` && request.method === 'POST') {
       response.end(JSON.stringify({ ...task, status: 'completed', ownerId: userId }));
     } else {
-      response.writeHead(404); response.end(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Unknown route' } }));
+      response.writeHead(404);
+      response.end(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Unknown route' } }));
     }
   });
   server.listen(0, '127.0.0.1');
@@ -62,10 +94,19 @@ async function fixture(t) {
   const bin = join(directory, 'bin');
   await mkdir(bin);
   const executions = join(directory, 'executions');
-  for (const executable of ['git', 'gh']) await writeFile(join(bin, executable), '#!/bin/sh\necho invoked >> "$CLQN_TEST_EXECUTIONS"\nexit 91\n', { mode: 0o700 });
+  for (const executable of ['git', 'gh'])
+    await writeFile(join(bin, executable), '#!/bin/sh\necho invoked >> "$CLQN_TEST_EXECUTIONS"\nexit 91\n', {
+      mode: 0o700,
+    });
   const call = (args, options = {}) => {
-    const env = { ...process.env, CLQN_CONFIG_DIR: join(directory, 'config'), CLQN_TOKEN: token,
-      CLQN_CLAN_ID: clanId, PATH: `${bin}:${process.env.PATH}`, CLQN_TEST_EXECUTIONS: executions };
+    const env = {
+      ...process.env,
+      CLQN_CONFIG_DIR: join(directory, 'config'),
+      CLQN_TOKEN: token,
+      CLQN_CLAN_ID: clanId,
+      PATH: `${bin}:${process.env.PATH}`,
+      CLQN_TEST_EXECUTIONS: executions,
+    };
     if (options.savedLogin) delete env.CLQN_TOKEN;
     const result = run(process.execPath, [cli, '--api-url', apiUrl, ...args], { env, cwd: directory });
     result.child.stdin.end(options.input);
@@ -89,9 +130,13 @@ test('agent add registers workers and orchestrators with positional names', asyn
   const orchestrator = JSON.parse((await f.call(['agent', 'add', 'Coordinator', '--orchestrator', '--json'])).stdout);
   assert.equal(worker.agent.name, 'Codex');
   assert.equal(orchestrator.agent.role, 'orchestrator');
-  assert.deepEqual(f.requests.map((request) => request.body), [
-    { name: 'Codex', role: 'worker' }, { name: 'Coordinator', role: 'orchestrator' },
-  ]);
+  assert.deepEqual(
+    f.requests.map((request) => request.body),
+    [
+      { name: 'Codex', role: 'worker' },
+      { name: 'Coordinator', role: 'orchestrator' },
+    ],
+  );
 });
 
 test('limits shows current settings or updates them directly', async (t) => {
@@ -99,24 +144,40 @@ test('limits shows current settings or updates them directly', async (t) => {
   const initial = JSON.parse((await f.call(['limits', '--json'])).stdout);
   assert.equal(initial.revision, 3);
   assert.equal(initial.enforcement, 'unavailable');
-  const updated = JSON.parse((await f.call(['limits', '--tokens', '100000', '--models', 'provider/model', '--control', 'approve', '--json'])).stdout);
+  const updated = JSON.parse(
+    (await f.call(['limits', '--tokens', '100000', '--models', 'provider/model', '--control', 'approve', '--json']))
+      .stdout,
+  );
   assert.equal(updated.tokenLimit, 100000);
   assert.equal(updated.revision, 4);
-  assert.deepEqual(f.requests.map((request) => request.method), ['GET', 'GET', 'POST']);
-  assert.deepEqual(f.requests[2].body, { tokenLimit: 100000, allowedModels: ['provider/model'], control: 'approve', expectedRevision: 3 });
+  assert.deepEqual(
+    f.requests.map((request) => request.method),
+    ['GET', 'GET', 'POST'],
+  );
+  assert.deepEqual(f.requests[2].body, {
+    tokenLimit: 100000,
+    allowedModels: ['provider/model'],
+    control: 'approve',
+    expectedRevision: 3,
+  });
 });
 
 test('simple commands reject invalid names and limit values before HTTP access', async (t) => {
   const f = await fixture(t);
   for (const args of [
-    ['agent', 'add', ' '], ['limits', '--tokens', '-1'], ['limits', '--tokens', '1.5'],
-    ['limits', '--tokens', 'NaN'], ['limits', '--models', 'same', 'same'], ['limits', '--control', 'full'],
-  ]) await assert.rejects(f.call([...args, '--json']), (error) => {
-    assert.equal(error.code, 1);
-    assert.equal(error.stdout, '');
-    assert.equal(JSON.parse(error.stderr).error.code, 'COMMAND_FAILED');
-    return true;
-  });
+    ['agent', 'add', ' '],
+    ['limits', '--tokens', '-1'],
+    ['limits', '--tokens', '1.5'],
+    ['limits', '--tokens', 'NaN'],
+    ['limits', '--models', 'same', 'same'],
+    ['limits', '--control', 'full'],
+  ])
+    await assert.rejects(f.call([...args, '--json']), (error) => {
+      assert.equal(error.code, 1);
+      assert.equal(error.stdout, '');
+      assert.equal(JSON.parse(error.stderr).error.code, 'COMMAND_FAILED');
+      return true;
+    });
   assert.equal(f.requests.length, 0);
 });
 
@@ -124,9 +185,15 @@ test('task done uses the completion endpoint and JSON contract', async (t) => {
   const f = await fixture(t);
   const done = JSON.parse((await f.call(['task', 'done', taskId, '--json'])).stdout);
   assert.equal(done.status, 'completed');
-  assert.ok(f.requests.every((request) => request.method === 'POST'
-    && request.path === `/v1/clans/${clanId}/tasks/${taskId}/complete`));
-  assert.deepEqual(f.requests.map((request) => request.body), [{}]);
+  assert.ok(
+    f.requests.every(
+      (request) => request.method === 'POST' && request.path === `/v1/clans/${clanId}/tasks/${taskId}/complete`,
+    ),
+  );
+  assert.deepEqual(
+    f.requests.map((request) => request.body),
+    [{}],
+  );
 });
 
 test('task submit defaults to the current directory but preserves the ownership preflight', async (t) => {
@@ -152,16 +219,24 @@ test('login accepts piped input', async (t) => {
 test('removed commands and flags fail before API or Git access', async (t) => {
   const f = await fixture(t);
   for (const args of [
-    ['agent', 'status'], ['agent', 'connect', '--name', 'Legacy'], ['agent', 'add', '--name', 'Legacy'],
-    ['sync'], ['watch'], ['repo', 'sync'], ['policy', 'show'], ['policy', 'set', '--tokens', '10'],
+    ['agent', 'status'],
+    ['agent', 'connect', '--name', 'Legacy'],
+    ['agent', 'add', '--name', 'Legacy'],
+    ['sync'],
+    ['watch'],
+    ['repo', 'sync'],
+    ['policy', 'show'],
+    ['policy', 'set', '--tokens', '10'],
     ...['claim', 'prepare', 'publish', 'complete', 'integrate'].map((action) => ['task', action, taskId]),
     ...['metrics', 'metric', 'usage'].map((action) => [action]),
-    ['login', '--token-stdin'], ['limits', '--token-limit', '10'],
-  ]) await assert.rejects(f.call(args), (error) => {
-    assert.equal(error.code, 1);
-    assert.match(error.stderr, /unknown (command|option)/);
-    return true;
-  });
+    ['login', '--token-stdin'],
+    ['limits', '--token-limit', '10'],
+  ])
+    await assert.rejects(f.call(args), (error) => {
+      assert.equal(error.code, 1);
+      assert.match(error.stderr, /unknown (command|option)/);
+      return true;
+    });
   assert.equal(f.requests.length, 0);
   await assert.rejects(readFile(f.executions), { code: 'ENOENT' });
 });

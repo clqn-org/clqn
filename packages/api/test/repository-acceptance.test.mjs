@@ -1,17 +1,17 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { tmpdir, devNull } from 'node:os';
-import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import postgres from 'postgres';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { devNull, tmpdir } from 'node:os';
+import { join } from 'node:path';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
+import { serve } from '@hono/node-server';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
-import { serve } from '@hono/node-server';
+import postgres from 'postgres';
 import { createApp } from '../dist/app.js';
 import { createStore } from '../dist/store.js';
 
@@ -41,7 +41,8 @@ test('repository acceptance: orchestrator delegates, worker publishes isolated w
       }
       if (userIds.length) await sql`delete from users where id in ${sql(userIds)}`;
     } finally {
-      await connection.close(); await sql.end();
+      await connection.close();
+      await sql.end();
       await rm(root, { recursive: true, force: true });
     }
   });
@@ -66,20 +67,36 @@ test('repository acceptance: orchestrator delegates, worker publishes isolated w
   const bin = join(root, 'bin');
   const prFile = join(root, 'pr.json');
   const logFile = join(root, 'commands.jsonl');
-  const env = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_NOSYSTEM: '1',
-    GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.com',
-    GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.com',
-    CLQN_CONFIG_DIR: join(root, 'config'), CLQN_CLAN_ID: clan.id,
-    CLQN_TEST_GIT: actualGit, CLQN_TEST_REMOTE: remote, CLQN_TEST_PR: prFile,
-    CLQN_TEST_LOG: logFile, CLQN_TEST_INTEGRATOR: integrator };
+  const env = {
+    ...process.env,
+    GIT_CONFIG_GLOBAL: devNull,
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_AUTHOR_NAME: 'Test',
+    GIT_AUTHOR_EMAIL: 'test@example.com',
+    GIT_COMMITTER_NAME: 'Test',
+    GIT_COMMITTER_EMAIL: 'test@example.com',
+    CLQN_CONFIG_DIR: join(root, 'config'),
+    CLQN_CLAN_ID: clan.id,
+    CLQN_TEST_GIT: actualGit,
+    CLQN_TEST_REMOTE: remote,
+    CLQN_TEST_PR: prFile,
+    CLQN_TEST_LOG: logFile,
+    CLQN_TEST_INTEGRATOR: integrator,
+  };
   delete env.GIT_CONFIG_COUNT;
-  const git = async (cwd, args) => (await execute(actualGit, ['-c', `core.hooksPath=${devNull}`, ...args], {
-    cwd, env, encoding: 'utf8',
-  })).stdout.trim();
+  const git = async (cwd, args) =>
+    (
+      await execute(actualGit, ['-c', `core.hooksPath=${devNull}`, ...args], {
+        cwd,
+        env,
+        encoding: 'utf8',
+      })
+    ).stdout.trim();
   await git(root, ['init', '--bare', remote]);
   await git(root, ['clone', remote, personal]);
   await writeFile(join(personal, 'README.md'), 'initial project\n');
-  await git(personal, ['add', '.']); await git(personal, ['commit', '-m', 'base']);
+  await git(personal, ['add', '.']);
+  await git(personal, ['commit', '-m', 'base']);
   await git(personal, ['branch', '-M', 'main']);
   await git(personal, ['push', 'origin', 'main']);
   await git(remote, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
@@ -91,7 +108,9 @@ test('repository acceptance: orchestrator delegates, worker publishes isolated w
   const personalStatus = await git(personal, ['status', '--porcelain=v1']);
 
   await mkdir(bin);
-  await writeFile(join(bin, 'git'), `#!${process.execPath}
+  await writeFile(
+    join(bin, 'git'),
+    `#!${process.execPath}
 const fs = require('node:fs'); const cp = require('node:child_process');
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.CLQN_TEST_LOG, JSON.stringify({file:'git',args})+'\\n');
@@ -99,8 +118,12 @@ const network = args.some(arg => ['fetch','push','ls-remote'].includes(arg));
 const extra = network ? ['-c','url.'+process.env.CLQN_TEST_REMOTE+'.insteadOf=https://github.com/test/project.git','-c','protocol.file.allow=always'] : [];
 const result = cp.spawnSync(process.env.CLQN_TEST_GIT,[...extra,...args],{stdio:'inherit'});
 process.exit(result.status ?? 1);
-`, { mode: 0o755 });
-  await writeFile(join(bin, 'gh'), `#!${process.execPath}
+`,
+    { mode: 0o755 },
+  );
+  await writeFile(
+    join(bin, 'gh'),
+    `#!${process.execPath}
 const fs = require('node:fs'); const cp = require('node:child_process');
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.CLQN_TEST_LOG,JSON.stringify({file:'gh',args})+'\\n');
@@ -127,16 +150,29 @@ else if(args[1] === 'merge' && pr) {
  pr.state = 'MERGED'; pr.mergeCommit = {oid:git(cwd,['rev-parse','HEAD'])};
  fs.writeFileSync(path,JSON.stringify(pr));
 } else process.exit(3);
-`, { mode: 0o755 });
+`,
+    { mode: 0o755 },
+  );
   const cliEnv = { ...env, PATH: `${bin}:${process.env.PATH}` };
-  const call = async (token, args, cwd = personal) => JSON.parse((await execute(process.execPath,
-    [cli, '--api-url', apiUrl, '--json', ...args], { env: { ...cliEnv, CLQN_TOKEN: token }, cwd, encoding: 'utf8' })).stdout);
+  const call = async (token, args, cwd = personal) =>
+    JSON.parse(
+      (
+        await execute(process.execPath, [cli, '--api-url', apiUrl, '--json', ...args], {
+          env: { ...cliEnv, CLQN_TOKEN: token },
+          cwd,
+          encoding: 'utf8',
+        })
+      ).stdout,
+    );
 
   const task = await call(orchestrator.token, ['task', 'add', 'Implement shared feature', '--code']);
   assert.equal(task.repository.slug, 'test/project');
   assert.equal(task.repository.baseSha, baseSha);
   assert.match(task.repository.branch, /^clqn\/task-[a-f0-9-]+$/);
-  assert.equal((await call(orchestrator.token, ['task', 'assign', task.id, '--agent', worker.agent.id])).assignedAgentId, worker.agent.id);
+  assert.equal(
+    (await call(orchestrator.token, ['task', 'assign', task.id, '--agent', worker.agent.id])).assignedAgentId,
+    worker.agent.id,
+  );
   const prepared = await call(worker.token, ['task', 'start', task.id]);
   const worktree = prepared.path;
   assert.equal(prepared.task.ownerAgentId, worker.agent.id);
@@ -146,7 +182,8 @@ else if(args[1] === 'merge' && pr) {
   const resumed = await call(worker.token, ['task', 'start', task.id], worktree);
   assert.equal(resumed.path, worktree);
   assert.equal(await readFile(join(worktree, 'feature.txt'), 'utf8'), 'finished task\n');
-  await git(worktree, ['add', 'feature.txt']); await git(worktree, ['commit', '-m', 'Implement feature']);
+  await git(worktree, ['add', 'feature.txt']);
+  await git(worktree, ['commit', '-m', 'Implement feature']);
   const headSha = await git(worktree, ['rev-parse', 'HEAD']);
   const published = await call(worker.token, ['task', 'submit', task.id, '--body', 'Feature tested'], worktree);
   assert.equal(published.repository.headSha, headSha);
@@ -165,8 +202,17 @@ else if(args[1] === 'merge' && pr) {
   assert.equal(stored.repository.headSha, headSha);
   assert.equal(stored.repository.mergeCommitSha, mergedSha);
 
-  const nextTask = await call(orchestrator.token, ['task', 'add', 'Build on integrated feature', '--repo', 'test/project',
-    '--base-sha', mergedSha, '--branch', 'clqn/acceptance-next']);
+  const nextTask = await call(orchestrator.token, [
+    'task',
+    'add',
+    'Build on integrated feature',
+    '--repo',
+    'test/project',
+    '--base-sha',
+    mergedSha,
+    '--branch',
+    'clqn/acceptance-next',
+  ]);
   await call(orchestrator.token, ['task', 'assign', nextTask.id, '--agent', worker.agent.id]);
   await call(worker.token, ['task', 'start', nextTask.id, '--from', personal, '--path', nextWorktree]);
   assert.equal(await git(nextWorktree, ['rev-parse', 'HEAD']), mergedSha);
@@ -176,11 +222,28 @@ else if(args[1] === 'merge' && pr) {
   assert.equal(await git(personal, ['status', '--porcelain=v1']), personalStatus);
   assert.equal(await readFile(join(personal, 'README.md'), 'utf8'), 'personal uncommitted edit\n');
   assert.equal(await readFile(join(personal, 'private.txt'), 'utf8'), 'personal untracked data\n');
-  const events = await sql`select type from events where clan_id = ${clan.id} and resource_id = ${task.id} order by sequence`;
-  for (const type of ['task.created', 'task.assigned', 'task.claimed', 'task.repository_updated', 'task.integrated', 'task.completed']) {
-    assert.ok(events.some((event) => event.type === type), `Missing audit event ${type}`);
+  const events =
+    await sql`select type from events where clan_id = ${clan.id} and resource_id = ${task.id} order by sequence`;
+  for (const type of [
+    'task.created',
+    'task.assigned',
+    'task.claimed',
+    'task.repository_updated',
+    'task.integrated',
+    'task.completed',
+  ]) {
+    assert.ok(
+      events.some((event) => event.type === type),
+      `Missing audit event ${type}`,
+    );
   }
   const commands = (await readFile(logFile, 'utf8')).trim().split('\n').map(JSON.parse);
-  assert.ok(!commands.some(({file,args}) => file === 'git' && args.some((arg) => ['pull','reset','stash','--force'].includes(arg))));
-  assert.ok(commands.some(({file,args}) => file === 'gh' && args.includes('--match-head-commit') && args.includes(headSha)));
+  assert.ok(
+    !commands.some(
+      ({ file, args }) => file === 'git' && args.some((arg) => ['pull', 'reset', 'stash', '--force'].includes(arg)),
+    ),
+  );
+  assert.ok(
+    commands.some(({ file, args }) => file === 'gh' && args.includes('--match-head-commit') && args.includes(headSha)),
+  );
 });

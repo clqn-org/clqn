@@ -1,5 +1,5 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import { createApp } from '../dist/app.js';
 
 const alice = { id: '65fd2b48-b47f-4862-a85d-af491cdb8a3c', email: 'alice@example.com' };
@@ -10,11 +10,17 @@ const headers = { authorization: `Bearer ${token}`, 'content-type': 'application
 
 test('agent credentials cannot administer clans or escape their registered clan', async () => {
   const actor = { ...alice, clanId, agentId };
-  const app = createApp({ authenticate: async () => actor,
+  const app = createApp({
+    authenticate: async () => actor,
     listClans: async () => [{ id: clanId }, { id: alice.id }],
     members: async () => [{ userId: alice.id }],
   });
-  for (const path of ['/v1/clans', '/v1/invitations/join', `/v1/clans/${clanId}/agents`, `/v1/clans/${clanId}/invitations`]) {
+  for (const path of [
+    '/v1/clans',
+    '/v1/invitations/join',
+    `/v1/clans/${clanId}/agents`,
+    `/v1/clans/${clanId}/invitations`,
+  ]) {
     assert.equal((await app.request(path, { method: 'POST', headers, body: '{}' })).status, 403);
   }
   for (const path of ['members', 'agents', 'context', 'tasks', 'events', 'status']) {
@@ -27,7 +33,8 @@ test('agent credentials cannot administer clans or escape their registered clan'
 
 test('agent registration uses the authenticated owner, validates the name, and exposes registration status', async () => {
   const agent = { id: agentId, clanId, ownerId: alice.id, name: 'Codex', createdAt: new Date().toISOString() };
-  const app = createApp({ authenticate: async () => alice,
+  const app = createApp({
+    authenticate: async () => alice,
     registerAgent: async (actor, receivedClan, name) => {
       assert.deepEqual(actor, alice);
       assert.equal(receivedClan, clanId);
@@ -37,7 +44,8 @@ test('agent registration uses the authenticated owner, validates the name, and e
     agentStatus: async () => undefined,
     listAgents: async () => [agent],
   });
-  const post = (body) => app.request(`/v1/clans/${clanId}/agents`, { method: 'POST', headers, body: JSON.stringify(body) });
+  const post = (body) =>
+    app.request(`/v1/clans/${clanId}/agents`, { method: 'POST', headers, body: JSON.stringify(body) });
   assert.equal((await post({ name: ' Codex ' })).status, 201);
   for (const body of [{}, { name: ' ' }, { name: 'x'.repeat(101) }, { name: 'Codex', ownerId: alice.id }]) {
     assert.equal((await post(body)).status, 400);

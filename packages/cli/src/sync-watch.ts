@@ -1,4 +1,4 @@
-import { syncMain, type MainSyncResult } from './git.js';
+import { type MainSyncResult, syncMain } from './git.js';
 
 export interface SyncEventPage {
   events: Array<{ sequence: number; type: string; resourceId: string | null }>;
@@ -23,7 +23,11 @@ const cancelled = Symbol('cancelled');
 function wait(milliseconds: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) => {
-    const done = () => { clearTimeout(timer); signal.removeEventListener('abort', done); resolve(); };
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', done);
+      resolve();
+    };
     const timer = setTimeout(done, Math.max(1, milliseconds));
     signal.addEventListener('abort', done, { once: true });
     if (signal.aborted) done();
@@ -34,12 +38,17 @@ async function untilAborted<T>(operation: Promise<T>, signal: AbortSignal): Prom
   if (signal.aborted) return cancelled;
   let stop: (() => void) | undefined;
   try {
-    return await Promise.race([operation, new Promise<typeof cancelled>((resolve) => {
-      stop = () => resolve(cancelled);
-      signal.addEventListener('abort', stop, { once: true });
-      if (signal.aborted) stop();
-    })]);
-  } finally { if (stop) signal.removeEventListener('abort', stop); }
+    return await Promise.race([
+      operation,
+      new Promise<typeof cancelled>((resolve) => {
+        stop = () => resolve(cancelled);
+        signal.addEventListener('abort', stop, { once: true });
+        if (signal.aborted) stop();
+      }),
+    ]);
+  } finally {
+    if (stop) signal.removeEventListener('abort', stop);
+  }
 }
 
 // Git runs at startup, after a matching notification, or on a slow safety fallback.
@@ -48,7 +57,12 @@ export async function runSyncWatch(options: SyncWatchOptions): Promise<void> {
   const pollInterval = options.pollIntervalMs ?? 15_000;
   const fallbackInterval = options.fallbackIntervalMs ?? 300_000;
   let cursor = options.initialCursor ?? 0;
-  if (!Number.isFinite(pollInterval) || pollInterval <= 0 || !Number.isFinite(fallbackInterval) || fallbackInterval <= 0) {
+  if (
+    !Number.isFinite(pollInterval) ||
+    pollInterval <= 0 ||
+    !Number.isFinite(fallbackInterval) ||
+    fallbackInterval <= 0
+  ) {
     throw new Error('Sync intervals must be positive finite numbers');
   }
   if (!Number.isSafeInteger(cursor) || cursor < 0) throw new Error('Sync cursor must be a nonnegative safe integer');
@@ -64,13 +78,19 @@ export async function runSyncWatch(options: SyncWatchOptions): Promise<void> {
 
   const synchronize = async () => {
     try {
-      const result = await untilAborted(sync({ repoPath: options.repoPath, repository: options.repository, signal }), signal);
+      const result = await untilAborted(
+        sync({ repoPath: options.repoPath, repository: options.repository, signal }),
+        signal,
+      );
       if (result === cancelled || signal.aborted) return;
       gitFailures = 0;
       nextGitAt = Date.now() + fallbackInterval;
       // A skipped local checkout is left untouched. Its next attempt is the safety fallback,
       // not a repeated network fetch on every lightweight API poll.
-      if (pendingCursor !== undefined) { cursor = pendingCursor; pendingCursor = undefined; }
+      if (pendingCursor !== undefined) {
+        cursor = pendingCursor;
+        pendingCursor = undefined;
+      }
       options.onResult(result);
     } catch (error) {
       if (signal.aborted) return;
@@ -90,12 +110,20 @@ export async function runSyncWatch(options: SyncWatchOptions): Promise<void> {
         for (let pages = 0; pages < 10 && !signal.aborted; pages += 1) {
           const page = await untilAborted(options.getEvents(scannedCursor, signal), signal);
           if (page === cancelled || signal.aborted) return;
-          if (!Number.isSafeInteger(page.nextCursor) || page.nextCursor < scannedCursor || page.events.length > 100 ||
-              (page.events.length > 0 && page.nextCursor === scannedCursor)) {
+          if (
+            !Number.isSafeInteger(page.nextCursor) ||
+            page.nextCursor < scannedCursor ||
+            page.events.length > 100 ||
+            (page.events.length > 0 && page.nextCursor === scannedCursor)
+          ) {
             throw new Error('Event cursor did not advance correctly');
           }
-          changed ||= page.events.some((event) => event.sequence > cursor && event.type === 'repository.main_changed' &&
-            event.resourceId?.toLowerCase() === repository);
+          changed ||= page.events.some(
+            (event) =>
+              event.sequence > cursor &&
+              event.type === 'repository.main_changed' &&
+              event.resourceId?.toLowerCase() === repository,
+          );
           scannedCursor = page.nextCursor;
           if (page.events.length < 100) break;
         }

@@ -3,7 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "bin": { "clqn": "dist/index.js" },
-  "scripts": { "build": "tsc -p tsconfig.json", "typecheck": "tsc -p tsconfig.json --noEmit" },
-  "dependencies": { "@clqn/shared": "0.1.0", "@clqn/mcp": "0.1.0", "commander": "^14.0.0" }
+  "bin": {
+    "clqn": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@clqn/shared": "0.1.0",
+    "@clqn/mcp": "0.1.0",
+    "commander": "^14.0.0"
+  }
 }

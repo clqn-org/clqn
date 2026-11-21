@@ -1,8 +1,8 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { ClqnClient, ApiError } from '../dist/index.js';
+import test from 'node:test';
+import { ApiError, ClqnClient } from '../dist/index.js';
 
 test('client refuses credential-bearing URLs and authenticated remote HTTP', () => {
   assert.throws(() => new ClqnClient('https://user:secret@example.com'), /credentials/);
@@ -16,7 +16,10 @@ test('client never follows API redirects with a bearer token', async (t) => {
     if (request.url === '/v1/me') {
       assert.equal(request.headers.authorization, 'Bearer secret');
       response.writeHead(302, { location: '/destination' });
-    } else { redirected = true; response.writeHead(200); }
+    } else {
+      redirected = true;
+      response.writeHead(200);
+    }
     response.end('{}');
   });
   server.listen(0, '127.0.0.1');

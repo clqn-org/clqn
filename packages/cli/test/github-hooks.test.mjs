@@ -1,8 +1,8 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import test from 'node:test';
 import { configureGithubWebhook, removeGithubWebhook } from '../dist/github-hooks.js';
 
 const repository = 'example/project';
@@ -22,7 +22,9 @@ async function fixture(t, hooks = []) {
   const hooksPath = join(directory, 'hooks.json');
   const logPath = join(directory, 'requests.jsonl');
   await writeFile(hooksPath, JSON.stringify(hooks));
-  await writeFile(join(bin, 'gh'), `#!${process.execPath}
+  await writeFile(
+    join(bin, 'gh'),
+    `#!${process.execPath}
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 let raw = '';
@@ -40,12 +42,23 @@ process.stdin.on('end', () => {
  else if (method === 'DELETE') process.stdout.write('');
  else process.stdout.write(JSON.stringify({id: method === 'PATCH' ? 42 : 91, config:{url:body.config.url,secret:body.config.secret}}));
 });
-`, { mode: 0o755 });
-  Object.assign(process.env, { PATH: bin, GH_HOST: 'enterprise.invalid', CLQN_TEST_HOOK_LOG: logPath, CLQN_TEST_HOOKS: hooksPath });
+`,
+    { mode: 0o755 },
+  );
+  Object.assign(process.env, {
+    PATH: bin,
+    GH_HOST: 'enterprise.invalid',
+    CLQN_TEST_HOOK_LOG: logPath,
+    CLQN_TEST_HOOKS: hooksPath,
+  });
   delete process.env.CLQN_TEST_HOOK_ERROR;
   const requests = async () => {
-    try { return (await readFile(logPath, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse); }
-    catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+    try {
+      return (await readFile(logPath, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
+    } catch (error) {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    }
   };
   return { directory, bin, logPath, hooksPath, requests };
 }
@@ -70,13 +83,18 @@ test('GitHub webhook creation sends the secret only through stdin and returns on
   assert.equal(requests[1].args[requests[1].args.indexOf('--method') + 1], 'POST');
   assert.equal(requests[1].args[requests[1].args.indexOf('--input') + 1], '-');
   assert.deepEqual(requests[1].body, {
-    name: 'web', active: true, events: ['push'],
+    name: 'web',
+    active: true,
+    events: ['push'],
     config: { url, content_type: 'json', secret, insecure_ssl: '0' },
   });
 });
 
 test('GitHub webhook setup reuses an exact URL across paginated hooks and updates its secret', async (t) => {
-  const f = await fixture(t, [[{ id: 11, config: { url: 'https://elsewhere.example/hook' } }], [{ id: 42, config: { url } }]]);
+  const f = await fixture(t, [
+    [{ id: 11, config: { url: 'https://elsewhere.example/hook' } }],
+    [{ id: 42, config: { url } }],
+  ]);
   assert.deepEqual(await configureGithubWebhook({ repository, url, secret }), { id: 42, url });
   const requests = await f.requests();
   assert.equal(requests.length, 2);
@@ -89,16 +107,28 @@ test('GitHub webhook setup reuses an exact URL across paginated hooks and update
 });
 
 test('ambiguous webhook matches fail without creating, updating, or deleting any hook', async (t) => {
-  const f = await fixture(t, [[{ id: 1, config: { url } }, { id: 2, config: { url } }]]);
+  const f = await fixture(t, [
+    [
+      { id: 1, config: { url } },
+      { id: 2, config: { url } },
+    ],
+  ]);
   await assert.rejects(configureGithubWebhook({ repository, url, secret }));
   await assert.rejects(removeGithubWebhook({ repository, url }));
   const requests = await f.requests();
   assert.equal(requests.length, 2);
-  assert.ok(requests.every(({ args }) => !args.includes('POST') && !args.includes('PATCH') && !args.includes('DELETE')));
+  assert.ok(
+    requests.every(({ args }) => !args.includes('POST') && !args.includes('PATCH') && !args.includes('DELETE')),
+  );
 });
 
 test('webhook removal deletes only the exact matching URL and is a no-op when absent', async (t) => {
-  const f = await fixture(t, [[{ id: 7, config: { url: 'https://elsewhere.example/hook' } }, { id: 42, config: { url } }]]);
+  const f = await fixture(t, [
+    [
+      { id: 7, config: { url: 'https://elsewhere.example/hook' } },
+      { id: 42, config: { url } },
+    ],
+  ]);
   assert.deepEqual(await removeGithubWebhook({ repository, url }), { removed: true });
   const requests = await f.requests();
   requests.forEach(assertHostAndNoSecret);
@@ -124,14 +154,27 @@ test('GitHub errors never expose the secret or raw child stderr', async (t) => {
 
 test('invalid repository, URL, and secret inputs are rejected before starting gh', async (t) => {
   const f = await fixture(t, [[]]);
-  for (const badRepository of ['--help', 'https://github.com/example/project', 'example/project;touch', '../project', 'example/project/extra']) {
+  for (const badRepository of [
+    '--help',
+    'https://github.com/example/project',
+    'example/project;touch',
+    '../project',
+    'example/project/extra',
+  ]) {
     await assert.rejects(configureGithubWebhook({ repository: badRepository, url, secret }));
   }
-  for (const badUrl of ['https://clqn.example/wrong/path', 'https://user:password@clqn.example/hooks/github/2c753d10-6378-4b86-963d-be68a816366c', `${url}#fragment`, 'http://remote.example/hooks/github/2c753d10-6378-4b86-963d-be68a816366c', 'file:///tmp/hook']) {
+  for (const badUrl of [
+    'https://clqn.example/wrong/path',
+    'https://user:password@clqn.example/hooks/github/2c753d10-6378-4b86-963d-be68a816366c',
+    `${url}#fragment`,
+    'http://remote.example/hooks/github/2c753d10-6378-4b86-963d-be68a816366c',
+    'file:///tmp/hook',
+  ]) {
     await assert.rejects(configureGithubWebhook({ repository, url: badUrl, secret }));
     await assert.rejects(removeGithubWebhook({ repository, url: badUrl }));
   }
-  for (const badSecret of ['', 'short']) await assert.rejects(configureGithubWebhook({ repository, url, secret: badSecret }));
+  for (const badSecret of ['', 'short'])
+    await assert.rejects(configureGithubWebhook({ repository, url, secret: badSecret }));
   assert.deepEqual(await f.requests(), []);
 });
 

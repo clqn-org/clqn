@@ -1,7 +1,7 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
+import { errorSchema, healthSchema } from '@clqn/shared';
 import { createApp } from '../dist/app.js';
-import { healthSchema, errorSchema } from '@clqn/shared';
 
 test('health endpoint satisfies the shared contract without a database', async () => {
   const response = await createApp().request('/health');
@@ -27,8 +27,13 @@ test('protected endpoints fail closed when no database is configured', async () 
 test('missing, malformed, and unknown credentials never reach workspace operations', async () => {
   let lookups = 0;
   const app = createApp({
-    authenticate: async () => { lookups++; return undefined; },
-    listClans: async () => { assert.fail('Unauthenticated query'); },
+    authenticate: async () => {
+      lookups++;
+      return undefined;
+    },
+    listClans: async () => {
+      assert.fail('Unauthenticated query');
+    },
   });
   for (const authorization of ['', 'Bearer raw-password', `Basic ${token}`, `Bearer ${token}`]) {
     const response = await app.request('/v1/clans', { headers: { authorization } });
@@ -41,7 +46,10 @@ test('missing, malformed, and unknown credentials never reach workspace operatio
 test('authentication hashes credentials and clan creation uses verified actor', async () => {
   const { hashToken } = await import('../dist/store.js');
   const app = createApp({
-    authenticate: async (hash) => { assert.equal(hash, hashToken(token)); return alice; },
+    authenticate: async (hash) => {
+      assert.equal(hash, hashToken(token));
+      return alice;
+    },
     createClan: async (id, name) => {
       assert.equal(id, alice.id);
       assert.equal(name, 'Project');
@@ -50,11 +58,21 @@ test('authentication hashes credentials and clan creation uses verified actor', 
   });
   const me = await app.request('/v1/me', { headers });
   assert.deepEqual(await me.json(), alice);
-  const result = await app.request('/v1/clans', { method: 'POST', headers, body: JSON.stringify({ name: ' Project ' }) });
+  const result = await app.request('/v1/clans', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ name: ' Project ' }),
+  });
   assert.equal(result.status, 201);
   assert.equal((await result.json()).createdBy, alice.id);
-  for (const body of ['no JSON', '{}', '{"name":" "}', JSON.stringify({ name: 'x'.repeat(101) }), JSON.stringify({name: '\0'}),
-    JSON.stringify({ name: 'Project', createdBy: 'attacker' })]) {
+  for (const body of [
+    'no JSON',
+    '{}',
+    '{"name":" "}',
+    JSON.stringify({ name: 'x'.repeat(101) }),
+    JSON.stringify({ name: '\0' }),
+    JSON.stringify({ name: 'Project', createdBy: 'attacker' }),
+  ]) {
     const response = await app.request('/v1/clans', { method: 'POST', headers, body });
     assert.equal(response.status, 400);
   }
@@ -95,5 +113,8 @@ test('invitation routes validate bodies, forward verified identity, and hide ina
   }
   assert.equal((await post('/v1/invitations/join', { code })).status, 404);
   assert.equal((await post('/v1/invitations/join', { code: 'bad' })).status, 400);
-  assert.equal((await app.request('/v1/invitations/join', { method: 'POST', headers, body: 'x'.repeat(5000) })).status, 413);
+  assert.equal(
+    (await app.request('/v1/invitations/join', { method: 'POST', headers, body: 'x'.repeat(5000) })).status,
+    413,
+  );
 });

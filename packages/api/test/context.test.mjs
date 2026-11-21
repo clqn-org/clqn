@@ -1,20 +1,31 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import postgres from 'postgres';
+import {
+  contextEntrySchema,
+  contextHistorySchema,
+  contextKeySchema,
+  contextListSchema,
+  writeContextSchema,
+} from '@clqn/shared';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
-import { createStore } from '../dist/store.js';
+import postgres from 'postgres';
 import { createApp } from '../dist/app.js';
-import { contextEntrySchema, contextHistorySchema, contextKeySchema, contextListSchema, writeContextSchema } from '@clqn/shared';
+import { createStore } from '../dist/store.js';
 
 test('context contracts require optimistic revisions and bound UTF-8 text', () => {
   assert.equal(writeContextSchema.safeParse({ text: 'hello', expectedRevision: 0 }).success, true);
   assert.equal(contextKeySchema.safeParse('.').success, false);
   assert.equal(contextKeySchema.safeParse('..').success, false);
-  for (const body of [{ text: 'hello' }, { text: '\0', expectedRevision: 0 }, { text: '', expectedRevision: -1 },
-    { text: '', expectedRevision: 0, actorId: randomUUID() }, { text: '🎉'.repeat(16385), expectedRevision: 0 }]) {
+  for (const body of [
+    { text: 'hello' },
+    { text: '\0', expectedRevision: 0 },
+    { text: '', expectedRevision: -1 },
+    { text: '', expectedRevision: 0, actorId: randomUUID() },
+    { text: '🎉'.repeat(16385), expectedRevision: 0 },
+  ]) {
     assert.equal(writeContextSchema.safeParse(body).success, false);
   }
 });
@@ -39,7 +50,10 @@ test('PostgreSQL: context isolation, immutable revisions, and concurrent compare
         await sql`delete from credentials where user_id in ${sql(userIds)}`;
         await sql`delete from users where id in ${sql(userIds)}`;
       }
-    } finally { await connection.close(); await sql.end(); }
+    } finally {
+      await connection.close();
+      await sql.end();
+    }
   });
   await migrate(drizzle(sql), { migrationsFolder: fileURLToPath(new URL('../drizzle', import.meta.url)) });
   const alice = await connection.provisionUser(`${randomUUID()}@example.com`);
@@ -51,9 +65,12 @@ test('PostgreSQL: context isolation, immutable revisions, and concurrent compare
   const key = encodeURIComponent('project/notes with spaces');
   const path = `/v1/clans/${clan.id}/context/${key}`;
   const auth = (token) => ({ authorization: `Bearer ${token}`, 'content-type': 'application/json' });
-  const write = (text, expectedRevision, token = alice.token) => app.request(path, {
-    method: 'POST', headers: auth(token), body: JSON.stringify({ text, expectedRevision }),
-  });
+  const write = (text, expectedRevision, token = alice.token) =>
+    app.request(path, {
+      method: 'POST',
+      headers: auth(token),
+      body: JSON.stringify({ text, expectedRevision }),
+    });
   assert.equal((await app.request(path, { headers: auth(alice.token) })).status, 404);
   const denied = await write('cannot write', 0, bob.token);
   assert.equal(denied.status, 404);
@@ -70,13 +87,21 @@ test('PostgreSQL: context isolation, immutable revisions, and concurrent compare
   const latestResponse = await app.request(path, { headers: auth(alice.token) });
   const latest = contextEntrySchema.parse(await latestResponse.json());
   assert.equal(latest.revision, 2);
-  const history = contextHistorySchema.parse(await (await app.request(`${path}/history`, { headers: auth(alice.token) })).json());
-  assert.deepEqual(history.revisions.map((entry) => entry.revision), [1, 2]);
+  const history = contextHistorySchema.parse(
+    await (await app.request(`${path}/history`, { headers: auth(alice.token) })).json(),
+  );
+  assert.deepEqual(
+    history.revisions.map((entry) => entry.revision),
+    [1, 2],
+  );
   assert.equal(history.revisions[0].text, created.text);
   assert.equal(history.revisions[1].text, latest.text);
-  const listing = contextListSchema.parse(await (await app.request(`/v1/clans/${clan.id}/context`, { headers: auth(alice.token) })).json());
+  const listing = contextListSchema.parse(
+    await (await app.request(`/v1/clans/${clan.id}/context`, { headers: auth(alice.token) })).json(),
+  );
   assert.equal(listing.entries[0].revision, 2);
   assert.equal((await app.request(`${path}/history`, { headers: auth(bob.token) })).status, 404);
-  const [audit] = await sql`select count(*)::integer as n from events where clan_id = ${clan.id} and type = 'context.written'`;
+  const [audit] =
+    await sql`select count(*)::integer as n from events where clan_id = ${clan.id} and type = 'context.written'`;
   assert.equal(audit.n, 2);
 });

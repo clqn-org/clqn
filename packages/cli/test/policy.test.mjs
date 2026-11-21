@@ -1,13 +1,13 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import { promisify } from 'node:util';
 import { execFile } from 'node:child_process';
-import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { fileURLToPath } from 'node:url';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 const cli = fileURLToPath(new URL('../dist/index.js', import.meta.url));
@@ -18,7 +18,15 @@ async function fixture(t, { conflict = false } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'clqn-policy-cli-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const token = `clqn_${'p'.repeat(43)}`;
-  let policy = { clanId, userId, tokenLimit: null, allowedModels: null, control: 'manual', revision: 7, enforcement: 'unavailable' };
+  let policy = {
+    clanId,
+    userId,
+    tokenLimit: null,
+    allowedModels: null,
+    control: 'manual',
+    revision: 7,
+    enforcement: 'unavailable',
+  };
   const requests = [];
   const server = createServer(async (request, response) => {
     let rawBody = '';
@@ -35,7 +43,11 @@ async function fixture(t, { conflict = false } = {}) {
     } else if (request.method === 'GET') response.end(JSON.stringify(policy));
     else if (conflict) {
       response.writeHead(409);
-      response.end(JSON.stringify({ error: { code: 'REVISION_CONFLICT', message: 'Policy changed; read the latest revision before updating' } }));
+      response.end(
+        JSON.stringify({
+          error: { code: 'REVISION_CONFLICT', message: 'Policy changed; read the latest revision before updating' },
+        }),
+      );
     } else {
       const { expectedRevision, ...changes } = body;
       policy = { ...policy, ...changes, revision: expectedRevision + 1 };
@@ -71,13 +83,34 @@ test('limits returns JSON and states the lack of runtime enforcement in human ou
 
 test('limits sends the selected settings and latest revision without replacing unspecified settings', async (t) => {
   const f = await fixture(t);
-  const result = await f.call(['limits', '--tokens', '50000', '--models', 'provider/model-a', 'provider/model-b', '--control', 'approve', '--json']);
-  assert.deepEqual(f.requests.map((request) => request.method), ['GET', 'POST']);
+  const result = await f.call([
+    'limits',
+    '--tokens',
+    '50000',
+    '--models',
+    'provider/model-a',
+    'provider/model-b',
+    '--control',
+    'approve',
+    '--json',
+  ]);
+  assert.deepEqual(
+    f.requests.map((request) => request.method),
+    ['GET', 'POST'],
+  );
   assert.deepEqual(f.requests[1].body, {
-    tokenLimit: 50000, allowedModels: ['provider/model-a', 'provider/model-b'], control: 'approve', expectedRevision: 7,
+    tokenLimit: 50000,
+    allowedModels: ['provider/model-a', 'provider/model-b'],
+    control: 'approve',
+    expectedRevision: 7,
   });
-  assert.deepEqual(JSON.parse(result.stdout), { ...f.initial, tokenLimit: 50000,
-    allowedModels: ['provider/model-a', 'provider/model-b'], control: 'approve', revision: 8 });
+  assert.deepEqual(JSON.parse(result.stdout), {
+    ...f.initial,
+    tokenLimit: 50000,
+    allowedModels: ['provider/model-a', 'provider/model-b'],
+    control: 'approve',
+    revision: 8,
+  });
 });
 
 test('limits supports zero budget, unrestricted models, and removal of a token cap', async (t) => {
@@ -92,9 +125,14 @@ test('limits supports zero budget, unrestricted models, and removal of a token c
 test('limits rejects malformed limits, model lists, control levels before HTTP access', async (t) => {
   const f = await fixture(t);
   for (const args of [
-    ['--tokens', '-1'], ['--tokens', '1.5'], ['--tokens', '1e6'],
-    ['--tokens', '9007199254740992'], ['--tokens', 'NaN'],
-    ['--models', 'same', 'same'], ['--models', 'model with spaces'], ['--control', 'full'],
+    ['--tokens', '-1'],
+    ['--tokens', '1.5'],
+    ['--tokens', '1e6'],
+    ['--tokens', '9007199254740992'],
+    ['--tokens', 'NaN'],
+    ['--models', 'same', 'same'],
+    ['--models', 'model with spaces'],
+    ['--control', 'full'],
   ]) {
     await assert.rejects(f.call(['limits', ...args, '--json']), (error) => {
       assert.equal(error.code, 1);
@@ -114,5 +152,8 @@ test('limits surfaces revision conflicts without retrying or reporting success',
     assert.equal(JSON.parse(error.stderr).error.code, 'REVISION_CONFLICT');
     return true;
   });
-  assert.deepEqual(f.requests.map((request) => request.method), ['GET', 'POST']);
+  assert.deepEqual(
+    f.requests.map((request) => request.method),
+    ['GET', 'POST'],
+  );
 });

@@ -1,19 +1,19 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFile } from 'node:child_process';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { once } from 'node:events';
-import postgres from 'postgres';
-import { drizzle } from 'drizzle-orm/postgres-js';
-import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { serve } from '@hono/node-server';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import { migrate } from 'drizzle-orm/postgres-js/migrator';
+import postgres from 'postgres';
 import { createApp } from '../dist/app.js';
 import { createStore } from '../dist/store.js';
 
@@ -103,15 +103,31 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
   const connectMcp = async (name, env) => {
     const client = new Client({ name, version: '1.0.0' });
     clients.push(client);
-    const transport = new StdioClientTransport({ command: process.execPath,
-      args: [cliPath, '--api-url', apiUrl, 'mcp'], cwd: directory, env, stderr: 'pipe' });
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [cliPath, '--api-url', apiUrl, 'mcp'],
+      cwd: directory,
+      env,
+      stderr: 'pipe',
+    });
     transport.stderr?.resume();
     await client.connect(transport);
     return client;
   };
-  const [aliceMcp, bobMcp] = await Promise.all([connectMcp('codex-acceptance', scopedCodexEnv), connectMcp('claude-acceptance', claudeEnv)]);
-  const expectedTools = ['clqn_read_context', 'clqn_write_context', 'clqn_list_context', 'clqn_create_task',
-    'clqn_claim_task', 'clqn_complete_task', 'clqn_list_tasks', 'clqn_get_status'];
+  const [aliceMcp, bobMcp] = await Promise.all([
+    connectMcp('codex-acceptance', scopedCodexEnv),
+    connectMcp('claude-acceptance', claudeEnv),
+  ]);
+  const expectedTools = [
+    'clqn_read_context',
+    'clqn_write_context',
+    'clqn_list_context',
+    'clqn_create_task',
+    'clqn_claim_task',
+    'clqn_complete_task',
+    'clqn_list_tasks',
+    'clqn_get_status',
+  ];
   const listed = new Set((await aliceMcp.listTools()).tools.map((tool) => tool.name));
   for (const name of expectedTools) assert.ok(listed.has(name), `Missing MCP tool ${name}`);
   const call = async (client, name, args = {}) => {
@@ -120,16 +136,30 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
     return JSON.parse(response.content[0].text);
   };
   assert.equal((await call(aliceMcp, 'clqn_get_status')).clan.id, clan.id);
-  const initial = await run(codexEnv, ['context', 'write', 'implementation', '--expected-revision', '0'], 'Alice: API work ready.');
+  const initial = await run(
+    codexEnv,
+    ['context', 'write', 'implementation', '--expected-revision', '0'],
+    'Alice: API work ready.',
+  );
   assert.equal(initial.revision, 1);
   assert.equal((await call(bobMcp, 'clqn_read_context', { key: 'implementation' })).text, 'Alice: API work ready.');
-  await call(bobMcp, 'clqn_write_context', { key: 'implementation', text: 'Bob: CLI work ready too.', expectedRevision: 1 });
+  await call(bobMcp, 'clqn_write_context', {
+    key: 'implementation',
+    text: 'Bob: CLI work ready too.',
+    expectedRevision: 1,
+  });
   assert.equal((await call(aliceMcp, 'clqn_read_context', { key: 'implementation' })).revision, 2);
   assert.equal((await run(codexEnv, ['context', 'read', 'implementation'])).text, 'Bob: CLI work ready too.');
   assert.equal((await run(claudeEnv, ['context', 'history', 'implementation'])).revisions.length, 2);
   assert.equal((await call(aliceMcp, 'clqn_list_context')).entries.length, 1);
-  const task = await call(aliceMcp, 'clqn_create_task', { description: 'Review shared implementation', alias: 'review' });
-  assert.equal((await run(aliceEnv, ['task', 'assign', 'review', '--agent', 'claude'])).assignedAgentId, claude.agent.id);
+  const task = await call(aliceMcp, 'clqn_create_task', {
+    description: 'Review shared implementation',
+    alias: 'review',
+  });
+  assert.equal(
+    (await run(aliceEnv, ['task', 'assign', 'review', '--agent', 'claude'])).assignedAgentId,
+    claude.agent.id,
+  );
   assert.equal((await call(bobMcp, 'clqn_claim_task', { taskId: 'review' })).ownerAgentId, claude.agent.id);
   const denied = await aliceMcp.callTool({ name: 'clqn_complete_task', arguments: { taskId: task.id } });
   assert.equal(denied.isError, true);
@@ -153,7 +183,11 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
   assert.ok(log.events.some((event) => event.type === 'task.completed'));
   assert.ok(log.events.every((event, i) => i === 0 || event.sequence < log.events[i - 1].sequence));
   assert.equal((await call(bobMcp, 'clqn_get_status')).stats.tasks.completed, 2);
-  const events = (await (await fetch(`${apiUrl}/v1/clans/${clan.id}/events`, { headers: { authorization: `Bearer ${bob.token}` } })).json()).events;
+  const events = (
+    await (
+      await fetch(`${apiUrl}/v1/clans/${clan.id}/events`, { headers: { authorization: `Bearer ${bob.token}` } })
+    ).json()
+  ).events;
   assert.ok(events.some((event) => event.type === 'context.written' && event.agentId === codex.agent.id));
   assert.ok(events.some((event) => event.type === 'context.written' && event.agentId === claude.agent.id));
   assert.ok(events.some((event) => event.type === 'task.completed' && event.resourceId === task.id));

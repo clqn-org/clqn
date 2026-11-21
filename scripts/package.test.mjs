@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
-import { once } from 'node:events';
-import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { promisify } from 'node:util';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
 
@@ -24,10 +24,32 @@ test('release installs without workspace dependencies and serves CLI and MCP', {
   const archive = fileURLToPath(new URL(`dist/clqn-cli-${manifest.version}.tgz`, root));
   const formula = await readFile(new URL('dist/clqn.rb', root), 'utf8');
   assert.ok(formula.includes(`releases/download/v${manifest.version}/clqn-cli-${manifest.version}.tgz`));
-  assert.ok(formula.includes(createHash('sha256').update(await readFile(archive)).digest('hex')));
+  assert.ok(
+    formula.includes(
+      createHash('sha256')
+        .update(await readFile(archive))
+        .digest('hex'),
+    ),
+  );
   const npmCli = process.env.npm_execpath;
-  await exec(npmCli ? process.execPath : 'npm', [...(npmCli ? [npmCli] : []), 'install', '--global', '--prefix', directory, '--cache', join(directory, 'cache'),
-    '--offline', '--ignore-scripts', '--no-audit', '--no-fund', archive], { cwd: directory });
+  await exec(
+    npmCli ? process.execPath : 'npm',
+    [
+      ...(npmCli ? [npmCli] : []),
+      'install',
+      '--global',
+      '--prefix',
+      directory,
+      '--cache',
+      join(directory, 'cache'),
+      '--offline',
+      '--ignore-scripts',
+      '--no-audit',
+      '--no-fund',
+      archive,
+    ],
+    { cwd: directory },
+  );
   // Windows places the npm command shim directly in the installation prefix.
   const cli = process.platform === 'win32' ? 'cmd.exe' : join(directory, 'bin', 'clqn');
   const launcher = process.platform === 'win32' ? ['/d', '/c', '.\\clqn.cmd'] : [];
@@ -48,16 +70,22 @@ test('release installs without workspace dependencies and serves CLI and MCP', {
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const apiUrl = `http://127.0.0.1:${server.address().port}`;
-  assert.deepEqual(JSON.parse((await exec(cli, [...launcher, '--api-url', apiUrl, '--json', 'health'], options)).stdout), health);
+  assert.deepEqual(
+    JSON.parse((await exec(cli, [...launcher, '--api-url', apiUrl, '--json', 'health'], options)).stdout),
+    health,
+  );
 
   const child = spawn(cli, [...launcher, '--api-url', apiUrl, 'mcp', '--path', '.'], {
-    ...options, stdio: ['pipe', 'pipe', 'pipe'],
+    ...options,
+    stdio: ['pipe', 'pipe', 'pipe'],
   });
   t.after(() => child.kill());
   let stderr = '';
-  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk;
+  });
   const responses = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
-  const send = (message) => child.stdin.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n');
+  const send = (message) => child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
   const receive = async (id) => {
     const { value, done } = await responses.next();
     assert.equal(done, false, stderr);
@@ -66,8 +94,11 @@ test('release installs without workspace dependencies and serves CLI and MCP', {
     assert.equal(message.error, undefined);
     return message.result;
   };
-  send({ id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {},
-    clientInfo: { name: 'package-test', version: '1.0.0' } } });
+  send({
+    id: 1,
+    method: 'initialize',
+    params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'package-test', version: '1.0.0' } },
+  });
   assert.equal((await receive(1)).serverInfo.name, 'clqn');
   send({ method: 'notifications/initialized' });
   send({ id: 2, method: 'tools/list', params: {} });

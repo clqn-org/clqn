@@ -2,7 +2,7 @@ import { ApiError, resourceReferenceSchema } from '@clqn/shared';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { agents } from './db/schema.js';
-import { tasks } from './db/tasks.js';
+import type { tasks } from './db/tasks.js';
 
 export function resourceFilter(table: typeof agents | typeof tasks, clanId: string, value: string | undefined) {
   const parsed = resourceReferenceSchema.safeParse(value);
@@ -13,7 +13,10 @@ export function resourceFilter(table: typeof agents | typeof tasks, clanId: stri
 
 export function rethrowAliasConflict(error: unknown): never {
   const cause = (error as { cause?: { code?: string; constraint_name?: string } }).cause;
-  if (cause?.code === '23505' && (cause.constraint_name === 'agents_clan_alias_idx' || cause.constraint_name === 'tasks_clan_alias_idx')) {
+  if (
+    cause?.code === '23505' &&
+    (cause.constraint_name === 'agents_clan_alias_idx' || cause.constraint_name === 'tasks_clan_alias_idx')
+  ) {
     throw new ApiError(409, 'ALIAS_CONFLICT', 'That alias is already in use for this resource type in the clan');
   }
   throw error;
