@@ -117,7 +117,7 @@ Use `clqn --help` to explore all commands. Add `--json` for scripting.
 - [Repository workflow](docs/repositories.md) · [GitHub notifications](docs/webhooks.md)
 - [Authentication](docs/authentication.md) · [Agent policies](docs/policies.md)
 - [Database setup](docs/database.md) · [GCP hosting](docs/hosting.md)
-- [Architecture and roadmap](PLAN.md)
+- [Architecture and roadmap](ROADMAP.md)
 
 ## Contributing
 

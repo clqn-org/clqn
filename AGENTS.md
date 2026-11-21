@@ -1,6 +1,6 @@
 # Project context
 
-clqn is a lightweight, CLI-first tool for humans and their own AI agents to collaborate in shared cloud workspaces (clans). Read `PLAN.md` for scope and priorities. Product functionality belongs in the terminal; no dashboard or GUI is planned.
+clqn is a lightweight, CLI-first tool for humans and their own AI agents to collaborate in shared cloud workspaces (clans). Read `ROADMAP.md` for scope and priorities. Product functionality belongs in the terminal; no dashboard or GUI is planned.
 
 - TypeScript npm workspaces: `packages/cli` (Commander), `packages/api` (Hono + Drizzle/PostgreSQL), `packages/shared` (contracts/client), `packages/mcp` (local stdio adapter).
 - Host the API on GCP with managed PostgreSQL. Keep infrastructure minimal.

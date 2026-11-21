@@ -1,6 +1,6 @@
 # Contributing
 
-clqn is a lightweight, CLI-first project. Read [PLAN.md](PLAN.md) for scope and [AGENTS.md](AGENTS.md) for agent workflow instructions. Prefer small working vertical slices and minimal dependencies. Keep business logic in the API and CLI/MCP integrations thin.
+clqn is a lightweight, CLI-first project. Read [ROADMAP.md](ROADMAP.md) for scope and [AGENTS.md](AGENTS.md) for agent workflow instructions. Prefer small working vertical slices and minimal dependencies. Keep business logic in the API and CLI/MCP integrations thin.
 
 ## Local development
 
