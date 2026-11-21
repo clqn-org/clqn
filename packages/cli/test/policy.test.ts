@@ -3,9 +3,10 @@ import { execFile } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
@@ -14,7 +15,10 @@ const cli = fileURLToPath(new URL('../dist/index.js', import.meta.url));
 const clanId = '28c42b15-9a81-480d-9ff5-596a2e9e7428';
 const userId = 'dbab0ddd-41bd-42ba-83c7-d48078552cc7';
 
-async function fixture(t, { conflict = false } = {}) {
+// execFile rejects with the exit code and captured output.
+type ExecError = Error & { code: number; stdout: string; stderr: string };
+
+async function fixture(t: TestContext, { conflict = false } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'clqn-policy-cli-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const token = `clqn_${'p'.repeat(43)}`;
@@ -27,7 +31,12 @@ async function fixture(t, { conflict = false } = {}) {
     revision: 7,
     enforcement: 'unavailable',
   };
-  const requests = [];
+  const requests: {
+    method: string | undefined;
+    path: string | undefined;
+    authorization: string | undefined;
+    body: unknown;
+  }[] = [];
   const server = createServer(async (request, response) => {
     let rawBody = '';
     for await (const chunk of request) rawBody += chunk;
@@ -57,8 +66,8 @@ async function fixture(t, { conflict = false } = {}) {
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
-  const url = `http://127.0.0.1:${server.address().port}`;
-  const call = (args, overrides = {}) => {
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const call = (args: string[], overrides: Record<string, string> = {}) => {
     // Never read the caller's saved login or inherit their active clan/token.
     const env = { ...process.env, CLQN_CONFIG_DIR: directory, CLQN_TOKEN: token, CLQN_CLAN_ID: clanId, ...overrides };
     return run(process.execPath, [cli, '--api-url', url, ...args], { env });
@@ -71,7 +80,7 @@ test('limits returns JSON and states the lack of runtime enforcement in human ou
   const result = await f.call(['limits', '--json']);
   assert.deepEqual(JSON.parse(result.stdout), f.initial);
   assert.equal(result.stderr, '');
-  assert.equal(f.requests[0].authorization, `Bearer ${f.token}`);
+  assert.equal(f.requests[0]?.authorization, `Bearer ${f.token}`);
   const human = await f.call(['limits', '--clan', clanId], { CLQN_CLAN_ID: userId });
   assert.match(human.stdout, /Token limit: none/);
   assert.match(human.stdout, /Allowed models: any/);
@@ -98,7 +107,7 @@ test('limits sends the selected settings and latest revision without replacing u
     f.requests.map((request) => request.method),
     ['GET', 'POST'],
   );
-  assert.deepEqual(f.requests[1].body, {
+  assert.deepEqual(f.requests[1]?.body, {
     tokenLimit: 50000,
     allowedModels: ['provider/model-a', 'provider/model-b'],
     control: 'approve',
@@ -119,7 +128,7 @@ test('limits supports zero budget, unrestricted models, and removal of a token c
   assert.equal(zero.tokenLimit, 0);
   assert.equal(zero.control, 'automatic');
   await f.call(['limits', '--tokens', 'none', '--models', 'any', '--json']);
-  assert.deepEqual(f.requests.at(-1).body, { tokenLimit: null, allowedModels: null, expectedRevision: 8 });
+  assert.deepEqual(f.requests.at(-1)?.body, { tokenLimit: null, allowedModels: null, expectedRevision: 8 });
 });
 
 test('limits rejects malformed limits, model lists, control levels before HTTP access', async (t) => {
@@ -134,7 +143,8 @@ test('limits rejects malformed limits, model lists, control levels before HTTP a
     ['--models', 'model with spaces'],
     ['--control', 'full'],
   ]) {
-    await assert.rejects(f.call(['limits', ...args, '--json']), (error) => {
+    await assert.rejects(f.call(['limits', ...args, '--json']), (thrown) => {
+      const error = thrown as ExecError;
       assert.equal(error.code, 1);
       assert.equal(error.stdout, '');
       assert.equal(JSON.parse(error.stderr).error.code, 'COMMAND_FAILED');
@@ -146,7 +156,8 @@ test('limits rejects malformed limits, model lists, control levels before HTTP a
 
 test('limits surfaces revision conflicts without retrying or reporting success', async (t) => {
   const f = await fixture(t, { conflict: true });
-  await assert.rejects(f.call(['limits', '--control', 'manual', '--json']), (error) => {
+  await assert.rejects(f.call(['limits', '--control', 'manual', '--json']), (thrown) => {
+    const error = thrown as ExecError;
     assert.equal(error.code, 1);
     assert.equal(error.stdout, '');
     assert.equal(JSON.parse(error.stderr).error.code, 'REVISION_CONFLICT');

@@ -2,29 +2,25 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { renderActivity, renderMetrics } from '../dist/metrics.js';
+import { renderActivity, renderMetrics } from '../src/metrics.js';
 
 const stats = { members: 2, agents: 3, tasks: { open: 5, claimed: 3, completed: 12 } };
 const clan = { id: '84367b51-14c7-43de-84a1-faf0207eadb3', name: 'Example clan' };
-const status = {
-  clan,
-  stats,
-  recentActivity: [
-    {
-      sequence: 1,
-      id: clan.id,
-      clanId: clan.id,
-      actorId: clan.id,
-      agentId: null,
-      resourceId: clan.id,
-      type: 'task.completed',
-      createdAt: '2026-11-18T16:30:00.000Z',
-    },
-  ],
+const event = {
+  sequence: 1,
+  id: clan.id,
+  clanId: clan.id,
+  actorId: clan.id,
+  agentId: null,
+  resourceId: clan.id,
+  type: 'task.completed',
+  createdAt: '2026-11-18T16:30:00.000Z',
 };
+const status = { clan, stats, recentActivity: [event] };
 
 test('metrics show proportional task bars and completion totals', () => {
   const output = renderMetrics(status);
@@ -41,7 +37,6 @@ test('empty metrics do not imply collected token usage or invalid percentages', 
   const output = renderMetrics({
     ...status,
     stats: { members: 0, agents: 0, tasks: { open: 0, claimed: 0, completed: 0 } },
-    recentActivity: [],
   });
   assert.match(output, /No tasks yet/);
   assert.doesNotMatch(output, /ACTIVITY|activity/);
@@ -53,14 +48,7 @@ test('empty metrics do not imply collected token usage or invalid percentages', 
 });
 
 test('status fits charts to narrow terminals and neutralizes control characters', () => {
-  const output = renderMetrics(
-    {
-      ...status,
-      clan: { ...clan, name: `\x1b[2J\n${'Long clan '.repeat(10)}` },
-      recentActivity: [{ ...status.recentActivity[0], type: 'task.completed\x1b[2J' }],
-    },
-    40,
-  );
+  const output = renderMetrics({ ...status, clan: { ...clan, name: `\x1b[2J\n${'Long clan '.repeat(10)}` } }, 40);
   assert.ok(output.split('\n').every((line) => Array.from(line).length <= 40));
   assert.doesNotMatch(output, /\x1b/);
   assert.doesNotMatch(output, /ACTIVITY|task.completed|resource:/);
@@ -69,7 +57,7 @@ test('status fits charts to narrow terminals and neutralizes control characters'
 test('activity log handles empty history and neutralizes untrusted event text', () => {
   assert.equal(renderActivity([]), 'RECENT ACTIVITY / latest 10\nNo activity yet.');
   const output = renderActivity(
-    [{ ...status.recentActivity[0], type: 'task.completed\x1b[2J\n', resourceId: `\x1b[2J${'resource'.repeat(20)}` }],
+    [{ ...event, type: 'task.completed\x1b[2J\n', resourceId: `\x1b[2J${'resource'.repeat(20)}` }],
     40,
   );
   assert.ok(output.split('\n').every((line) => Array.from(line).length <= 40));
@@ -79,7 +67,7 @@ test('activity log handles empty history and neutralizes untrusted event text', 
 });
 
 test('status shows only metrics and log shows only recent activity in human and JSON output', async (t) => {
-  const requests = [];
+  const requests: (string | undefined)[] = [];
   let responseValue = status;
   const server = createServer((request, response) => {
     requests.push(request.url);
@@ -91,11 +79,11 @@ test('status shows only metrics and log shows only recent activity in human and 
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const cli = fileURLToPath(new URL('../dist/index.js', import.meta.url));
   const run = promisify(execFile);
-  const call = (command, json = false) =>
+  const call = (command: string, json = false) =>
     run(process.execPath, [
       cli,
       '--api-url',
-      `http://127.0.0.1:${server.address().port}`,
+      `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
       command,
       '--clan',
       clan.id,

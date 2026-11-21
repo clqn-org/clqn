@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import test from 'node:test';
-import { ApiError, ClqnClient } from '../dist/index.js';
+import { ApiError, ClqnClient } from '../src/index.js';
 
 test('client refuses credential-bearing URLs and authenticated remote HTTP', () => {
   assert.throws(() => new ClqnClient('https://user:secret@example.com'), /credentials/);
@@ -25,7 +26,7 @@ test('client never follows API redirects with a bearer token', async (t) => {
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
-  await assert.rejects(new ClqnClient(`http://127.0.0.1:${server.address().port}`, 'secret').whoami());
+  await assert.rejects(new ClqnClient(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, 'secret').whoami());
   assert.equal(redirected, false);
 });
 
@@ -44,7 +45,7 @@ test('client preserves invitation errors and validates the returned invitation',
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
-  const client = new ClqnClient(`http://127.0.0.1:${server.address().port}`, 'secret');
+  const client = new ClqnClient(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, 'secret');
   await assert.rejects(client.joinClan(`clqn_inv_${'a'.repeat(43)}`), (error) => {
     assert.ok(error instanceof ApiError);
     assert.equal(error.status, 404);

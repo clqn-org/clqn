@@ -3,11 +3,12 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
-import { readConfig } from '../dist/config.js';
+import { readConfig } from '../src/config.js';
 
 test('GitHub CLI saves only clqn token, prints identity without credentials, uses POST polling', async (t) => {
   const dir = await mkdtemp(join(tmpdir(), 'clqn-github-'));
@@ -35,12 +36,12 @@ test('GitHub CLI saves only clqn token, prints identity without credentials, use
       res.end(JSON.stringify({ status: 'complete', user, token }));
     }
   });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => {
     server.close();
     await rm(dir, { recursive: true, force: true });
   });
-  const url = `http://127.0.0.1:${server.address().port}`;
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const result = await promisify(execFile)(
     process.execPath,
     ['packages/cli/dist/index.js', '--api-url', url, '--json', 'login', '--github'],
@@ -85,12 +86,12 @@ test('GitHub CLI login retries a temporary poll failure until the code expires',
       res.end(JSON.stringify({ error: { code: 'GITHUB_LOGIN_FAILED', message: 'GitHub login failed; try again' } }));
     } else res.end(JSON.stringify({ status: 'complete', user, token }));
   });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => {
     server.close();
     await rm(dir, { recursive: true, force: true });
   });
-  const url = `http://127.0.0.1:${server.address().port}`;
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const result = await promisify(execFile)(
     process.execPath,
     ['packages/cli/dist/index.js', '--api-url', url, '--json', 'login', '--github'],

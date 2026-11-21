@@ -66,6 +66,8 @@ TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/clqn_test npm te
 
 CI runs all checks, including the database tests, on Node 22 and 24.
 
+Write new tests in TypeScript as `packages/<name>/test/*.test.ts` and import the code under test from `../src`. `npm run typecheck` checks them with the same strict settings as the source. Some older tests are still `.mjs`; convert them when you change them.
+
 Changes to authorization, concurrent writes or task ownership need tests that cover them. For schema changes, follow [database setup](docs/database.md#schema-changes) and commit the generated migration.
 
 ## Open a pull request
