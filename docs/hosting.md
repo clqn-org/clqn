@@ -1,14 +1,6 @@
 # GCP hosting
 
-Run the API as one Cloud Run service with managed Cloud SQL PostgreSQL. CLI and MCP run locally and connect to the operator's HTTPS API URL. The public website is hosted separately at clqn.org.
-
-## Automatic website deployment
-
-After the Node.js 22 and 24 checks pass on the current `main` of `rli8145/clqn`, GitHub Actions deploys the tested static site to the Vercel project `andy-zhang-s-projects2/clqn`. It compares the public homepage, download page, docs index, and logo with the build.
-
-Under GitHub **Settings → Environments**, create `website-production`, restrict deployment branches to `main`, and add an environment secret named `VERCEL_TOKEN`. Use a dedicated token scoped to the Vercel team with permission to deploy the existing project. The workflow includes the nonsecret team and project IDs. [Vercel's GitHub Actions guide](https://vercel.com/kb/guide/how-can-i-use-github-actions-with-vercel)
-
-Select **Actions → CI → Run workflow** on `main` to redeploy. Deployments run one at a time and skip superseded commits. Rerun a failed job within the artifact's seven-day retention period, or start a fresh workflow. To roll back, revert the site change on `main`.
+Run the API as one Cloud Run service with managed Cloud SQL PostgreSQL. CLI and MCP run locally and connect to the operator's HTTPS API URL.
 
 ## Build and run the container
 
