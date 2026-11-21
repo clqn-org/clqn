@@ -64,6 +64,13 @@
       "when": 1795151353305,
       "tag": "0008_custom_aliases",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795288138519,
+      "tag": "0009_yellow_nighthawk",
+      "breakpoints": true
     }
   ]
 }

@@ -4,6 +4,7 @@ import {
   bigint,
   bigserial,
   check,
+  index,
   integer,
   jsonb,
   pgEnum,
@@ -48,7 +49,11 @@ export const memberships = pgTable(
     policyRevision: integer('policy_revision').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [primaryKey({ columns: [table.clanId, table.userId] })],
+  (table) => [
+    primaryKey({ columns: [table.clanId, table.userId] }),
+    // The primary key leads with clan_id, so lookups by user need their own index.
+    index('memberships_user_idx').on(table.userId),
+  ],
 );
 
 export const agents = pgTable(
@@ -100,20 +105,27 @@ export const invitations = pgTable('invitations', {
   consumedAt: timestamp('consumed_at', { withTimezone: true }),
 });
 
-export const events = pgTable('events', {
-  sequence: bigserial('sequence', { mode: 'number' }).notNull().unique(),
-  resourceId: text('resource_id'),
-  id: uuid('id').primaryKey().defaultRandom(),
-  clanId: uuid('clan_id')
-    .notNull()
-    .references(() => clans.id),
-  actorId: uuid('actor_id')
-    .notNull()
-    .references(() => users.id),
-  agentId: uuid('agent_id').references(() => agents.id),
-  type: text('type').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const events = pgTable(
+  'events',
+  {
+    sequence: bigserial('sequence', { mode: 'number' }).notNull().unique(),
+    resourceId: text('resource_id'),
+    id: uuid('id').primaryKey().defaultRandom(),
+    clanId: uuid('clan_id')
+      .notNull()
+      .references(() => clans.id),
+    actorId: uuid('actor_id')
+      .notNull()
+      .references(() => users.id),
+    agentId: uuid('agent_id').references(() => agents.id),
+    type: text('type').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Clients poll each clan's events in sequence order.
+    index('events_clan_sequence_idx').on(table.clanId, table.sequence),
+  ],
+);
 
 // Repository webhook secrets are derived from the server master secret and binding ID, never stored here.
 export const linkedRepositories = pgTable(
