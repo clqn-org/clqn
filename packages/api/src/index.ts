@@ -7,7 +7,11 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error('PORT must be an integer between 1 and 65535');
 }
 const hostname = process.env.HOST ?? '127.0.0.1';
-const connection = process.env.DATABASE_URL ? createStore(process.env.DATABASE_URL) : undefined;
+const poolSize = Number(process.env.DATABASE_POOL_SIZE ?? 10);
+if (!Number.isInteger(poolSize) || poolSize < 1 || poolSize > 100) {
+  throw new Error('DATABASE_POOL_SIZE must be an integer between 1 and 100');
+}
+const connection = process.env.DATABASE_URL ? createStore(process.env.DATABASE_URL, poolSize) : undefined;
 const server = serve(
   {
     fetch: createApp(connection?.store, connection?.db, {

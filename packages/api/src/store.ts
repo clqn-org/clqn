@@ -32,8 +32,8 @@ export interface WorkspaceStore {
   members(userId: string, clanId: string): Promise<Member[] | undefined>;
 }
 
-export function createStore(url: string) {
-  const sql = postgres(url, { max: 5 });
+export function createStore(url: string, poolSize = 10) {
+  const sql = postgres(url, { max: poolSize });
   const db = drizzle(sql);
   const clanView = (clan: typeof schema.clans.$inferSelect): Clan => ({
     ...clan,

@@ -69,10 +69,12 @@ gcloud run deploy clqn-api \
   --image "$CLQN_IMAGE" --service-account "$CLQN_RUNTIME_ACCOUNT" \
   --network "$CLQN_NETWORK" --subnet "$CLQN_SUBNET" --vpc-egress private-ranges-only \
   --set-secrets "DATABASE_URL=$CLQN_DB_SECRET:$CLQN_DB_SECRET_VERSION" \
-  --port 8080 --max-instances 2 --allow-unauthenticated
+  --port 8080 --concurrency 80 --max-instances 4 --allow-unauthenticated
 ```
 
-Public transport lets clients send clqn bearer tokens; the API still authenticates `/v1`. Cloud Run provides HTTPS. The two-instance limit bounds the five-connections-per-process database pool; adjust against database capacity.
+Public transport lets clients send clqn bearer tokens; the API still authenticates `/v1`. Cloud Run provides HTTPS.
+
+Each instance opens up to `DATABASE_POOL_SIZE` database connections (default 10), so the service can use max instances × pool size connections: 40 with the flags above. Keep that below your Cloud SQL instance's `max_connections`, with room for the migration job and admin tools. Requests wait for a free connection when an instance's pool is busy. To serve more traffic, raise the database tier first, then `--max-instances` or `DATABASE_POOL_SIZE` (set it with `--update-env-vars`).
 
 Set clients' `CLQN_API_URL` to the returned service URL. Keep `DATABASE_URL` server-side.
 
