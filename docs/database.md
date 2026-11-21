@@ -1,6 +1,6 @@
 # Database setup
 
-Use local PostgreSQL for development or managed PostgreSQL on GCP. Set `DATABASE_URL` in the root `.env`, then run migrations before starting the API:
+Use local PostgreSQL for development or managed PostgreSQL on GCP. For development, `docker compose up -d --wait` starts a database that matches `.env.example`. Set `DATABASE_URL` in the root `.env`, then run migrations before starting the API:
 
 ```sh
 npm run db:migrate
