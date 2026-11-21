@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { createHmac, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import type { AddressInfo } from 'node:net';
 import { devNull, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -13,9 +14,10 @@ import { serve } from '@hono/node-server';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
-import { runMcpSync } from '../../cli/dist/mcp-sync.js';
-import { createApp } from '../dist/app.js';
-import { createStore } from '../dist/store.js';
+import type { MainSyncResult } from '../../cli/src/git.js';
+import { runMcpSync } from '../../cli/src/mcp-sync.js';
+import { createApp } from '../src/app.js';
+import { createStore } from '../src/store.js';
 
 const execute = promisify(execFile);
 const cli = fileURLToPath(new URL('../../cli/dist/index.js', import.meta.url));
@@ -25,17 +27,17 @@ test('webhook sync acceptance: main notifications trigger Git fetches while idle
   timeout: 45_000,
 }, async (t) => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'clqn-webhook-sync-')));
-  const sql = postgres(process.env.TEST_DATABASE_URL, { max: 5 });
-  const connection = createStore(process.env.TEST_DATABASE_URL);
-  const userIds = [];
-  const clanIds = [];
-  let server;
+  const sql = postgres(process.env.TEST_DATABASE_URL!, { max: 5 });
+  const connection = createStore(process.env.TEST_DATABASE_URL!);
+  const userIds: string[] = [];
+  const clanIds: string[] = [];
+  let server: ReturnType<typeof serve> | undefined;
   const controller = new AbortController();
-  let syncing;
+  let syncing: Promise<void> | undefined;
   t.after(async () => {
     controller.abort();
     await syncing;
-    if (server) await new Promise((resolve) => server.close(resolve));
+    if (server) await new Promise((resolve) => server?.close(resolve));
     try {
       if (clanIds.length) {
         await sql`delete from github_deliveries where binding_id in (select id from linked_repositories where clan_id in ${sql(clanIds)})`;
@@ -68,7 +70,7 @@ test('webhook sync acceptance: main notifications trigger Git fetches while idle
     port: 0,
   });
   await once(server, 'listening');
-  const apiUrl = `http://127.0.0.1:${server.address().port}`;
+  const apiUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const api = new ClqnClient(apiUrl, leader.token);
 
   const actualGit = (await execute('which', ['git'], { encoding: 'utf8' })).stdout.trim();
@@ -80,7 +82,7 @@ test('webhook sync acceptance: main notifications trigger Git fetches while idle
   const gitLog = join(root, 'git.jsonl');
   const ghLog = join(root, 'gh.jsonl');
   const hookFile = join(root, 'hook.json');
-  const env = {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     GIT_CONFIG_GLOBAL: devNull,
     GIT_CONFIG_NOSYSTEM: '1',
@@ -98,7 +100,7 @@ test('webhook sync acceptance: main notifications trigger Git fetches while idle
     CLQN_TEST_HOOK: hookFile,
   };
   delete env.GIT_CONFIG_COUNT;
-  const git = async (cwd, args) =>
+  const git = async (cwd: string, args: string[]) =>
     (
       await execute(actualGit, ['-c', `core.hooksPath=${devNull}`, ...args], { cwd, env, encoding: 'utf8' })
     ).stdout.trim();
@@ -163,7 +165,10 @@ process.stdin.on('end',()=>{
   assert.equal(hook.config.url, new URL(setup.webhook.path, apiUrl).href);
   assert.equal(hook.config.content_type, 'json');
   assert.deepEqual(hook.events, ['push']);
-  const setupCalls = (await readFile(ghLog, 'utf8')).trim().split('\n').map(JSON.parse);
+  const setupCalls = (await readFile(ghLog, 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line): { args: string[]; body?: { config?: { secret?: string } } } => JSON.parse(line));
   assert.ok(setupCalls.every(({ args }) => !args.some((arg) => arg.includes(setup.webhook.secret))));
   assert.ok(
     setupCalls.some(({ args, body }) => args.includes('--input') && body?.config?.secret === setup.webhook.secret),
@@ -174,10 +179,10 @@ process.stdin.on('end',()=>{
       .trim()
       .split('\n')
       .filter(Boolean)
-      .map(JSON.parse)
+      .map((line): string[] => JSON.parse(line))
       .filter((args) => args.includes('fetch')).length;
   let stderr = '';
-  const results = [];
+  const results: MainSyncResult[] = [];
   // Run the same automatic listener used by MCP, with short test-only intervals.
   const savedEnv = { ...process.env };
   Object.assign(process.env, cliEnv);
@@ -195,7 +200,7 @@ process.stdin.on('end',()=>{
       stderr += String(error);
     },
   });
-  const waitFor = async (predicate) => {
+  const waitFor = async (predicate: () => boolean | Promise<boolean>) => {
     const deadline = Date.now() + 12_000;
     while (!(await predicate())) {
       if (Date.now() > deadline) throw new Error(`Timed out waiting for watcher: ${stderr}`);
@@ -212,7 +217,7 @@ process.stdin.on('end',()=>{
   await git(writer, ['commit', '-m', 'update main']);
   await git(writer, ['push', 'origin', 'main']);
   const mainSha = await git(writer, ['rev-parse', 'HEAD']);
-  const deliver = async (ref, deliveryId = randomUUID()) => {
+  const deliver = async (ref: string, deliveryId = randomUUID()) => {
     const raw = JSON.stringify({ repository: { full_name: 'test/project' }, ref, after: mainSha, deleted: false });
     const response = await fetch(new URL(setup.webhook.path, apiUrl), {
       method: 'POST',
@@ -248,7 +253,7 @@ process.stdin.on('end',()=>{
   assert.equal(await fetchCount(), 2, 'a replayed delivery must not trigger another fetch');
   const [events] =
     await sql`select count(*)::integer as n from events where clan_id = ${clan.id} and type = 'repository.main_changed'`;
-  assert.equal(events.n, 1);
+  assert.equal(events?.n, 1);
   controller.abort();
   await syncing;
   assert.equal(stderr, '');

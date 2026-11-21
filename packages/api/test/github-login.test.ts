@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { ClqnClient } from '@clqn/shared';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
-import { ClqnClient } from '../../shared/dist/index.js';
-import { createGithubLoginRoutes, githubRequest, verifiedIdentity } from '../dist/github-login.js';
-import { createStore } from '../dist/store.js';
+import type { WorkspaceDb } from '../src/access.js';
+import { createGithubLoginRoutes, githubRequest, verifiedIdentity } from '../src/github-login.js';
+import { createStore } from '../src/store.js';
 
 test('GitHub identity requires stable ID and verified primary email', () => {
   assert.deepEqual(
@@ -26,7 +27,7 @@ test('GitHub identity requires stable ID and verified primary email', () => {
 test('GitHub transport redacts upstream errors and refuses redirects', async () => {
   await assert.rejects(
     githubRequest('/user', undefined, 'sensitive', async (_url, options) => {
-      assert.equal(options.redirect, 'error');
+      assert.equal(options?.redirect, 'error');
       throw new Error('sensitive upstream payload');
     }),
     { message: 'GitHub authentication unavailable' },
@@ -36,7 +37,7 @@ test('GitHub transport redacts upstream errors and refuses redirects', async () 
 test('GitHub routes disabled by default and reject invalid input', async () => {
   const disabled = createGithubLoginRoutes();
   assert.equal((await disabled.request('/start', { method: 'POST' })).status, 503);
-  const app = createGithubLoginRoutes({}, 'id');
+  const app = createGithubLoginRoutes({} as WorkspaceDb, 'id');
   const response = await app.request('/poll', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -48,10 +49,10 @@ test('GitHub routes disabled by default and reject invalid input', async () => {
 test('PostgreSQL: GitHub single use, concurrent completion, identity conflicts, throttling and revocation', {
   skip: !process.env.TEST_DATABASE_URL && 'Set TEST_DATABASE_URL to run PostgreSQL integration tests',
 }, async (t) => {
-  const sql = postgres(process.env.TEST_DATABASE_URL);
-  const connection = createStore(process.env.TEST_DATABASE_URL);
-  const ids = [];
-  const handles = [];
+  const sql = postgres(process.env.TEST_DATABASE_URL!);
+  const connection = createStore(process.env.TEST_DATABASE_URL!);
+  const ids: string[] = [];
+  const handles: string[] = [];
   t.after(async () => {
     for (const handle of handles)
       await sql`delete from github_logins where handle_hash = encode(sha256(${handle}::bytea), 'hex')`;
@@ -67,10 +68,10 @@ test('PostgreSQL: GitHub single use, concurrent completion, identity conflicts, 
   let githubId = Math.floor(Math.random() * 1e12) + 1;
   let polls = 0;
   let mode = 'complete';
-  let gate;
+  let gate: Promise<void> | undefined;
   const app = createGithubLoginRoutes(connection.db, 'client', async (path, body, token) => {
     if (path === '/login/device/code') {
-      assert.equal(body.scope, 'user:email');
+      assert.equal(body?.scope, 'user:email');
       return {
         device_code: 'private-device-code',
         user_code: 'ABCD-EFGH',
@@ -87,7 +88,7 @@ test('PostgreSQL: GitHub single use, concurrent completion, identity conflicts, 
     assert.equal(token, 'private-github-token');
     return path === '/user' ? { id: githubId } : [{ email, primary: true, verified: true }];
   });
-  const post = async (path, body = {}) =>
+  const post = async (path: string, body: object = {}) =>
     (
       await app.request(path, {
         method: 'POST',
@@ -100,7 +101,7 @@ test('PostgreSQL: GitHub single use, concurrent completion, identity conflicts, 
     handles.push(attempt.handle);
     return attempt;
   };
-  const ready = async (handle) =>
+  const ready = async (handle: string) =>
     sql`update github_logins set next_poll_at = now() - interval '1 second' where handle_hash = encode(sha256(${handle}::bytea), 'hex')`;
   const first = await start();
   assert.equal(JSON.stringify(first).includes('private-device-code'), false);
@@ -108,14 +109,14 @@ test('PostgreSQL: GitHub single use, concurrent completion, identity conflicts, 
   assert.equal(polls, 0);
   await ready(first.handle);
   // A slow GitHub response must not hold a lock: a concurrent poll returns immediately instead of waiting.
-  let open;
-  gate = new Promise((resolve) => {
+  let open: (() => void) | undefined;
+  gate = new Promise<void>((resolve) => {
     open = resolve;
   });
   const inFlight = post('/poll', { handle: first.handle });
   while (polls === 0) await new Promise((resolve) => setImmediate(resolve));
   assert.equal((await post('/poll', { handle: first.handle })).status, 'pending');
-  open();
+  open?.();
   gate = undefined;
   const complete = await inFlight;
   assert.equal(complete.status, 'complete');
@@ -123,13 +124,13 @@ test('PostgreSQL: GitHub single use, concurrent completion, identity conflicts, 
   assert.equal((await post('/poll', { handle: first.handle })).status, 'expired');
   ids.push(complete.user.id);
   assert.equal(
-    (await connection.store.authenticate((await import('../dist/store.js')).hashToken(complete.token))).id,
+    (await connection.store.authenticate((await import('../src/store.js')).hashToken(complete.token)))?.id,
     complete.user.id,
   );
   const [credential] = await sql`select id from credentials where user_id = ${complete.user.id}`;
-  await connection.revokeCredential(credential.id);
+  await connection.revokeCredential(credential!.id);
   assert.equal(
-    await connection.store.authenticate((await import('../dist/store.js')).hashToken(complete.token)),
+    await connection.store.authenticate((await import('../src/store.js')).hashToken(complete.token)),
     undefined,
   );
   const second = await start();

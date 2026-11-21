@@ -3,8 +3,10 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Readable } from 'node:stream';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -14,26 +16,28 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
-import { createApp } from '../dist/app.js';
-import { createStore } from '../dist/store.js';
+import { createApp } from '../src/app.js';
+import { createStore } from '../src/store.js';
 
 const cliPath = fileURLToPath(new URL('../../cli/dist/index.js', import.meta.url));
+
+type ActivityEvent = { type: string; sequence: number; agentId: string | null; resourceId: string | null };
 
 test('MVP acceptance: two people and two stdio agents share context, coordinate work, and observe progress', {
   skip: !process.env.TEST_DATABASE_URL && 'Set TEST_DATABASE_URL to run PostgreSQL integration tests',
   timeout: 30_000,
 }, async (t) => {
-  const sql = postgres(process.env.TEST_DATABASE_URL, { max: 5 });
+  const sql = postgres(process.env.TEST_DATABASE_URL!, { max: 5 });
   const db = drizzle(sql);
-  const connection = createStore(process.env.TEST_DATABASE_URL);
+  const connection = createStore(process.env.TEST_DATABASE_URL!);
   const directory = await mkdtemp(join(tmpdir(), 'clqn-acceptance-'));
-  const userIds = [];
-  const clanIds = [];
-  const clients = [];
-  let server;
+  const userIds: string[] = [];
+  const clanIds: string[] = [];
+  const clients: Client[] = [];
+  let server: ReturnType<typeof serve> | undefined;
   t.after(async () => {
     await Promise.all(clients.map((client) => client.close()));
-    if (server) await new Promise((resolve) => server.close(resolve));
+    if (server) await new Promise((resolve) => server?.close(resolve));
     try {
       if (clanIds.length) {
         await sql`delete from events where clan_id in ${sql(clanIds)}`;
@@ -62,18 +66,21 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
   userIds.push(alice.user.id, bob.user.id);
   server = serve({ fetch: createApp(connection.store, db).fetch, hostname: '127.0.0.1', port: 0 });
   await once(server, 'listening');
-  const apiUrl = `http://127.0.0.1:${server.address().port}`;
-  const baseEnv = Object.fromEntries(Object.entries(process.env).filter(([, value]) => typeof value === 'string'));
+  const apiUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const baseEnv = Object.fromEntries(
+    Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+  );
   delete baseEnv.CLQN_TOKEN;
   delete baseEnv.CLQN_CLAN_ID;
   const aliceEnv = { ...baseEnv, CLQN_CONFIG_DIR: join(directory, 'alice') };
   const bobEnv = { ...baseEnv, CLQN_CONFIG_DIR: join(directory, 'bob') };
-  const runRaw = async (env, args, input) => {
+  const runRaw = async (env: Record<string, string>, args: string[], input?: string) => {
     const command = promisify(execFile)(process.execPath, [cliPath, '--api-url', apiUrl, '--json', ...args], { env });
-    command.child.stdin.end(input);
+    command.child.stdin?.end(input);
     return (await command).stdout;
   };
-  const run = async (env, args, input) => JSON.parse(await runRaw(env, args, input));
+  const run = async (env: Record<string, string>, args: string[], input?: string) =>
+    JSON.parse(await runRaw(env, args, input));
   await run(aliceEnv, ['login'], alice.token);
   await run(bobEnv, ['login'], bob.token);
   const clan = await run(aliceEnv, ['init', 'Two-agent acceptance']);
@@ -94,13 +101,13 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
   await run(otherEnv, ['login'], alice.token);
   const otherClan = await run(otherEnv, ['init', 'Unrelated personal selection']);
   clanIds.push(otherClan.id);
-  const scopedCodexEnv = { ...otherEnv, CLQN_TOKEN: codex.token };
+  const scopedCodexEnv: Record<string, string> = { ...otherEnv, CLQN_TOKEN: codex.token };
   assert.equal(scopedCodexEnv.CLQN_CLAN_ID, undefined);
   const scopedMembers = await run(scopedCodexEnv, ['members']);
-  assert.deepEqual(new Set(scopedMembers.members.map((member) => member.userId)), new Set(userIds));
+  assert.deepEqual(new Set(scopedMembers.members.map((member: { userId: string }) => member.userId)), new Set(userIds));
   const cleanAgentEnv = { ...baseEnv, CLQN_CONFIG_DIR: join(directory, 'agent-only'), CLQN_TOKEN: codex.token };
   assert.equal((await run(cleanAgentEnv, ['members'])).members.length, 2);
-  const connectMcp = async (name, env) => {
+  const connectMcp = async (name: string, env: Record<string, string>) => {
     const client = new Client({ name, version: '1.0.0' });
     clients.push(client);
     const transport = new StdioClientTransport({
@@ -110,7 +117,7 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
       env,
       stderr: 'pipe',
     });
-    transport.stderr?.resume();
+    (transport.stderr as Readable | null)?.resume();
     await client.connect(transport);
     return client;
   };
@@ -130,10 +137,11 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
   ];
   const listed = new Set((await aliceMcp.listTools()).tools.map((tool) => tool.name));
   for (const name of expectedTools) assert.ok(listed.has(name), `Missing MCP tool ${name}`);
-  const call = async (client, name, args = {}) => {
+  const call = async (client: Client, name: string, args: Record<string, unknown> = {}) => {
     const response = await client.callTool({ name, arguments: args });
-    assert.notEqual(response.isError, true, `MCP ${name} failed: ${response.content?.[0]?.text}`);
-    return JSON.parse(response.content[0].text);
+    const content = response.content as { text: string }[] | undefined;
+    assert.notEqual(response.isError, true, `MCP ${name} failed: ${content?.[0]?.text}`);
+    return JSON.parse(content?.[0]?.text ?? '');
   };
   assert.equal((await call(aliceMcp, 'clqn_get_status')).clan.id, clan.id);
   const initial = await run(
@@ -179,11 +187,11 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
   assert.equal(status.clan.id, clan.id);
   assert.deepEqual(status.stats, { members: 2, agents: 2, tasks: { open: 0, claimed: 0, completed: 2 } });
   assert.equal('recentActivity' in status, false);
-  const log = await run(bobEnv, ['log']);
+  const log: { events: ActivityEvent[] } = await run(bobEnv, ['log']);
   assert.ok(log.events.some((event) => event.type === 'task.completed'));
-  assert.ok(log.events.every((event, i) => i === 0 || event.sequence < log.events[i - 1].sequence));
+  assert.ok(log.events.every((event, i) => i === 0 || event.sequence < log.events[i - 1]!.sequence));
   assert.equal((await call(bobMcp, 'clqn_get_status')).stats.tasks.completed, 2);
-  const events = (
+  const events: ActivityEvent[] = (
     await (
       await fetch(`${apiUrl}/v1/clans/${clan.id}/events`, { headers: { authorization: `Bearer ${bob.token}` } })
     ).json()
@@ -191,5 +199,5 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
   assert.ok(events.some((event) => event.type === 'context.written' && event.agentId === codex.agent.id));
   assert.ok(events.some((event) => event.type === 'context.written' && event.agentId === claude.agent.id));
   assert.ok(events.some((event) => event.type === 'task.completed' && event.resourceId === task.id));
-  assert.ok(events.every((event, i) => i === 0 || event.sequence > events[i - 1].sequence));
+  assert.ok(events.every((event, i) => i === 0 || event.sequence > events[i - 1]!.sequence));
 });

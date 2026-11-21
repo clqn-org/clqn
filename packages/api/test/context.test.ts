@@ -12,8 +12,8 @@ import {
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
-import { createApp } from '../dist/app.js';
-import { createStore } from '../dist/store.js';
+import { createApp } from '../src/app.js';
+import { createStore } from '../src/store.js';
 
 test('context contracts require optimistic revisions and bound UTF-8 text', () => {
   assert.equal(writeContextSchema.safeParse({ text: 'hello', expectedRevision: 0 }).success, true);
@@ -33,10 +33,10 @@ test('context contracts require optimistic revisions and bound UTF-8 text', () =
 test('PostgreSQL: context isolation, immutable revisions, and concurrent compare-and-set writes', {
   skip: !process.env.TEST_DATABASE_URL && 'Set TEST_DATABASE_URL to run PostgreSQL integration tests',
 }, async (t) => {
-  const sql = postgres(process.env.TEST_DATABASE_URL, { max: 2 });
-  const connection = createStore(process.env.TEST_DATABASE_URL);
-  const userIds = [];
-  const clanIds = [];
+  const sql = postgres(process.env.TEST_DATABASE_URL!, { max: 2 });
+  const connection = createStore(process.env.TEST_DATABASE_URL!);
+  const userIds: string[] = [];
+  const clanIds: string[] = [];
   t.after(async () => {
     try {
       if (clanIds.length) {
@@ -64,8 +64,8 @@ test('PostgreSQL: context isolation, immutable revisions, and concurrent compare
   const app = createApp(connection.store, connection.db);
   const key = encodeURIComponent('project/notes with spaces');
   const path = `/v1/clans/${clan.id}/context/${key}`;
-  const auth = (token) => ({ authorization: `Bearer ${token}`, 'content-type': 'application/json' });
-  const write = (text, expectedRevision, token = alice.token) =>
+  const auth = (token: string) => ({ authorization: `Bearer ${token}`, 'content-type': 'application/json' });
+  const write = (text: string, expectedRevision: number | undefined, token = alice.token) =>
     app.request(path, {
       method: 'POST',
       headers: auth(token),
@@ -94,14 +94,14 @@ test('PostgreSQL: context isolation, immutable revisions, and concurrent compare
     history.revisions.map((entry) => entry.revision),
     [1, 2],
   );
-  assert.equal(history.revisions[0].text, created.text);
-  assert.equal(history.revisions[1].text, latest.text);
+  assert.equal(history.revisions[0]?.text, created.text);
+  assert.equal(history.revisions[1]?.text, latest.text);
   const listing = contextListSchema.parse(
     await (await app.request(`/v1/clans/${clan.id}/context`, { headers: auth(alice.token) })).json(),
   );
-  assert.equal(listing.entries[0].revision, 2);
+  assert.equal(listing.entries[0]?.revision, 2);
   assert.equal((await app.request(`${path}/history`, { headers: auth(bob.token) })).status, 404);
   const [audit] =
     await sql`select count(*)::integer as n from events where clan_id = ${clan.id} and type = 'context.written'`;
-  assert.equal(audit.n, 2);
+  assert.equal(audit?.n, 2);
 });

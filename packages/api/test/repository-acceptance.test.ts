@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import type { AddressInfo } from 'node:net';
 import { devNull, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -12,8 +13,8 @@ import { serve } from '@hono/node-server';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
-import { createApp } from '../dist/app.js';
-import { createStore } from '../dist/store.js';
+import { createApp } from '../src/app.js';
+import { createStore } from '../src/store.js';
 
 const execute = promisify(execFile);
 const cli = fileURLToPath(new URL('../../cli/dist/index.js', import.meta.url));
@@ -23,13 +24,13 @@ test('repository acceptance: orchestrator delegates, worker publishes isolated w
   timeout: 45_000,
 }, async (t) => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'clqn-repository-acceptance-')));
-  const sql = postgres(process.env.TEST_DATABASE_URL, { max: 5 });
-  const connection = createStore(process.env.TEST_DATABASE_URL);
-  const userIds = [];
-  const clanIds = [];
-  let server;
+  const sql = postgres(process.env.TEST_DATABASE_URL!, { max: 5 });
+  const connection = createStore(process.env.TEST_DATABASE_URL!);
+  const userIds: string[] = [];
+  const clanIds: string[] = [];
+  let server: ReturnType<typeof serve> | undefined;
   t.after(async () => {
-    if (server) await new Promise((resolve) => server.close(resolve));
+    if (server) await new Promise((resolve) => server?.close(resolve));
     try {
       if (clanIds.length) {
         await sql`delete from events where clan_id in ${sql(clanIds)}`;
@@ -57,7 +58,7 @@ test('repository acceptance: orchestrator delegates, worker publishes isolated w
   const worker = await connection.store.registerAgent(member.user, clan.id, 'Worker');
   server = serve({ fetch: createApp(connection.store, connection.db).fetch, hostname: '127.0.0.1', port: 0 });
   await once(server, 'listening');
-  const apiUrl = `http://127.0.0.1:${server.address().port}`;
+  const apiUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
   const actualGit = (await execute('which', ['git'], { encoding: 'utf8' })).stdout.trim();
   const remote = join(root, 'remote.git');
@@ -67,7 +68,7 @@ test('repository acceptance: orchestrator delegates, worker publishes isolated w
   const bin = join(root, 'bin');
   const prFile = join(root, 'pr.json');
   const logFile = join(root, 'commands.jsonl');
-  const env = {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     GIT_CONFIG_GLOBAL: devNull,
     GIT_CONFIG_NOSYSTEM: '1',
@@ -84,7 +85,7 @@ test('repository acceptance: orchestrator delegates, worker publishes isolated w
     CLQN_TEST_INTEGRATOR: integrator,
   };
   delete env.GIT_CONFIG_COUNT;
-  const git = async (cwd, args) =>
+  const git = async (cwd: string, args: string[]) =>
     (
       await execute(actualGit, ['-c', `core.hooksPath=${devNull}`, ...args], {
         cwd,
@@ -154,7 +155,7 @@ else if(args[1] === 'merge' && pr) {
     { mode: 0o755 },
   );
   const cliEnv = { ...env, PATH: `${bin}:${process.env.PATH}` };
-  const call = async (token, args, cwd = personal) =>
+  const call = async (token: string, args: string[], cwd = personal) =>
     JSON.parse(
       (
         await execute(process.execPath, [cli, '--api-url', apiUrl, '--json', ...args], {
@@ -237,7 +238,10 @@ else if(args[1] === 'merge' && pr) {
       `Missing audit event ${type}`,
     );
   }
-  const commands = (await readFile(logFile, 'utf8')).trim().split('\n').map(JSON.parse);
+  const commands = (await readFile(logFile, 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line): { file: string; args: string[] } => JSON.parse(line));
   assert.ok(
     !commands.some(
       ({ file, args }) => file === 'git' && args.some((arg) => ['pull', 'reset', 'stash', '--force'].includes(arg)),

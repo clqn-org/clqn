@@ -8,19 +8,19 @@ import { sql as query } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
-import { appendEvent } from '../dist/access.js';
-import { createApp } from '../dist/app.js';
-import { tasks } from '../dist/db/tasks.js';
-import { createStore } from '../dist/store.js';
+import { appendEvent } from '../src/access.js';
+import { createApp } from '../src/app.js';
+import { tasks } from '../src/db/tasks.js';
+import { createStore } from '../src/store.js';
 
 test('PostgreSQL: clan activity, bounded cursor pagination, atomic audit, and commit-ordered polling', {
   skip: !process.env.TEST_DATABASE_URL && 'Set TEST_DATABASE_URL to run PostgreSQL integration tests',
   timeout: 15_000,
 }, async (t) => {
-  const sql = postgres(process.env.TEST_DATABASE_URL, { max: 2 });
-  const connection = createStore(process.env.TEST_DATABASE_URL);
-  const userIds = [];
-  const clanIds = [];
+  const sql = postgres(process.env.TEST_DATABASE_URL!, { max: 2 });
+  const connection = createStore(process.env.TEST_DATABASE_URL!);
+  const userIds: string[] = [];
+  const clanIds: string[] = [];
   t.after(async () => {
     try {
       if (clanIds.length) {
@@ -45,9 +45,10 @@ test('PostgreSQL: clan activity, bounded cursor pagination, atomic audit, and co
   const other = await connection.store.createClan(bob.user.id, 'Other');
   clanIds.push(clan.id, other.id);
   const app = createApp(connection.store, connection.db);
-  const auth = (token) => ({ authorization: `Bearer ${token}`, 'content-type': 'application/json' });
-  const get = (suffix, token = alice.token) => app.request(`/v1/clans/${clan.id}/${suffix}`, { headers: auth(token) });
-  const post = (suffix, body, token = alice.token) =>
+  const auth = (token: string) => ({ authorization: `Bearer ${token}`, 'content-type': 'application/json' });
+  const get = (suffix: string, token = alice.token) =>
+    app.request(`/v1/clans/${clan.id}/${suffix}`, { headers: auth(token) });
+  const post = (suffix: string, body: object, token = alice.token) =>
     app.request(`/v1/clans/${clan.id}/${suffix}`, {
       method: 'POST',
       headers: auth(token),
@@ -73,8 +74,8 @@ test('PostgreSQL: clan activity, bounded cursor pagination, atomic audit, and co
 
   const all = eventsSchema.parse(await (await get('events')).json());
   const agentEvent = all.events.find((event) => event.resourceId === open.id);
-  assert.equal(agentEvent.actorId, alice.user.id);
-  assert.equal(agentEvent.agentId, registration.agent.id);
+  assert.equal(agentEvent?.actorId, alice.user.id);
+  assert.equal(agentEvent?.agentId, registration.agent.id);
   let cursor = 0;
   const seen = [];
   for (;;) {
@@ -106,15 +107,15 @@ test('PostgreSQL: clan activity, bounded cursor pagination, atomic audit, and co
     /Deliberate rollback/,
   );
   const [rolledBack] = await sql`select count(*)::integer as n from tasks where id = ${rollbackId}`;
-  assert.equal(rolledBack.n, 0);
+  assert.equal(rolledBack?.n, 0);
   assert.deepEqual((await (await get(`events?cursor=${cursor}`)).json()).events, []);
 
   // Hold an inserted event uncommitted. A later writer must not allocate a visible cursor past it.
-  let releaseFirst;
+  let releaseFirst: (value?: unknown) => void = () => {};
   const holdFirst = new Promise((resolve) => {
     releaseFirst = resolve;
   });
-  let announceFirst;
+  let announceFirst: (value?: unknown) => void = () => {};
   const firstReady = new Promise((resolve) => {
     announceFirst = resolve;
   });
@@ -123,16 +124,16 @@ test('PostgreSQL: clan activity, bounded cursor pagination, atomic audit, and co
     announceFirst();
     await holdFirst;
   });
-  let second;
+  let second: Promise<void> | undefined;
   try {
     await Promise.race([firstReady, first]);
-    let announcePid;
-    const secondPid = new Promise((resolve) => {
+    let announcePid: (pid: number) => void = () => {};
+    const secondPid = new Promise<number>((resolve) => {
       announcePid = resolve;
     });
     second = connection.db.transaction(async (tx) => {
       const [row] = await tx.execute(query`select pg_backend_pid() as pid`);
-      announcePid(row.pid);
+      announcePid(row?.pid as number);
       await appendEvent(tx, { clanId: clan.id, actorId: alice.user.id, type: 'test.second' });
     });
     const pid = await secondPid;
@@ -140,7 +141,7 @@ test('PostgreSQL: clan activity, bounded cursor pagination, atomic audit, and co
     for (let attempt = 0; attempt < 100 && !waiting; attempt++) {
       const [row] =
         await sql`select exists(select 1 from pg_locks where pid = ${pid} and locktype = 'advisory' and not granted) as waiting`;
-      waiting = row.waiting;
+      waiting = row?.waiting;
       if (!waiting) await delay(20);
     }
     assert.equal(waiting, true, 'second writer waits for the first transaction');
@@ -154,5 +155,5 @@ test('PostgreSQL: clan activity, bounded cursor pagination, atomic audit, and co
     resumed.events.map((event) => event.type),
     ['test.first', 'test.second'],
   );
-  assert.ok(resumed.events[0].sequence < resumed.events[1].sequence);
+  assert.ok(resumed.events[0]!.sequence < resumed.events[1]!.sequence);
 });

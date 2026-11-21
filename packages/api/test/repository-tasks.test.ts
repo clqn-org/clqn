@@ -6,8 +6,8 @@ import { createTaskSchema, repositoryReportSchema, taskSchema } from '@clqn/shar
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
-import { createApp } from '../dist/app.js';
-import { createStore } from '../dist/store.js';
+import { createApp } from '../src/app.js';
+import { createStore } from '../src/store.js';
 
 const repository = { slug: 'example/project', baseSha: 'a'.repeat(40), branch: 'clqn/task-one' };
 
@@ -58,17 +58,17 @@ test('repository task contracts reject unsafe refs and incomplete repository rep
     description: 'Work',
     repository: { ...repository, slug: 'Example/Project' },
   });
-  assert.equal(parsed.repository.slug, 'example/project');
-  assert.equal(parsed.repository.baseBranch, 'main');
+  assert.equal(parsed.repository?.slug, 'example/project');
+  assert.equal(parsed.repository?.baseBranch, 'main');
 });
 
 test('PostgreSQL: orchestrator delegates isolated repository work and integration gates task completion', {
   skip: !process.env.TEST_DATABASE_URL && 'Set TEST_DATABASE_URL to run PostgreSQL integration tests',
 }, async (t) => {
-  const sql = postgres(process.env.TEST_DATABASE_URL, { max: 5 });
-  const connection = createStore(process.env.TEST_DATABASE_URL);
-  const userIds = [];
-  const clanIds = [];
+  const sql = postgres(process.env.TEST_DATABASE_URL!, { max: 5 });
+  const connection = createStore(process.env.TEST_DATABASE_URL!);
+  const userIds: string[] = [];
+  const clanIds: string[] = [];
   t.after(async () => {
     try {
       if (clanIds.length) {
@@ -99,7 +99,7 @@ test('PostgreSQL: orchestrator delegates isolated repository work and integratio
   const secondWorker = await connection.store.registerAgent(bob.user, clan.id, 'Second worker', 'worker', 'review');
   const outsideWorker = await connection.store.registerAgent(bob.user, other.id, 'Outside worker', 'worker', 'outside');
   const app = createApp(connection.store, connection.db);
-  const request = (token, suffix = '', body, clanId = clan.id) =>
+  const request = (token: string, suffix = '', body?: object, clanId = clan.id) =>
     app.request(`/v1/clans/${clanId}/tasks${suffix}`, {
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }),
@@ -131,7 +131,7 @@ test('PostgreSQL: orchestrator delegates isolated repository work and integratio
   const aliasChange = await request(orchestrator.token, '/build/alias', { alias: 'ship' });
   assert.equal(aliasChange.status, 200);
   assert.equal((await aliasChange.json()).id, task.id);
-  const assign = (token, agentId) => request(token, '/ship/assign', { agentId });
+  const assign = (token: string, agentId: string | null | undefined) => request(token, '/ship/assign', { agentId });
   assert.equal((await assign(bob.token, worker.agent.id)).status, 403);
   assert.equal((await assign(regular.token, worker.agent.id)).status, 403);
   assert.equal((await assign(orchestrator.token, outsideWorker.agent.id)).status, 404);
@@ -141,7 +141,7 @@ test('PostgreSQL: orchestrator delegates isolated repository work and integratio
     assign(alice.token, secondWorker.agent.alias),
   ]);
   assert.deepEqual(assignments.map((r) => r.status).sort(), [200, 409]);
-  const assigned = await assignments.find((r) => r.status === 200).json();
+  const assigned = await assignments.find((r) => r.status === 200)?.json();
   const owner = assigned.assignedAgentId === worker.agent.id ? worker : secondWorker;
   const loser = owner === worker ? secondWorker : worker;
   assert.equal((await assign(alice.token, owner.agent.id)).status, 200);
@@ -149,13 +149,13 @@ test('PostgreSQL: orchestrator delegates isolated repository work and integratio
   assert.equal((await request(loser.token, `/${task.id}/claim`, {})).status, 409);
   assert.equal((await request(owner.token, `/${task.id}/claim`, {})).status, 200);
   assert.equal((await request(owner.token, `/${task.id}/complete`, {})).status, 409);
-  const report = (token, body) => request(token, '/ship/repository', body);
+  const report = (token: string, body: object) => request(token, '/ship/repository', body);
   assert.equal((await report(loser.token, { expectedHeadSha: null, headSha: 'b'.repeat(40) })).status, 409);
   const heads = await Promise.all(
     ['b', 'c'].map((letter) => report(owner.token, { expectedHeadSha: null, headSha: letter.repeat(40) })),
   );
   assert.deepEqual(heads.map((r) => r.status).sort(), [200, 409]);
-  const pushed = await heads.find((r) => r.status === 200).json();
+  const pushed = await heads.find((r) => r.status === 200)?.json();
   assert.equal(pushed.repository.state, 'pushed');
   assert.equal(
     (
@@ -187,7 +187,7 @@ test('PostgreSQL: orchestrator delegates isolated repository work and integratio
   const reported = await report(owner.token, pr);
   assert.equal(reported.status, 200);
   assert.equal((await reported.json()).repository.prUrl, 'https://github.com/example/project/pull/1');
-  const integrate = (token, headSha = pushed.repository.headSha) =>
+  const integrate = (token: string, headSha = pushed.repository.headSha) =>
     request(token, '/ship/integration', {
       headSha,
       mergeCommitSha: 'd'.repeat(40),

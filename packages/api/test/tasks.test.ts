@@ -2,15 +2,17 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { ApiError, taskSchema } from '@clqn/shared';
+import { type Actor, ApiError, taskSchema } from '@clqn/shared';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { Hono } from 'hono';
 import postgres from 'postgres';
-import { createStore } from '../dist/store.js';
-import { createTaskRoutes } from '../dist/tasks.js';
+import { createStore } from '../src/store.js';
+import { createTaskRoutes } from '../src/tasks.js';
 
-const post = (app, path, actor, body = {}) =>
+type TestApp = Hono<{ Variables: { user: Actor } }>;
+
+const post = (app: TestApp, path: string, actor: string, body: object = {}) =>
   app.request(path, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-test-actor': actor },
@@ -20,11 +22,11 @@ const post = (app, path, actor, body = {}) =>
 test('PostgreSQL: task claims serialize and only the owning human or agent completes work', {
   skip: !process.env.TEST_DATABASE_URL && 'Set TEST_DATABASE_URL to run PostgreSQL integration tests',
 }, async (t) => {
-  const sql = postgres(process.env.TEST_DATABASE_URL, { max: 5 });
+  const sql = postgres(process.env.TEST_DATABASE_URL!, { max: 5 });
   const db = drizzle(sql);
-  const connection = createStore(process.env.TEST_DATABASE_URL);
-  const userIds = [];
-  const clanIds = [];
+  const connection = createStore(process.env.TEST_DATABASE_URL!);
+  const userIds: string[] = [];
+  const clanIds: string[] = [];
   t.after(async () => {
     try {
       if (clanIds.length) {
@@ -51,20 +53,22 @@ test('PostgreSQL: task claims serialize and only the owning human or agent compl
   await sql`insert into memberships (clan_id, user_id) values (${clan.id}, ${bob.user.id})`;
   const [agentOne, agentTwo] = await sql`insert into agents (clan_id, owner_id, name) values
     (${clan.id}, ${bob.user.id}, 'one'), (${clan.id}, ${bob.user.id}, 'two') returning id`;
+  assert.ok(agentOne && agentTwo);
   const actors = {
     alice: alice.user,
     bob: bob.user,
     one: { ...bob.user, agentId: agentOne.id, clanId: clan.id },
     two: { ...bob.user, agentId: agentTwo.id, clanId: clan.id },
   };
-  const app = new Hono();
+  const app: TestApp = new Hono();
   app.use('*', async (c, next) => {
-    c.set('user', actors[c.req.header('x-test-actor') ?? 'alice']);
+    c.set('user', actors[(c.req.header('x-test-actor') ?? 'alice') as keyof typeof actors]);
     await next();
   });
   app.route('/v1/clans/:clanId/tasks', createTaskRoutes(db));
   app.onError((error, c) => {
-    if (error instanceof ApiError) return c.json({ error: { code: error.code } }, error.status);
+    if (error instanceof ApiError)
+      return c.json({ error: { code: error.code } }, error.status as 400 | 403 | 404 | 409);
     throw error;
   });
   const path = `/v1/clans/${clan.id}/tasks`;
@@ -75,7 +79,7 @@ test('PostgreSQL: task claims serialize and only the owning human or agent compl
   assert.equal(task.description, 'Shared work');
   assert.equal(task.status, 'open');
   assert.equal(task.ownerId, null);
-  const rename = (ref, actor, alias) => post(app, `${path}/${ref}/alias`, actor, { alias });
+  const rename = (ref: string, actor: string, alias: string) => post(app, `${path}/${ref}/alias`, actor, { alias });
   assert.equal((await rename(task.id, 'bob', 'shared-work')).status, 403);
   assert.equal((await rename(task.id, 'alice', task.id)).status, 400);
   const named = await rename(task.id, 'alice', 'shared-work');
@@ -110,11 +114,11 @@ test('PostgreSQL: task claims serialize and only the owning human or agent compl
   assert.equal((await post(app, `${path}/${agentTask.id}/complete`, 'two')).status, 200);
   const [audit] =
     await sql`select count(*)::integer as n from events where clan_id = ${clan.id} and type = 'task.claimed'`;
-  assert.equal(audit.n, 3);
+  assert.equal(audit?.n, 3);
   const [agentAudit] =
     await sql`select agent_id, resource_id from events where clan_id = ${clan.id} and type = 'task.completed' and agent_id is not null`;
-  assert.equal(agentAudit.agent_id, agentTwo.id);
-  assert.equal(agentAudit.resource_id, agentTask.id);
+  assert.equal(agentAudit?.agent_id, agentTwo.id);
+  assert.equal(agentAudit?.resource_id, agentTask.id);
   const aliasEvents =
     await sql`select agent_id, resource_id from events where clan_id = ${clan.id} and type = 'task.alias_changed' order by sequence`;
   assert.deepEqual(
@@ -142,10 +146,13 @@ test('PostgreSQL: task claims serialize and only the owning human or agent compl
   assert.equal((await post(app, path, 'alice', { description: ' ', ownerId: bob.user.id })).status, 400);
   assert.equal((await post(app, `${path}/${agentTask.id}/claim`, 'one', { ownerId: bob.user.id })).status, 400);
   const listing = await app.request(path, { headers: { 'x-test-actor': 'bob' } });
-  assert.deepEqual((await listing.json()).tasks.map((entry) => entry.alias).sort(), ['revised', 'shared-work']);
+  assert.deepEqual((await listing.json()).tasks.map((entry: { alias: string | null }) => entry.alias).sort(), [
+    'revised',
+    'shared-work',
+  ]);
   const racing = await Promise.all(
     ['alice', 'bob'].map((actor) => post(app, path, actor, { description: 'New', alias: 'one-name' })),
   );
   assert.deepEqual(racing.map((response) => response.status).sort(), [201, 409]);
-  assert.equal((await racing.find((response) => response.status === 409).json()).error.code, 'ALIAS_CONFLICT');
+  assert.equal((await racing.find((response) => response.status === 409)?.json())?.error.code, 'ALIAS_CONFLICT');
 });

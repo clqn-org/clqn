@@ -6,8 +6,8 @@ import { defaultPolicy, updatePolicySchema } from '@clqn/shared';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
-import { createApp } from '../dist/app.js';
-import { createStore } from '../dist/store.js';
+import { createApp } from '../src/app.js';
+import { createStore } from '../src/store.js';
 
 test('policies reject malformed budgets, model lists, control levels and ownership overrides', () => {
   for (const settings of [
@@ -44,10 +44,10 @@ test('policies reject malformed budgets, model lists, control levels and ownersh
 test('PostgreSQL: only the member changes their policy; concurrent writes cannot overwrite it', {
   skip: !process.env.TEST_DATABASE_URL && 'Set TEST_DATABASE_URL to run PostgreSQL integration tests',
 }, async (t) => {
-  const sql = postgres(process.env.TEST_DATABASE_URL, { max: 5 });
-  const connection = createStore(process.env.TEST_DATABASE_URL);
-  const userIds = [];
-  const clanIds = [];
+  const sql = postgres(process.env.TEST_DATABASE_URL!, { max: 5 });
+  const connection = createStore(process.env.TEST_DATABASE_URL!);
+  const userIds: string[] = [];
+  const clanIds: string[] = [];
   t.after(async () => {
     try {
       if (clanIds.length) {
@@ -73,7 +73,7 @@ test('PostgreSQL: only the member changes their policy; concurrent writes cannot
   await sql`insert into memberships (clan_id, user_id) values (${clan.id}, ${bob.user.id})`;
   const agent = await connection.store.registerAgent(bob.user, clan.id, 'Worker');
   const app = createApp(connection.store, connection.db);
-  const call = (token, body, clanId = clan.id) =>
+  const call = (token: string, body?: object, clanId = clan.id) =>
     app.request(`/v1/clans/${clanId}/policy`, {
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }),
@@ -109,7 +109,7 @@ test('PostgreSQL: only the member changes their policy; concurrent writes cannot
     call(bob.token, { expectedRevision: 1, tokenLimit: 20000 }),
   ]);
   assert.deepEqual(writes.map((r) => r.status).sort(), [200, 409]);
-  const winner = await writes.find((r) => r.status === 200).json();
+  const winner = await writes.find((r) => r.status === 200)?.json();
   assert.equal(winner.revision, 2);
   assert.deepEqual(await (await call(bob.token)).json(), winner);
   assert.equal((await call(bob.token, { expectedRevision: 1, allowedModels: null })).status, 409);
@@ -120,5 +120,5 @@ test('PostgreSQL: only the member changes their policy; concurrent writes cannot
   assert.equal(revoked.tokenLimit, winner.tokenLimit);
   const [audit] =
     await sql`select count(*)::integer as n from events where clan_id = ${clan.id} and type = 'policy.updated'`;
-  assert.equal(audit.n, 3);
+  assert.equal(audit?.n, 3);
 });

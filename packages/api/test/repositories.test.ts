@@ -6,8 +6,8 @@ import { linkedRepositorySchema, linkedRepositorySetupSchema } from '@clqn/share
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
-import { createApp } from '../dist/app.js';
-import { createStore } from '../dist/store.js';
+import { createApp } from '../src/app.js';
+import { createStore } from '../src/store.js';
 
 const master = '0123456789abcdef'.repeat(4);
 test('webhook configuration fails closed and setup schemas constrain secret destinations', async () => {
@@ -45,10 +45,10 @@ test('webhook configuration fails closed and setup schemas constrain secret dest
 test('PostgreSQL: scoped repository links authenticate raw webhooks, deduplicate concurrent delivery, and revoke atomically', {
   skip: !process.env.TEST_DATABASE_URL && 'Set TEST_DATABASE_URL to run PostgreSQL integration tests',
 }, async (t) => {
-  const sql = postgres(process.env.TEST_DATABASE_URL, { max: 5 });
-  const connection = createStore(process.env.TEST_DATABASE_URL);
-  const clanIds = [];
-  const userIds = [];
+  const sql = postgres(process.env.TEST_DATABASE_URL!, { max: 5 });
+  const connection = createStore(process.env.TEST_DATABASE_URL!);
+  const clanIds: string[] = [];
+  const userIds: string[] = [];
   t.after(async () => {
     try {
       if (clanIds.length) {
@@ -77,7 +77,7 @@ test('PostgreSQL: scoped repository links authenticate raw webhooks, deduplicate
   const orchestrator = await connection.store.registerAgent(alice.user, clan.id, 'Coordinator', 'orchestrator');
   const app = createApp(connection.store, connection.db, { githubWebhookSecret: master });
   const unavailable = createApp(connection.store, connection.db);
-  const request = (token, path = '', body, clanId = clan.id, target = app) =>
+  const request = (token: string, path = '', body?: object, clanId = clan.id, target = app) =>
     target.request(`/v1/clans/${clanId}/repositories${path}`, {
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }),
@@ -99,6 +99,7 @@ test('PostgreSQL: scoped repository links authenticate raw webhooks, deduplicate
   const [setup, repeated] = await Promise.all(
     setups.map(async (response) => linkedRepositorySetupSchema.parse(await response.json())),
   );
+  assert.ok(setup);
   assert.deepEqual(setup, repeated);
   assert.equal(setup.repository.slug, 'test/project');
   assert.equal(setup.webhook.secret, createHmac('sha256', master).update(setup.repository.id).digest('hex'));
@@ -119,14 +120,14 @@ test('PostgreSQL: scoped repository links authenticate raw webhooks, deduplicate
     commits: [{ message: 'Unicode résumé 🐈' }],
   };
   const signed = (
-    body,
+    body: unknown,
     {
       event = 'push',
       delivery = randomUUID(),
       secret = setup.webhook.secret,
       path = setup.webhook.path,
       signature,
-    } = {},
+    }: { event?: string; delivery?: string; secret?: string; path?: string; signature?: string } = {},
   ) => {
     const raw = typeof body === 'string' ? body : JSON.stringify(body);
     return app.request(path, {
@@ -172,11 +173,11 @@ test('PostgreSQL: scoped repository links authenticate raw webhooks, deduplicate
   assert.equal((await (await signed(push, { delivery: ignoredDelivery })).json()).duplicate, true);
   const [events] =
     await sql`select count(*)::integer as n from events where clan_id = ${clan.id} and type = 'repository.main_changed'`;
-  assert.equal(events.n, 1);
+  assert.equal(events?.n, 1);
   const [audit] = await sql`select * from events where clan_id = ${clan.id} and type = 'repository.main_changed'`;
-  assert.equal(audit.actor_id, alice.user.id);
-  assert.equal(audit.resource_id, 'test/project');
-  assert.equal(Number(audit.sequence), received.lastEventSequence);
+  assert.equal(audit?.actor_id, alice.user.id);
+  assert.equal(audit?.resource_id, 'test/project');
+  assert.equal(Number(audit?.sequence), received.lastEventSequence);
   assert.ok(!JSON.stringify(audit).includes('Unicode'));
   // Main deletion still creates a notification, but never deletes or changes local code on the server.
   const deletion = await signed({ ...push, deleted: true, after: '0'.repeat(40) });
@@ -191,8 +192,8 @@ test('PostgreSQL: scoped repository links authenticate raw webhooks, deduplicate
   assert.equal((await request(alice.token, `/${setup.repository.id}`)).status, 404);
   const [deliveries] =
     await sql`select count(*)::integer as n from github_deliveries where binding_id = ${setup.repository.id}`;
-  assert.equal(deliveries.n, 0);
+  assert.equal(deliveries?.n, 0);
   const [links] =
     await sql`select count(*)::integer as n from events where clan_id = ${clan.id} and type = 'repository.linked'`;
-  assert.equal(links.n, 1);
+  assert.equal(links?.n, 1);
 });

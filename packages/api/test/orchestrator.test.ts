@@ -6,8 +6,8 @@ import { agentSchema, registerAgentSchema } from '@clqn/shared';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
-import { createApp } from '../dist/app.js';
-import { createStore } from '../dist/store.js';
+import { createApp } from '../src/app.js';
+import { createStore } from '../src/store.js';
 
 test('agent contracts preserve worker defaults and restrict orchestrator role values', () => {
   assert.deepEqual(registerAgentSchema.parse({ name: 'Codex' }), { name: 'Codex', role: 'worker' });
@@ -31,10 +31,10 @@ test('agent contracts preserve worker defaults and restrict orchestrator role va
 test('PostgreSQL: only a personal leader registers one orchestrator per clan under concurrent requests', {
   skip: !process.env.TEST_DATABASE_URL && 'Set TEST_DATABASE_URL to run PostgreSQL integration tests',
 }, async (t) => {
-  const sql = postgres(process.env.TEST_DATABASE_URL, { max: 5 });
-  const connection = createStore(process.env.TEST_DATABASE_URL);
-  const userIds = [];
-  const clanIds = [];
+  const sql = postgres(process.env.TEST_DATABASE_URL!, { max: 5 });
+  const connection = createStore(process.env.TEST_DATABASE_URL!);
+  const userIds: string[] = [];
+  const clanIds: string[] = [];
   t.after(async () => {
     try {
       if (clanIds.length) {
@@ -59,7 +59,7 @@ test('PostgreSQL: only a personal leader registers one orchestrator per clan und
   clanIds.push(clan.id, other.id);
   await sql`insert into memberships (clan_id, user_id) values (${clan.id}, ${bob.user.id})`;
   const app = createApp(connection.store, connection.db);
-  const post = (token, path, body) =>
+  const post = (token: string, path: string, body: object) =>
     app.request(path, {
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
@@ -75,25 +75,25 @@ test('PostgreSQL: only a personal leader registers one orchestrator per clan und
     post(alice.token, path, { name: 'Second', role: 'orchestrator' }),
   ]);
   assert.deepEqual(responses.map((r) => r.status).sort(), [201, 409]);
-  const orchestrator = await responses.find((r) => r.status === 201).json();
+  const orchestrator = await responses.find((r) => r.status === 201)?.json();
   assert.equal(orchestrator.agent.role, 'orchestrator');
   assert.equal(orchestrator.agent.ownerId, alice.user.id);
-  assert.equal((await responses.find((r) => r.status === 409).json()).error.code, 'ORCHESTRATOR_EXISTS');
+  assert.equal((await responses.find((r) => r.status === 409)?.json())?.error.code, 'ORCHESTRATOR_EXISTS');
   const [counts] =
     await sql`select count(*)::integer as n from agents where clan_id = ${clan.id} and role = 'orchestrator'`;
-  assert.equal(counts.n, 1);
+  assert.equal(counts?.n, 1);
   const [credentials] =
     await sql`select count(*)::integer as n from credentials c join agents a on a.id = c.agent_id where a.clan_id = ${clan.id}`;
-  assert.equal(credentials.n, 2);
+  assert.equal(credentials?.n, 2);
   const [events] =
     await sql`select count(*)::integer as n from events where clan_id = ${clan.id} and type = 'agent.registered'`;
-  assert.equal(events.n, 2);
+  assert.equal(events?.n, 2);
   assert.equal(
     (await post(alice.token, `/v1/clans/${other.id}/agents`, { name: 'Other', role: 'orchestrator', alias: 'writer' }))
       .status,
     201,
   );
-  const rename = (token, ref, alias) => post(token, `${path}/${ref}/alias`, { alias });
+  const rename = (token: string, ref: string, alias: string) => post(token, `${path}/${ref}/alias`, { alias });
   assert.equal((await rename(alice.token, 'writer', 'editor')).status, 403);
   assert.equal((await rename(worker.token, 'writer', 'editor')).status, 403);
   const racing = await Promise.all([
@@ -101,8 +101,8 @@ test('PostgreSQL: only a personal leader registers one orchestrator per clan und
     rename(alice.token, orchestrator.agent.id, 'editor'),
   ]);
   assert.deepEqual(racing.map((response) => response.status).sort(), [200, 409]);
-  assert.equal((await racing.find((response) => response.status === 409).json()).error.code, 'ALIAS_CONFLICT');
-  const winner = await racing.find((response) => response.status === 200).json();
+  assert.equal((await racing.find((response) => response.status === 409)?.json())?.error.code, 'ALIAS_CONFLICT');
+  const winner = await racing.find((response) => response.status === 200)?.json();
   const owner = winner.id === worker.agent.id ? bob.token : alice.token;
   assert.equal(winner.alias, 'editor');
   assert.equal((await rename(owner, winner.id, 'editor')).status, 200);
@@ -111,14 +111,14 @@ test('PostgreSQL: only a personal leader registers one orchestrator per clan und
     await sql`select actor_id, resource_id from events where clan_id = ${clan.id} and type = 'agent.alias_changed'`;
   assert.deepEqual([...changes], [{ actor_id: winner.ownerId, resource_id: winner.id }]);
   // The designated agent does not inherit the leader's administrative credential.
-  for (const [adminPath, body] of [
+  for (const [adminPath, body] of <[string, object][]>[
     [path, { name: 'Child', role: 'worker' }],
     [`/v1/clans/${clan.id}/invitations`, { email: bob.user.email }],
     [`/v1/clans/${clan.id}/policy`, { expectedRevision: 0, control: 'automatic' }],
   ])
     assert.equal((await post(orchestrator.token, adminPath, body)).status, 403);
   const list = await connection.store.listAgents(alice.user, clan.id);
-  assert.equal(list.find((a) => a.id === orchestrator.agent.id).role, 'orchestrator');
+  assert.equal(list.find((a) => a.id === orchestrator.agent.id)?.role, 'orchestrator');
   const registration = await app.request('/v1/agent', { headers: { authorization: `Bearer ${orchestrator.token}` } });
   assert.equal((await registration.json()).role, 'orchestrator');
   await assert.rejects(
