@@ -35,6 +35,7 @@ export const agentRegistrationSchema = z.object({
   agent: agentSchema,
   token: z.string().regex(/^clqn_[A-Za-z0-9_-]{43}$/),
 });
-export const agentsSchema = z.object({ agents: z.array(agentSchema) });
+// `active` is false once an agent's token is revoked. Older servers omit it.
+export const agentsSchema = z.object({ agents: z.array(agentSchema.extend({ active: z.boolean().optional() })) });
 export const revokedAgentSchema = z.object({ agent: agentSchema, revoked: z.literal(true) });
 export const logoutSchema = z.object({ revoked: z.boolean() });

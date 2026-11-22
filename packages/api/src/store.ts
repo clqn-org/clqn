@@ -32,7 +32,7 @@ export interface WorkspaceStore {
     reissue: boolean,
   ): Promise<{ agent: Agent; token?: string }>;
   revokeToken(tokenHash: string): Promise<boolean>;
-  listAgents(actor: Actor, clanId: string): Promise<Agent[]>;
+  listAgents(actor: Actor, clanId: string): Promise<(Agent & { active: boolean })[]>;
   agentStatus(actor: Actor): Promise<Agent | undefined>;
   authenticate(tokenHash: string): Promise<Actor | undefined>;
   createClan(userId: string, name: string): Promise<Clan>;
@@ -176,11 +176,15 @@ export function createStore(url: string, poolSize = 10) {
     async listAgents(actor, clanId) {
       await requireClan(db, actor, clanId);
       const rows = await db
-        .select()
+        .select({
+          agent: schema.agents,
+          // Drizzle renders columns unqualified inside sql``, so name the tables explicitly.
+          active: query<boolean>`exists (select 1 from credentials c where c.agent_id = agents.id)`,
+        })
         .from(schema.agents)
         .where(eq(schema.agents.clanId, clanId))
         .orderBy(schema.agents.createdAt, schema.agents.id);
-      return rows.map(agentView);
+      return rows.map(({ agent, active }) => ({ ...agentView(agent), active }));
     },
     async agentStatus(actor) {
       if (!actor.agentId || !actor.clanId) return undefined;

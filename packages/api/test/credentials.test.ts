@@ -69,11 +69,19 @@ test('PostgreSQL: logout and agent token revocation and rotation', {
   const revoked = await post(alice.token, `${agents}/${codex.agent.id}/revoke`);
   assert.deepEqual(await revoked.json(), { agent: codex.agent, revoked: true });
   assert.equal((await me(next)).status, 401);
+  // Revoked agents stay listed, marked inactive, until the owner issues a new token.
+  const listed = async () =>
+    (await (await app.request(agents, { headers: { authorization: `Bearer ${carol.token}` } })).json()).agents[0];
+  assert.equal((await listed()).active, false);
+  const revived = await (await post(bob.token, `${agents}/codex/token`)).json();
+  assert.equal((await listed()).active, true);
+  assert.equal((await post(alice.token, `${agents}/codex/revoke`)).status, 200);
+  assert.equal((await me(revived.token)).status, 401);
   const events =
     await sql`select type from events where clan_id = ${clan.id} and resource_id = ${codex.agent.id} order by sequence`;
   assert.deepEqual(
     events.map((event) => event.type),
-    ['agent.registered', 'agent.token_rotated', 'agent.revoked'],
+    ['agent.registered', 'agent.token_rotated', 'agent.revoked', 'agent.token_rotated', 'agent.revoked'],
   );
   // Logout revokes only the presented credential.
   const other = await connection.provisionUser(alice.user.email);

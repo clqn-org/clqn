@@ -110,7 +110,14 @@ async function workspaceFixture(t: TestContext) {
       response.end(JSON.stringify(clan));
     } else if (request.url === '/v1/clans') response.end(JSON.stringify({ clans: [clan] }));
     else if (request.url === `/v1/clans/${clan.id}/members`) response.end(JSON.stringify(members));
-    else {
+    else if (request.url === `/v1/clans/${clan.id}/agents`) {
+      const agent = { id: clan.id, clanId: clan.id, ownerId: user.id, createdAt: clan.createdAt, role: 'worker' };
+      const agents = [
+        { ...agent, name: 'Codex', alias: 'codex', active: true },
+        { ...agent, id: user.id, name: 'Claude', alias: 'claude', active: false },
+      ];
+      response.end(JSON.stringify({ agents }));
+    } else {
       response.writeHead(404);
       response.end('{}');
     }
@@ -129,6 +136,14 @@ async function workspaceFixture(t: TestContext) {
   };
   return { call, directory, user, clan, members, invitation, token, requests, url };
 }
+
+test('CLI marks revoked agents in the agent list', async (t) => {
+  const f = await workspaceFixture(t);
+  await f.call(['login'], { input: f.token });
+  const lines = (await f.call(['agent', 'list', '--clan', f.clan.id])).stdout.trim().split('\n');
+  assert.ok(!lines[0]?.endsWith('revoked'));
+  assert.ok(lines[1]?.endsWith('  revoked'));
+});
 
 test('CLI invitations normalize email, support an explicit clan, and joining selects the clan', async (t) => {
   const f = await workspaceFixture(t);

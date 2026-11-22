@@ -77,7 +77,7 @@ Agents act as distinct task owners under their human owner. Their tokens are res
 Revoke or replace agent tokens with your personal credential:
 
 ```sh
-clqn agent revoke codex   # owner or clan leader; the agent stays listed but cannot authenticate
+clqn agent revoke codex   # owner or clan leader; `agent list` marks it revoked until a new token is issued
 clqn agent token codex    # owner only; prints a new one-time token and invalidates the old one
 ```
 

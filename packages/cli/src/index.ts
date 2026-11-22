@@ -418,8 +418,12 @@ agent
     const result = await (await client()).listAgents(await selectedClan(options));
     output(
       result,
-      result.agents.map((a) => `${displayId(a)}  ${a.name}  role=${a.role}  owner=${a.ownerId}`).join('\n') ||
-        'No agents.',
+      result.agents
+        .map(
+          (a) =>
+            `${displayId(a)}  ${a.name}  role=${a.role}  owner=${a.ownerId}${a.active === false ? '  revoked' : ''}`,
+        )
+        .join('\n') || 'No agents.',
     );
   });
 agent
