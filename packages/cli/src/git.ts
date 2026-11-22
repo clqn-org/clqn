@@ -103,18 +103,29 @@ export async function localRepository(repoPath = '.', signal?: AbortSignal) {
   return { root, repository };
 }
 
-export async function repositoryForNewTask(repoPath = '.'): Promise<RepositoryWork> {
+// Read the branch that origin's HEAD points to, such as main, master, or develop.
+async function defaultBranch(root: string, signal?: AbortSignal): Promise<string> {
+  const head = await git(root, ['ls-remote', '--symref', 'origin', 'HEAD'], signal);
+  const branch = head.match(/^ref: refs\/heads\/(\S+)\tHEAD$/m)?.[1];
+  if (!branch) throw new Error('Origin does not report a default branch');
+  ref(branch);
+  return branch;
+}
+
+export async function repositoryForNewTask(repoPath = '.', baseBranch?: string): Promise<RepositoryWork> {
   const { root, repository } = await localRepository(repoPath);
+  const base = baseBranch ?? (await defaultBranch(root));
+  ref(base);
   await git(root, [
     'fetch',
     '--no-tags',
     '--no-recurse-submodules',
     'origin',
-    'refs/heads/main:refs/remotes/origin/main',
+    `refs/heads/${base}:refs/remotes/origin/${base}`,
   ]);
-  const baseSha = await git(root, ['rev-parse', '--verify', 'refs/remotes/origin/main^{commit}']);
-  if (!shaPattern.test(baseSha)) throw new Error('Origin main does not resolve to a commit');
-  return { slug: repository, baseBranch: 'main', baseSha, branch: `clqn/task-${randomUUID()}` };
+  const baseSha = await git(root, ['rev-parse', '--verify', `refs/remotes/origin/${base}^{commit}`]);
+  if (!shaPattern.test(baseSha)) throw new Error(`Origin ${base} does not resolve to a commit`);
+  return { slug: repository, baseBranch: base, baseSha, branch: `clqn/task-${randomUUID()}` };
 }
 
 export async function taskWorktreeLocation(input: {
@@ -433,7 +444,8 @@ export async function mergePullRequest(input: {
 export interface MainSyncResult {
   repository: string;
   path: string;
-  branch: 'main';
+  // The remote's default branch; "main" in names and reasons means this branch.
+  branch: string;
   status: 'updated' | 'unchanged' | 'skipped';
   reason?: 'not_main' | 'dirty' | 'operation_in_progress' | 'local_commits' | 'diverged' | 'no_local_main';
   previousSha: string | null;
@@ -441,7 +453,7 @@ export interface MainSyncResult {
   remoteSha: string;
 }
 
-// Sync only the selected main checkout. Task branches and other worktrees are never updated.
+// Sync only the selected default-branch checkout. Task branches and other worktrees are never updated.
 export async function syncMain(input: {
   repoPath: string;
   repository: string;
@@ -450,38 +462,42 @@ export async function syncMain(input: {
   const runGit = (cwd: string, args: string[]) => git(cwd, args, input.signal);
   const repoPath = await realpath(input.repoPath);
   let root = await realpath(await runGit(repoPath, ['rev-parse', '--show-toplevel']));
-  // A session may start in a task worktree. Find main without switching any branches.
+  const repository = slug(input.repository);
+  await verifyOrigin(root, repository, input.signal);
+  const branch = await defaultBranch(root, input.signal);
+  // A session may start in a task worktree. Find the default branch without switching any branches.
   const worktrees = (await runGit(root, ['worktree', 'list', '--porcelain', '-z'])).split('\0\0');
-  const main = worktrees.map((entry) => entry.split('\0')).find((fields) => fields.includes('branch refs/heads/main'));
+  const main = worktrees
+    .map((entry) => entry.split('\0'))
+    .find((fields) => fields.includes(`branch refs/heads/${branch}`));
   const mainPath = main?.find((field) => field.startsWith('worktree '))?.slice('worktree '.length);
   if (mainPath) root = await realpath(mainPath);
-  const repository = slug(input.repository);
   await verifyOrigin(root, repository, input.signal);
   await runGit(root, [
     'fetch',
     '--no-tags',
     '--no-recurse-submodules',
     'origin',
-    'refs/heads/main:refs/remotes/origin/main',
+    `refs/heads/${branch}:refs/remotes/origin/${branch}`,
   ]);
-  const remoteSha = await runGit(root, ['rev-parse', '--verify', 'refs/remotes/origin/main^{commit}']);
-  if (!shaPattern.test(remoteSha)) throw new Error('Origin main does not resolve to a commit');
+  const remoteSha = await runGit(root, ['rev-parse', '--verify', `refs/remotes/origin/${branch}^{commit}`]);
+  if (!shaPattern.test(remoteSha)) throw new Error(`Origin ${branch} does not resolve to a commit`);
   let previousSha: string | null;
   try {
-    previousSha = await runGit(root, ['rev-parse', '--verify', 'refs/heads/main^{commit}']);
+    previousSha = await runGit(root, ['rev-parse', '--verify', `refs/heads/${branch}^{commit}`]);
   } catch {
     previousSha = null;
   }
   const result: MainSyncResult = {
     repository,
     path: root,
-    branch: 'main',
+    branch,
     status: 'skipped',
     previousSha,
     headSha: previousSha,
     remoteSha,
   };
-  if ((await runGit(root, ['rev-parse', '--abbrev-ref', 'HEAD'])) !== 'main') return { ...result, reason: 'not_main' };
+  if ((await runGit(root, ['rev-parse', '--abbrev-ref', 'HEAD'])) !== branch) return { ...result, reason: 'not_main' };
   if (!previousSha) return { ...result, reason: 'no_local_main' };
   for (const name of ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply', 'sequencer']) {
     const path = resolve(root, await runGit(root, ['rev-parse', '--git-path', name]));
@@ -514,7 +530,7 @@ export async function syncMain(input: {
     '--no-overwrite-ignore',
     remoteSha,
   ]);
-  const headSha = await runGit(root, ['rev-parse', 'refs/heads/main']);
-  if (headSha !== remoteSha) throw new Error('Main changed during sync; inspect the checkout before retrying');
+  const headSha = await runGit(root, ['rev-parse', `refs/heads/${branch}`]);
+  if (headSha !== remoteSha) throw new Error(`${branch} changed during sync; inspect the checkout before retrying`);
   return { ...result, status: 'updated', headSha };
 }

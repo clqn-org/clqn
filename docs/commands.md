@@ -27,7 +27,7 @@ clqn task merge login-fix
 clqn task done login-fix
 ```
 
-Each agent session needs its own token. Registration and task commands do not launch agents. `--code` records the latest `origin/main` as the base; `start` claims the task and prepares a sibling worktree. `submit` pushes committed work and opens or reuses a PR. Only the claimant can finish, after integration is recorded.
+Each agent session needs its own token. Registration and task commands do not launch agents. `--code` records the latest commit on origin's default branch as the base (`--base-branch` picks another); `start` claims the task and prepares a sibling worktree. `submit` pushes committed work and opens or reuses a PR. Only the claimant can finish, after integration is recorded.
 
 See [repository workflow](repositories.md) for requirements and recovery.
 
@@ -84,4 +84,4 @@ clqn task submit <task-id> --path ~/Projects/api-review
 clqn repo link owner/project
 ```
 
-Use either `--code` or explicit repository flags. `start` prints the worktree path without changing your shell directory. If preparation fails after claiming, fix the local issue and retry; the task remains claimed. Existing unrelated directories and branches are never overwritten.
+Use either `--code` (optionally with `--base-branch`) or explicit repository flags. `start` prints the worktree path without changing your shell directory. If preparation fails after claiming, fix the local issue and retry; the task remains claimed. Existing unrelated directories and branches are never overwritten.

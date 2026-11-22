@@ -54,6 +54,8 @@ async function fixture(t: TestContext) {
   await git(repoPath, ['commit', '-m', 'base']);
   await git(repoPath, ['branch', '-M', 'main']);
   await git(repoPath, ['push', '-u', 'origin', 'main']);
+  // Like GitHub, the remote reports its default branch through HEAD.
+  await git(remote, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
   const baseSha = await git(repoPath, ['rev-parse', 'HEAD']);
   await git(repoPath, ['remote', 'set-url', 'origin', 'https://github.com/test/project.git']);
   const bin = join(root, 'bin');
@@ -282,17 +284,37 @@ test('merge matches the reviewed head, respects pending queues, and reports only
   );
 });
 
-async function advanceMain(f: Fixture) {
-  const writer = join(f.root, 'writer');
-  await git(f.root, ['clone', '--branch', 'main', f.remote, writer]);
+async function advanceMain(f: Fixture, branch = 'main') {
+  const writer = join(f.root, `writer-${branch}`);
+  await git(f.root, ['clone', '--branch', branch, f.remote, writer]);
   await git(writer, ['config', 'user.email', 'test@example.com']);
   await git(writer, ['config', 'user.name', 'Test']);
   await writeFile(join(writer, 'merged.txt'), 'merged task result\n');
   await git(writer, ['add', '.']);
   await git(writer, ['commit', '-m', 'merge task result']);
-  await git(writer, ['push', 'origin', 'main']);
+  await git(writer, ['push', 'origin', branch]);
   return git(writer, ['rev-parse', 'HEAD']);
 }
+
+test('code tasks and main sync follow a default branch other than main', async (t) => {
+  const f = await fixture(t);
+  await git(f.repoPath, ['switch', '-c', 'develop']);
+  await git(f.repoPath, ['push', 'origin', 'develop']);
+  await git(f.remote, ['symbolic-ref', 'HEAD', 'refs/heads/develop']);
+  const remoteSha = await advanceMain(f, 'develop');
+  const task = await repositoryForNewTask(f.repoPath);
+  assert.equal(task.baseBranch, 'develop');
+  assert.equal(task.baseSha, remoteSha);
+  const explicit = await repositoryForNewTask(f.repoPath, 'main');
+  assert.equal(explicit.baseBranch, 'main');
+  assert.equal(explicit.baseSha, f.baseSha);
+  await assert.rejects(repositoryForNewTask(f.repoPath, '--upload-pack=x'), /plain Git branch/);
+  const result = await syncMain({ repoPath: f.repoPath, repository: f.repository.slug });
+  assert.equal(result.branch, 'develop');
+  assert.equal(result.status, 'updated');
+  assert.equal(result.headSha, remoteSha);
+  assert.equal(await git(f.repoPath, ['rev-parse', 'refs/heads/main']), f.baseSha);
+});
 
 test('main sync fast-forwards clean main without updating active task worktrees or fetching their branches', async (t) => {
   const f = await fixture(t);

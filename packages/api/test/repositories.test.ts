@@ -171,6 +171,9 @@ test('PostgreSQL: scoped repository links authenticate raw webhooks, deduplicate
   const ignoredDelivery = randomUUID();
   await signed({ ...push, ref: 'refs/heads/other' }, { delivery: ignoredDelivery });
   assert.equal((await (await signed(push, { delivery: ignoredDelivery })).json()).duplicate, true);
+  // Notifications follow the repository's default branch rather than a fixed name.
+  const developDefault = { ...push, repository: { ...push.repository, default_branch: 'develop' } };
+  assert.equal((await (await signed(developDefault)).json()).ignored, true);
   const [events] =
     await sql`select count(*)::integer as n from events where clan_id = ${clan.id} and type = 'repository.main_changed'`;
   assert.equal(events?.n, 1);
@@ -179,6 +182,8 @@ test('PostgreSQL: scoped repository links authenticate raw webhooks, deduplicate
   assert.equal(audit?.resource_id, 'test/project');
   assert.equal(Number(audit?.sequence), received.lastEventSequence);
   assert.ok(!JSON.stringify(audit).includes('Unicode'));
+  const develop = await (await signed({ ...developDefault, ref: 'refs/heads/develop' })).json();
+  assert.ok(develop.sequence > received.lastEventSequence);
   // Main deletion still creates a notification, but never deletes or changes local code on the server.
   const deletion = await signed({ ...push, deleted: true, after: '0'.repeat(40) });
   assert.equal(deletion.status, 200);

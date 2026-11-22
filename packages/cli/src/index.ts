@@ -472,10 +472,10 @@ task
   .description('Create a task; add --code for work in this repository')
   .option('--clan <id>', 'clan ID')
   .option('--alias <alias>', 'short name for this task (defaults to the description if valid)')
-  .option('--code', 'use this GitHub clone, the latest origin/main, and an automatic task branch')
+  .option('--code', 'use this GitHub clone, the latest default branch, and an automatic task branch')
   .option('--repo <owner/repo>', 'GitHub repository')
   .option('--base-sha <sha>', 'full starting commit SHA on the remote base branch')
-  .option('--base-branch <branch>', 'target branch (defaults to main)')
+  .option('--base-branch <branch>', 'target branch (defaults to the origin default with --code, otherwise main)')
   .option('--branch <branch>', 'unique task branch')
   .action(
     async (
@@ -490,13 +490,12 @@ task
         branch?: string;
       },
     ) => {
-      const hasRepository = [options.repo, options.baseSha, options.baseBranch, options.branch].some(
-        (value) => value !== undefined,
-      );
-      if (options.code && hasRepository) throw new Error('Use --code for defaults, or explicit repository flags');
+      const explicit = [options.repo, options.baseSha, options.branch].some((value) => value !== undefined);
+      if (options.code && explicit)
+        throw new Error('Use --code with an optional --base-branch, or explicit repository flags');
       const repository = options.code
-        ? await repositoryForNewTask()
-        : hasRepository
+        ? await repositoryForNewTask('.', options.baseBranch)
+        : explicit || options.baseBranch !== undefined
           ? repositoryInputSchema.parse({
               slug: options.repo,
               baseSha: options.baseSha,

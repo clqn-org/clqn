@@ -1,6 +1,6 @@
 # GitHub main notifications
 
-Signed GitHub push webhooks record `repository.main_changed` events for `main`. Connected MCP clients use these events for [safe local sync](repositories.md#automatically-sync-only-main), with startup and five-minute fallback fetches.
+Signed GitHub push webhooks record `repository.main_changed` events for the repository's default branch. Connected MCP clients use these events for [safe local sync](repositories.md#automatically-sync-only-main), with startup and five-minute fallback fetches.
 
 ## Server setup
 
@@ -26,7 +26,7 @@ If GitHub setup fails, fix local permissions and rerun: the existing clan link i
 
 ## Delivery security and ordering
 
-The API verifies signatures before parsing JSON, limits bodies to 2 MiB, and requires the linked repository in push payloads. Only `refs/heads/main` emits a main-change event. Ping is accepted; push deliveries require a UUID delivery ID and are deduplicated per link.
+The API verifies signatures before parsing JSON, limits bodies to 2 MiB, and requires the linked repository in push payloads. Only pushes to the default branch named in the payload emit a main-change event. Ping is accepted; push deliveries require a UUID delivery ID and are deduplicated per link.
 
 Delivery registration, event insertion, and the link watermark commit together. Failed transactions remain retryable. Unlinking prevents later delivery acceptance. Audit events identify the integration owner, not the GitHub pusher.
 

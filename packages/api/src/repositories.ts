@@ -120,7 +120,7 @@ export function createRepositoryRoutes(db: WorkspaceDb, master?: string) {
 }
 
 const pushSchema = z.object({
-  repository: z.object({ full_name: repositorySlugSchema }),
+  repository: z.object({ full_name: repositorySlugSchema, default_branch: z.string().min(1).max(255).default('main') }),
   ref: z.string().min(1).max(500),
   after: gitShaSchema,
   deleted: z.boolean().optional().default(false),
@@ -179,7 +179,9 @@ export function createGithubWebhookRoutes(db?: WorkspaceDb, master?: string) {
           .onConflictDoNothing()
           .returning();
         if (!recorded) return { accepted: true, duplicate: true };
-        if (payload.data.ref !== 'refs/heads/main') return { accepted: true, ignored: true };
+        // Notify on the repository's default branch, whatever its name.
+        const defaultRef = `refs/heads/${payload.data.repository.default_branch}`;
+        if (payload.data.ref !== defaultRef) return { accepted: true, ignored: true };
         // actorId identifies the integration owner, not the GitHub pusher. No payload text or SHA is executed.
         const sequence = await appendEvent(tx, {
           clanId: current.clanId,
