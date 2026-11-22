@@ -193,6 +193,13 @@ test('CLI login, clan creation, membership, and logout persist API-scoped privat
   assert.deepEqual(JSON.parse((await f.call(['members', '--json'])).stdout), f.members);
   assert.deepEqual(JSON.parse((await f.call(['members', '--clan', f.clan.id, '--json'])).stdout), f.members);
   assert.match((await f.call(['members'])).stdout, /alice@example.com  leader/);
+  // A saved clan selection needs no identity lookup before the command's own request.
+  const before = f.requests.length;
+  await f.call(['members', '--json']);
+  assert.deepEqual(
+    f.requests.slice(before).map((request) => request.path),
+    [`/v1/clans/${f.clan.id}/members`],
+  );
   // Logging in again keeps the selected clan.
   await f.call(['login'], { input: f.token });
   assert.deepEqual(JSON.parse((await f.call(['members', '--json'])).stdout), f.members);

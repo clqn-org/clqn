@@ -47,10 +47,11 @@ const output = (value: unknown, human: string) => verbatim(value, human.replace(
 const displayId = (value: { id: string; alias?: string | null | undefined }) =>
   value.alias ? `${value.alias} (${value.id})` : value.id;
 const defaultAlias = (name: string) => resourceAliasSchema.safeParse(name.trim()).data;
-// Keep the selected clan across logins; the API still checks membership on every request.
-const saveToken = async (token: string) => {
+// Keep the selected clan across logins; an agent token selects its own clan. The API still checks membership.
+const saveToken = async (token: string, scopedClan?: string) => {
   const { clanId } = await readConfig(apiUrl()).catch((): Config => ({}));
-  await writeConfig(apiUrl(), clanId ? { token, clanId } : { token });
+  const selected = scopedClan ?? clanId;
+  await writeConfig(apiUrl(), selected ? { token, clanId: selected } : { token });
 };
 const client = async () => new ClqnClient(apiUrl(), process.env.CLQN_TOKEN ?? (await readConfig(apiUrl())).token);
 
@@ -181,7 +182,7 @@ program
     const token = Buffer.concat(chunks).toString('utf8').trim();
     if (!token || /\s/.test(token)) throw new Error('Provide one nonempty token on standard input');
     const user = await new ClqnClient(apiUrl(), token).whoami();
-    await saveToken(token);
+    await saveToken(token, user.clanId);
     output(user, `Logged in as ${user.email}`);
   });
 
@@ -309,7 +310,9 @@ program
 const selectedClan = async (options: { clan?: string } = {}) => {
   if (options.clan ?? process.env.CLQN_CLAN_ID) return (options.clan ?? process.env.CLQN_CLAN_ID)!;
   const config = await readConfig(apiUrl());
-  if (process.env.CLQN_TOKEN ?? config.token) {
+  // A saved selection already matches a saved token, so only ask the API about an environment token
+  // (often an agent's) or a token saved without a clan.
+  if (process.env.CLQN_TOKEN || (config.token && !config.clanId)) {
     const actor = await (await client()).whoami();
     if (actor.clanId) return actor.clanId;
   }
