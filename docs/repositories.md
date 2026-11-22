@@ -37,7 +37,7 @@ clqn task show <task-id> --json
 
 `--code` infers the GitHub origin, fetches its default branch (or `--base-branch <branch>`), and records its SHA with a unique task branch. It leaves the current checkout unchanged. Omit it for non-code work or use [explicit repository flags](commands.md#explicit-overrides).
 
-The repository, base branch/SHA, and task branch are fixed at creation. Task branches must differ from the base and be unique per repository in the clan; use unique names across clans too.
+The repository, base branch/SHA, and task branch are fixed at creation. Task branches must differ from the base and be unique among a repository's unfinished tasks in the clan; a completed task frees its branch name. Use unique names across clans too.
 
 Only a human leader or orchestrator can assign open tasks. Only the assigned agent can claim assigned work. To clear an open assignment:
 

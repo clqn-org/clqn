@@ -5,9 +5,13 @@ export const gitShaSchema = z.string().regex(/^[0-9a-f]{40}$/, 'Use a full lower
 export const repositorySlugSchema = z
   .string()
   .max(200)
-  .regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9][A-Za-z0-9._-]*$/, 'Use a GitHub owner/repository name')
+  // Repository names may start with "." or "_" (such as .github) but never "-", which could read as an option.
+  .regex(
+    /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/[A-Za-z0-9._][A-Za-z0-9._-]*$/,
+    'Use a GitHub owner/repository name',
+  )
   .refine(
-    (slug) => !slug.toLowerCase().endsWith('.git') && !slug.includes('..'),
+    (slug) => !slug.toLowerCase().endsWith('.git') && !slug.includes('..') && !slug.endsWith('/.'),
     'Use the repository name without a .git suffix',
   )
   .transform((slug) => slug.toLowerCase());

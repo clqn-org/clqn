@@ -39,6 +39,8 @@ test('repository task contracts reject unsafe refs and incomplete repository rep
     '-owner/project',
     'owner/.git',
     'owner/project.git',
+    'owner/.',
+    'owner/-project',
   ]) {
     assert.equal(
       createTaskSchema.safeParse({ description: 'Work', repository: { ...repository, slug } }).success,
@@ -59,6 +61,12 @@ test('repository task contracts reject unsafe refs and incomplete repository rep
     repository: { ...repository, slug: 'Example/Project' },
   });
   assert.equal(parsed.repository?.slug, 'example/project');
+  for (const slug of ['owner/.github', 'owner/_private']) {
+    assert.equal(
+      createTaskSchema.safeParse({ description: 'Work', repository: { ...repository, slug } }).success,
+      true,
+    );
+  }
   assert.equal(parsed.repository?.baseBranch, 'main');
 });
 
@@ -202,6 +210,8 @@ test('PostgreSQL: orchestrator delegates isolated repository work and integratio
   assert.equal((await report(owner.token, pr)).status, 409);
   assert.equal((await request(bob.token, `/${task.id}/complete`, {})).status, 409);
   assert.equal((await request(owner.token, '/ship/complete', {})).status, 200);
+  // A completed task frees its branch name for new work.
+  assert.equal((await request(alice.token, '', { description: 'Follow-up', repository })).status, 201);
   const resetTask = await (await request(alice.token, '', { description: 'Release assignment' })).json();
   assert.equal((await request(alice.token, `/${resetTask.id}/assign`, { agentId: worker.agent.id })).status, 200);
   assert.equal((await request(worker.token, `/${resetTask.id}/claim`, {})).status, 200);

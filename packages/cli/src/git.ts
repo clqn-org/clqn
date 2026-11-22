@@ -14,7 +14,7 @@ export interface RepositoryWork {
   headSha?: string | null;
 }
 const shaPattern = /^[a-f0-9]{40}$/;
-const slugPattern = /^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const slugPattern = /^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9._][A-Za-z0-9._-]*$/;
 const prFields =
   'number,url,state,headRefName,headRefOid,headRepository,headRepositoryOwner,baseRefName,isCrossRepository,mergeCommit,statusCheckRollup';
 
@@ -59,7 +59,7 @@ const git = (cwd: string, args: string[], signal?: AbortSignal) =>
   );
 
 function slug(value: string): string {
-  if (!slugPattern.test(value) || value.endsWith('.git') || value.includes('..'))
+  if (!slugPattern.test(value) || value.endsWith('.git') || value.includes('..') || value.endsWith('/.'))
     throw new Error('Repository must be a GitHub owner/repo slug');
   return value.toLowerCase();
 }

@@ -1,0 +1,2 @@
+DROP INDEX "tasks_repository_branch_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX "tasks_repository_branch_idx" ON "tasks" USING btree ("clan_id",("repository"->>'slug'),("repository"->>'branch')) WHERE "tasks"."repository" IS NOT NULL AND "tasks"."status" <> 'completed';
