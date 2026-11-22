@@ -450,9 +450,9 @@ for (const action of ['list', 'read', 'history', 'write'] as const) {
         const result = await api.contextHistory(clanId, key);
         output(result, result.revisions.map((e) => `Revision ${e.revision} (${e.updatedAt})\n${e.text}`).join('\n\n'));
       } else if (action === 'read') {
-        // Shared text is printed exactly, so it can be piped to files or other tools.
+        // Piped text is exact for files and other tools; a terminal gets it without control characters.
         const result = await api.readContext(clanId, key);
-        verbatim(result, result.text);
+        (process.stdout.isTTY ? output : verbatim)(result, result.text);
       } else {
         const result = await api.writeContext(
           clanId,
