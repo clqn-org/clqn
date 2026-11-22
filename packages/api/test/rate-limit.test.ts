@@ -9,19 +9,34 @@ const auth = (letter: string) => ({ authorization: `Bearer clqn_${letter.repeat(
 
 test('rate limiter counts each key per window and reports when to retry', () => {
   const limit = createRateLimiter(2, 60_000);
-  assert.equal(limit('a', 0), undefined);
-  assert.equal(limit('a', 1_000), undefined);
-  assert.equal(limit('a', 1_500), 59);
-  assert.equal(limit('b', 1_500), undefined);
-  assert.equal(limit('a', 60_000), undefined);
+  limit.record('a', 0);
+  assert.equal(limit.retryAfter('a', 1_000), undefined);
+  limit.record('a', 1_000);
+  assert.equal(limit.retryAfter('a', 1_500), 59);
+  assert.equal(limit.retryAfter('a', 1_500), 59);
+  assert.equal(limit.retryAfter('b', 1_500), undefined);
+  assert.equal(limit.retryAfter('a', 60_000), undefined);
 });
 
 test('rate limiter stops tracking new keys once full', () => {
   const limit = createRateLimiter(1, 60_000, 1);
-  assert.equal(limit('a', 0), undefined);
-  assert.equal(limit('a', 0), 60);
-  assert.equal(limit('b', 0), undefined);
-  assert.equal(limit('b', 0), undefined);
+  limit.record('a', 0);
+  assert.equal(limit.retryAfter('a', 0), 60);
+  limit.record('b', 0);
+  assert.equal(limit.retryAfter('b', 0), undefined);
+});
+
+test('API never counts unknown credentials, so they cannot crowd out real ones', async () => {
+  let lookups = 0;
+  const store = {
+    authenticate: async () => {
+      lookups++;
+      return undefined;
+    },
+  } as Partial<WorkspaceStore> as WorkspaceStore;
+  const app = createApp(store, undefined, { requestsPerMinute: 1 });
+  for (let i = 0; i < 3; i++) assert.equal((await app.request('/v1/me', { headers: auth('z') })).status, 401);
+  assert.equal(lookups, 3);
 });
 
 test('API rejects a credential over its limit before authenticating it', async () => {

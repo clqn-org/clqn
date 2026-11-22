@@ -39,8 +39,9 @@ export function createApp(
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'A valid bearer credential is required' } }, 401);
     if (!store) return c.json({ error: { code: 'UNAVAILABLE', message: 'Database is not configured' } }, 503);
     const tokenHash = hashToken(token);
-    // Limit before authenticating so a runaway client cannot exhaust the database pool.
-    const retryAfter = rateLimit(tokenHash);
+    // Check before authenticating so a runaway client cannot exhaust the database pool. Only verified
+    // credentials are counted, so unknown tokens cannot fill the table and switch limits off for real ones.
+    const retryAfter = rateLimit.retryAfter(tokenHash);
     if (retryAfter) {
       c.header('Retry-After', String(retryAfter));
       return c.json({ error: { code: 'RATE_LIMITED', message: 'Too many requests; try again later' } }, 429);
@@ -48,6 +49,7 @@ export function createApp(
     const user = await store.authenticate(tokenHash);
     if (!user)
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'A valid bearer credential is required' } }, 401);
+    rateLimit.record(tokenHash);
     if (user.agentId) {
       const clanPath = c.req.path.match(/^\/v1\/clans\/([^/]+)/);
       if (clanPath && clanPath[1] !== user.clanId)
