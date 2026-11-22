@@ -166,6 +166,13 @@ test('PostgreSQL: scoped repository links authenticate raw webhooks, deduplicate
   assert.equal(outcomes.filter((result) => result.duplicate).length, 1);
   const received = linkedRepositorySchema.parse(await (await request(worker.token, `/${setup.repository.id}`)).json());
   assert.ok(received.lastEventSequence > 0);
+  // Delivery IDs older than GitHub's redelivery window are pruned on the next delivery.
+  const stale = randomUUID();
+  await sql`insert into github_deliveries (binding_id, delivery_id, received_at)
+    values (${setup.repository.id}, ${stale}, now() - interval '8 days')`;
+  await signed({ ...push, ref: 'refs/heads/other' });
+  const [pruned] = await sql`select count(*)::integer as n from github_deliveries where delivery_id = ${stale}`;
+  assert.equal(pruned?.n, 0);
   const sameDeliveryDifferentBody = await signed({ ...push, after: 'b'.repeat(40) }, { delivery });
   assert.equal((await sameDeliveryDifferentBody.json()).duplicate, true);
   const ignoredDelivery = randomUUID();

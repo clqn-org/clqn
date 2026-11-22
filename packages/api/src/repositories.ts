@@ -7,7 +7,7 @@ import {
   linkRepositorySchema,
   repositorySlugSchema,
 } from '@clqn/shared';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, lt, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
@@ -179,6 +179,12 @@ export function createGithubWebhookRoutes(db?: WorkspaceDb, master?: string) {
           .onConflictDoNothing()
           .returning();
         if (!recorded) return { accepted: true, duplicate: true };
+        // GitHub redelivers for a few days at most; older IDs only take space.
+        await tx
+          .delete(githubDeliveries)
+          .where(
+            and(eq(githubDeliveries.bindingId, id), lt(githubDeliveries.receivedAt, sql`now() - interval '7 days'`)),
+          );
         // Notify on the repository's default branch, whatever its name.
         const defaultRef = `refs/heads/${payload.data.repository.default_branch}`;
         if (payload.data.ref !== defaultRef) return { accepted: true, ignored: true };
