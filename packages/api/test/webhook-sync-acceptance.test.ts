@@ -164,7 +164,7 @@ process.stdin.on('end',()=>{
   assert.equal(hook.config.secret, setup.webhook.secret);
   assert.equal(hook.config.url, new URL(setup.webhook.path, apiUrl).href);
   assert.equal(hook.config.content_type, 'json');
-  assert.deepEqual(hook.events, ['push']);
+  assert.deepEqual(hook.events, ['push', 'pull_request']);
   const setupCalls = (await readFile(ghLog, 'utf8'))
     .trim()
     .split('\n')

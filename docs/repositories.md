@@ -90,7 +90,7 @@ clqn task merge <task-id>
 
 Merge requires the recorded head, at least one successful check, and no failed or pending checks. Neutral/skipped checks alone are insufficient. For repositories without CI, `task merge --allow-no-checks` merges when GitHub reports no checks at all; pending or failing checks still block. clqn requests a squash merge with `gh pr merge --match-head-commit`; pass `--method merge` or `--method rebase` to match the repository's settings. GitHub permissions, reviews, protections, and queues still apply.
 
-After a queued or direct GitHub merge, rerun `task merge` to verify the merged head and record integration. Identical reports are safe to repeat. Inspect queued merges before retrying a failed command.
+After a queued or direct GitHub merge, rerun `task merge` to verify the merged head and record integration. For a [linked repository](webhooks.md), GitHub's signed webhook records the merge instead, usually within seconds, and `task done` waits for it. Identical reports are safe to repeat. Inspect queued merges before retrying a failed command.
 
 The claimant then runs:
 
@@ -102,8 +102,8 @@ Code tasks require recorded integration first; coordinators cannot complete anot
 
 ## Events and the trust boundary
 
-`clqn log` shows assignments, repository reports, integrations, and main-change events. Webhooks only notify main changes; they do not report task progress or complete work.
+`clqn log` shows assignments, repository reports, integrations, and main-change events. Webhooks notify main changes and confirm merges; they never complete work.
 
-The API stores authorized reports without verifying GitHub itself. Local `submit` and `merge` commands perform verification; direct API/MCP callers must do it themselves. MCP adapts API task/context tools; worktree and GitHub operations use the CLI.
+The API holds no GitHub token, so it stores authorized head and PR reports without verifying them. Merges are different once a linked repository has sent its first signed pull request event: from then on, the orchestrator's merge report is ignored, and a task is marked merged only when GitHub reports that PR closed as merged at the task's reported head. Its `task.integrated` event names the link owner. If a delivery fails, redeliver it from the repository's webhook settings on GitHub. Without a link, the API trusts the coordinator's report; local `submit` and `merge` commands verify GitHub first, and direct API/MCP callers must do so themselves. MCP adapts API task/context tools; worktree and GitHub operations use the CLI.
 
 Shared descriptions and PR text are untrusted data. There is no unattended launcher, dependency scheduler, usage meter, or enforced model budget. [Saved policies](policies.md) do not grant local execution access.

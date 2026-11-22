@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   bigserial,
+  boolean,
   check,
   index,
   integer,
@@ -141,6 +142,8 @@ export const linkedRepositories = pgTable(
       .references(() => users.id),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     lastEventSequence: bigint('last_event_sequence', { mode: 'number' }).notNull().default(0),
+    // Set by the first signed pull_request delivery; from then on only GitHub can mark tasks merged.
+    confirmsMerges: boolean('confirms_merges').notNull().default(false),
   },
   (table) => [uniqueIndex('linked_repositories_clan_slug_idx').on(table.clanId, table.slug)],
 );

@@ -16,7 +16,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
 import { appendEvent, requireClan, type WorkspaceDb } from './access.js';
 import { resourceFilter, rethrowAliasConflict } from './aliases.js';
-import { agents, memberships } from './db/schema.js';
+import { agents, linkedRepositories, memberships } from './db/schema.js';
 import { tasks } from './db/tasks.js';
 
 const taskView = (row: typeof tasks.$inferSelect): Task => ({
@@ -313,6 +313,12 @@ export function createTaskRoutes(db: WorkspaceDb) {
         if (row.repository.mergeCommitSha !== body.data.mergeCommitSha) throw conflict();
         return taskView(row);
       }
+      // Once a linked repository sends pull request events, only its signed webhook marks the task merged.
+      const [link] = await tx
+        .select({ confirmsMerges: linkedRepositories.confirmsMerges })
+        .from(linkedRepositories)
+        .where(and(eq(linkedRepositories.clanId, clanId), eq(linkedRepositories.slug, row.repository.slug)));
+      if (link?.confirmsMerges) return taskView(row);
       const repository: TaskRepository = {
         ...row.repository,
         state: 'merged',
@@ -353,7 +359,12 @@ export function createTaskRoutes(db: WorkspaceDb) {
         if (action === 'claim') {
           if (row.assignedAgentId && row.assignedAgentId !== actor.agentId) throw conflict();
         } else if (!leaderReset && !ownTask(row, actor)) throw conflict();
-        if (action === 'complete' && row.repository && row.repository.state !== 'merged') throw conflict();
+        if (action === 'complete' && row.repository && row.repository.state !== 'merged')
+          throw new ApiError(
+            409,
+            'TASK_CONFLICT',
+            'The pull request must be merged first; for linked repositories, GitHub must confirm the merge',
+          );
         const update =
           action === 'claim'
             ? {

@@ -13,6 +13,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
 import { appendEvent, requireClan, requirePersonal, type WorkspaceDb } from './access.js';
 import { githubDeliveries, linkedRepositories } from './db/schema.js';
+import { tasks } from './db/tasks.js';
 
 const metadata = (row: typeof linkedRepositories.$inferSelect): LinkedRepository => ({
   id: row.id,
@@ -126,6 +127,58 @@ const pushSchema = z.object({
   deleted: z.boolean().optional().default(false),
 });
 
+const pullRequestSchema = z.object({
+  action: z.string().max(100),
+  number: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  pull_request: z.object({
+    merged: z.boolean().optional().default(false),
+    merge_commit_sha: gitShaSchema.nullish(),
+    head: z.object({ sha: gitShaSchema }),
+  }),
+  repository: z.object({ full_name: repositorySlugSchema }),
+});
+
+// GitHub, not the reporting agent, decides that a pull request merged. Tasks match on PR number and reported head.
+async function confirmMerge(
+  tx: Pick<WorkspaceDb, 'execute' | 'insert' | 'select' | 'update'>,
+  link: typeof linkedRepositories.$inferSelect,
+  payload: z.infer<typeof pullRequestSchema>,
+) {
+  if (!link.confirmsMerges)
+    await tx.update(linkedRepositories).set({ confirmsMerges: true }).where(eq(linkedRepositories.id, link.id));
+  const mergeCommitSha = payload.pull_request.merge_commit_sha;
+  if (payload.action !== 'closed' || !payload.pull_request.merged || !mergeCommitSha)
+    return { accepted: true, ignored: true };
+  const rows = await tx
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.clanId, link.clanId),
+        eq(tasks.status, 'claimed'),
+        sql`${tasks.repository}->>'slug' = ${link.slug}`,
+        sql`${tasks.repository}->>'prNumber' = ${String(payload.number)}`,
+        sql`${tasks.repository}->>'headSha' = ${payload.pull_request.head.sha}`,
+        sql`${tasks.repository}->>'state' <> 'merged'`,
+      ),
+    )
+    .for('update');
+  for (const row of rows) {
+    await tx
+      .update(tasks)
+      .set({ repository: { ...row.repository!, state: 'merged', mergeCommitSha }, updatedAt: sql`now()` })
+      .where(eq(tasks.id, row.id));
+    // Like main-change events, the actor is the integration owner rather than the GitHub user who merged.
+    await appendEvent(tx, {
+      clanId: link.clanId,
+      actorId: link.createdBy,
+      type: 'task.integrated',
+      resourceId: row.id,
+    });
+  }
+  return { accepted: true, integrated: rows.length };
+}
+
 export function createGithubWebhookRoutes(db?: WorkspaceDb, master?: string) {
   const app = new Hono();
   app.use('*', async (c, next) => {
@@ -158,17 +211,17 @@ export function createGithubWebhookRoutes(db?: WorkspaceDb, master?: string) {
       if (!binding) throw missing();
       const event = c.req.header('x-github-event');
       if (event === 'ping') return c.json({ accepted: true });
-      if (event !== 'push') return c.json({ accepted: true, ignored: true }, 202);
+      if (event !== 'push' && event !== 'pull_request') return c.json({ accepted: true, ignored: true }, 202);
       let parsed: unknown;
       try {
         parsed = JSON.parse(raw.toString('utf8'));
       } catch {
         parsed = null;
       }
-      const payload = pushSchema.safeParse(parsed);
-      if (!payload.success) throw new ApiError(400, 'INVALID_REQUEST', 'Provide a valid GitHub push payload');
+      const payload = (event === 'push' ? pushSchema : pullRequestSchema).safeParse(parsed);
+      if (!payload.success) throw new ApiError(400, 'INVALID_REQUEST', `Provide a valid GitHub ${event} payload`);
       if (payload.data.repository.full_name !== binding.slug)
-        throw new ApiError(400, 'REPOSITORY_MISMATCH', 'Push repository does not match the link');
+        throw new ApiError(400, 'REPOSITORY_MISMATCH', 'Payload repository does not match the link');
       const result = await db.transaction(async (tx) => {
         // Lock the binding so unlink and delivery recording have a single committed order.
         const [current] = await tx.select().from(linkedRepositories).where(eq(linkedRepositories.id, id)).for('update');
@@ -185,6 +238,7 @@ export function createGithubWebhookRoutes(db?: WorkspaceDb, master?: string) {
           .where(
             and(eq(githubDeliveries.bindingId, id), lt(githubDeliveries.receivedAt, sql`now() - interval '7 days'`)),
           );
+        if (!('ref' in payload.data)) return confirmMerge(tx, current, payload.data);
         // Notify on the repository's default branch, whatever its name.
         const defaultRef = `refs/heads/${payload.data.repository.default_branch}`;
         if (payload.data.ref !== defaultRef) return { accepted: true, ignored: true };

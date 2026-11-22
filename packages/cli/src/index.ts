@@ -726,7 +726,12 @@ task
       headSha: result.headSha,
       mergeCommitSha: result.mergeCommitSha,
     });
-    output(integrated, describeTask(integrated));
+    output(
+      integrated,
+      integrated.repository?.state === 'merged'
+        ? describeTask(integrated)
+        : `${describeTask(integrated)}\nMerged on GitHub; the task is marked merged when GitHub's signed webhook confirms it.`,
+    );
   });
 for (const action of ['release', 'complete'] as const) {
   const command = task.command(`${action === 'complete' ? 'done' : action} <id>`);

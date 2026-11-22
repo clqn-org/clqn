@@ -95,7 +95,8 @@ export async function configureGithubWebhook(input: { repository: string; url: s
   const body = {
     ...(existing === undefined ? { name: 'web' } : {}),
     active: true,
-    events: ['push'],
+    // pull_request lets the API confirm merges itself instead of trusting the merging agent.
+    events: ['push', 'pull_request'],
     config: { url, content_type: 'json', secret: input.secret, insecure_ssl: '0' },
   };
   const response = (await ghApi(

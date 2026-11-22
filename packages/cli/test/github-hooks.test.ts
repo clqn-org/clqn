@@ -89,7 +89,7 @@ test('GitHub webhook creation sends the secret only through stdin and returns on
   assert.deepEqual(requests[1].body, {
     name: 'web',
     active: true,
-    events: ['push'],
+    events: ['push', 'pull_request'],
     config: { url, content_type: 'json', secret, insecure_ssl: '0' },
   });
 });
@@ -106,7 +106,7 @@ test('GitHub webhook setup reuses an exact URL across paginated hooks and update
   assert.ok(requests[1].args.includes(`repos/${repository}/hooks/42`));
   assert.equal(requests[1].args[requests[1].args.indexOf('--method') + 1], 'PATCH');
   assert.equal(requests[1].body.name, undefined);
-  assert.deepEqual(requests[1].body.events, ['push']);
+  assert.deepEqual(requests[1].body.events, ['push', 'pull_request']);
   assert.equal(requests[1].body.config.secret, secret);
 });
 

@@ -1,0 +1,1 @@
+ALTER TABLE "linked_repositories" ADD COLUMN "confirms_merges" boolean DEFAULT false NOT NULL;

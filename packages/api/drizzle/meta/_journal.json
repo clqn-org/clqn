@@ -78,6 +78,13 @@
       "when": 1795375934994,
       "tag": "0010_reusable_task_branches",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795381348810,
+      "tag": "0011_merge_confirmation",
+      "breakpoints": true
     }
   ]
 }
