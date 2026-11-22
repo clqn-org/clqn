@@ -46,6 +46,17 @@ test('GitHub routes disabled by default and reject invalid input', async () => {
   assert.equal(response.status, 400);
   assert.equal(response.headers.get('cache-control'), 'no-store');
 });
+test('GitHub login limits starts per client, so one client cannot lock out others', async () => {
+  const app = createGithubLoginRoutes();
+  // The last X-Forwarded-For entry is the address Cloud Run observed; earlier entries are spoofable.
+  const start = (forwarded: string) =>
+    app.request('/start', { method: 'POST', headers: { 'x-forwarded-for': forwarded } });
+  for (let i = 0; i < 10; i++) assert.equal((await start(`198.51.100.${i}, 192.0.2.1`)).status, 503);
+  const limited = await start('192.0.2.1');
+  assert.equal(limited.status, 429);
+  assert.ok(Number(limited.headers.get('retry-after')) >= 1);
+  assert.equal((await start('192.0.2.2')).status, 503);
+});
 test('PostgreSQL: GitHub single use, concurrent completion, identity conflicts, throttling and revocation', {
   skip: !process.env.TEST_DATABASE_URL && 'Set TEST_DATABASE_URL to run PostgreSQL integration tests',
 }, async (t) => {

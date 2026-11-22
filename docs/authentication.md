@@ -117,6 +117,6 @@ GitHub tokens are used only in server memory. Device codes are temporarily store
 
 Create a dedicated GitHub OAuth App with **Device Flow** enabled. Set its homepage to the project site and required callback URL to the API origin; device flow uses no callback route. Set `GITHUB_CLIENT_ID` on the API and apply migrations before deployment. No client secret or repository permissions are needed. Leave the ID unset to disable new logins.
 
-Enabling login allows any qualifying GitHub user to create an account, but grants no clan membership. The API has process-local admission and polling limits; configure edge rate limits before broad public signup. Keep authentication bodies out of logs.
+Enabling login allows any qualifying GitHub user to create an account, but grants no clan membership. The API has process-local admission and polling limits, including 10 login starts per minute per client address (the last `X-Forwarded-For` entry, which Cloud Run sets). Behind an additional load balancer, that entry is the balancer, so clients share one limit. Configure edge rate limits before broad public signup. Keep authentication bodies out of logs.
 
 Public endpoints: `POST /auth/github/start` and `POST /auth/github/poll`; send the polling handle in the JSON body. See [GitHub's device-flow documentation](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#device-flow).

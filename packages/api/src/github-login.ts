@@ -1,10 +1,12 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import { getConnInfo } from '@hono/node-server/conninfo';
 import { eq, lt, sql } from 'drizzle-orm';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
 import type { WorkspaceDb } from './access.js';
 import { credentials, githubLogins, users } from './db/schema.js';
+import { createRateLimiter } from './rate-limit.js';
 import { hashToken } from './store.js';
 
 const unavailable = () => new Error('GitHub authentication unavailable');
@@ -44,23 +46,32 @@ export function verifiedIdentity(profile: unknown, emails: unknown) {
   if (!email) throw new Error('A verified primary GitHub email is required');
   return { githubId: String(user.id), email };
 }
+// Cloud Run appends the connecting address to X-Forwarded-For; earlier entries are client-supplied.
+// Behind an extra load balancer the last entry is the balancer, so all clients share one limit.
+function clientAddress(c: Context): string {
+  const forwarded = c.req.header('x-forwarded-for')?.split(',').at(-1)?.trim();
+  if (forwarded) return forwarded;
+  try {
+    return getConnInfo(c).remote.address ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
 export function createGithubLoginRoutes(db?: WorkspaceDb, clientId?: string, request = githubRequest) {
   const app = new Hono();
   // A bounded, process-local admission guard; deployment-wide edge limits remain necessary.
-  let starts = 0;
-  let resetAt = 0;
+  // Starts are limited per client so one client cannot lock everyone else out of login.
+  const starts = createRateLimiter(10);
   let active = 0;
   app.use('*', async (c, next) => {
-    const now = Date.now();
-    if (now >= resetAt) {
-      starts = 0;
-      resetAt = now + 60_000;
-    }
-    if (active >= 10 || (c.req.path.endsWith('/start') && ++starts > 20)) {
-      c.header('Retry-After', '60');
+    const client = c.req.path.endsWith('/start') ? clientAddress(c) : undefined;
+    const retryAfter = client ? starts.retryAfter(client) : undefined;
+    if (active >= 10 || retryAfter) {
+      c.header('Retry-After', String(retryAfter ?? 60));
       c.header('Cache-Control', 'no-store');
       return c.json({ error: { code: 'RATE_LIMITED', message: 'Please try login again later' } }, 429);
     }
+    if (client) starts.record(client);
     active++;
     try {
       await next();
