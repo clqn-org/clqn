@@ -18,6 +18,16 @@ const slugPattern = /^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const prFields =
   'number,url,state,headRefName,headRefOid,headRepository,headRepositoryOwner,baseRefName,isCrossRepository,mergeCommit,statusCheckRollup';
 
+// Error output can echo remote URLs or tokens; strip both, plus terminal control characters.
+export function redactOutput(text: string): string {
+  return text
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s@]+@/gi, '$1***@')
+    .replace(/\b(gh[opsur]_|github_pat_|clqn_)[A-Za-z0-9_-]+/g, '$1***')
+    .replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, ' ')
+    .trim()
+    .slice(-2000);
+}
+
 async function command(file: 'git' | 'gh', args: string[], cwd?: string, signal?: AbortSignal): Promise<string> {
   try {
     const { stdout } = await execute(file, args, {
@@ -33,9 +43,10 @@ async function command(file: 'git' | 'gh', args: string[], cwd?: string, signal?
     const failure = error as Error & { code?: string | number; stderr?: string };
     if (failure.code === 'ENOENT')
       throw new Error(`${file} is required for repository commands; install it and make it available on PATH`);
-    // Do not echo process arguments or stderr: repository configuration can contain credentials.
+    // Never echo process arguments. Stderr is shown, redacted, only when verbose output is requested.
+    const detail = process.env.CLQN_VERBOSE && failure.stderr ? `\n${redactOutput(failure.stderr)}` : '';
     throw new Error(
-      `${file} ${args.find((arg) => !arg.startsWith('-') && !arg.includes('=')) ?? 'operation'} failed. Check repository access and local state.`,
+      `${file} ${args.find((arg) => !arg.startsWith('-') && !arg.includes('=')) ?? 'operation'} failed. Check repository access and local state.${detail}`,
     );
   }
 }

@@ -12,11 +12,13 @@ import { promisify } from 'node:util';
 import type { ClqnClient } from '@clqn/shared';
 import {
   inspectPullRequest,
+  localRepository,
   type MainSyncResult,
   mergePullRequest,
   openTaskWorktree,
   prepareWorktree,
   publishWorktree,
+  redactOutput,
   repositoryForNewTask,
   syncMain,
   taskWorktreeLocation,
@@ -606,5 +608,18 @@ test('automatic task directories can resume the same dirty worktree without crea
   await assert.rejects(
     taskWorktreeLocation({ repoPath: f.repoPath, taskId, repository: { ...f.repository, slug: 'other/repo' } }),
     /Origin does not match/,
+  );
+});
+
+test('verbose Git errors include redacted stderr; default errors do not', async (t) => {
+  const f = await fixture(t);
+  const outside = join(f.root, 'not-a-repository');
+  await mkdir(outside);
+  await assert.rejects(localRepository(outside), (error: Error) => !/not a git repository/i.test(error.message));
+  process.env.CLQN_VERBOSE = '1';
+  await assert.rejects(localRepository(outside), /not a git repository/i);
+  assert.equal(
+    redactOutput('fatal: https://user:ghp_secret@github.com/a/b \x1b[31m clqn_abc-DEF and github_pat_X1\n'),
+    'fatal: https://***@github.com/a/b  [31m clqn_*** and github_pat_***',
   );
 });

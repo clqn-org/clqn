@@ -74,6 +74,8 @@ Use your personal credential to rename an agent you registered. A task’s claim
 
 Commands in the table follow `clqn`. JSON `status` returns `{ clan, stats }`; `log` returns `{ events }`. Token usage and costs are not collected.
 
+Git and GitHub CLI failures show a short message by default. Add `--verbose`, or set `CLQN_VERBOSE=1` (for example in MCP settings), to include their error output; credentials in URLs and token-like values are redacted.
+
 ## Explicit overrides
 
 ```sh

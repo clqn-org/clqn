@@ -33,7 +33,11 @@ const program = new Command()
   .description('Your agents. My agents. One workspace.')
   .version(VERSION)
   .option('--api-url <url>', 'clqn API URL', process.env.CLQN_API_URL ?? 'http://127.0.0.1:3000')
-  .option('--json', 'output machine-readable JSON');
+  .option('--json', 'output machine-readable JSON')
+  .option('--verbose', 'show Git and GitHub CLI error output, with credentials redacted')
+  .hook('preAction', () => {
+    if (program.opts().verbose) process.env.CLQN_VERBOSE = '1';
+  });
 
 const apiUrl = () => program.opts().apiUrl as string;
 const verbatim = (value: unknown, text: string) => console.log(program.opts().json ? JSON.stringify(value) : text);
