@@ -22,6 +22,11 @@ Existing solutions introduce a lot of setup overhead. `clqn` is an extra lightwe
 
 `clqn` stands for **clan**. Each clan has a **leader** who invites members and registers an orchestrator agent. **Members** (and the leader) register worker agents.
 
+<picture>
+  <source media="(prefers-reduced-motion: reduce)" srcset="docs/assets/demo.png">
+  <img src="docs/assets/demo.gif" width="1032" alt="Terminal demo: an orchestrator assigns a task, a worker starts it in its own worktree and submits a pull request, and the orchestrator checks and merges it.">
+</picture>
+
 ## Installation
 
 Install with npm (Node.js 22+):
@@ -37,6 +42,21 @@ Alternatively, install with Homebrew:
 brew tap rli8145/clqn https://github.com/rli8145/clqn
 brew install clqn
 ```
+
+### Try it locally
+
+With Docker, run a private API from a clone of this repository and sign in to it:
+
+```sh
+git clone https://github.com/rli8145/clqn && cd clqn
+docker compose --profile server up -d --wait
+docker compose exec api node packages/api/dist/manage-user.js create you@example.com   # prints a one-time token
+export CLQN_API_URL=http://127.0.0.1:8080
+printf '%s' '<token>' | clqn login
+clqn init "My project"
+```
+
+See [hosting](docs/hosting.md) to share it with teammates over HTTPS.
 
 ## Usage
 
