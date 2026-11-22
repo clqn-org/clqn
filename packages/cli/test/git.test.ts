@@ -276,12 +276,33 @@ test('merge matches the reviewed head, respects pending queues, and reports only
   assert.ok(
     merges.every(
       ({ args }) =>
+        args.includes('--squash') &&
         args.includes('--match-head-commit') &&
         args.includes(f.baseSha) &&
         !args.includes('--admin') &&
         !args.includes('--auto'),
     ),
   );
+});
+
+test('merge can use another method and, when asked, a repository without checks', async (t) => {
+  const f = await fixture(t);
+  const input = { repository: f.repository, prNumber: 7, headSha: f.baseSha };
+  // Opting out of checks never bypasses pending or failing ones.
+  for (const statusCheckRollup of [
+    [{ __typename: 'CheckRun', status: 'IN_PROGRESS', conclusion: null }],
+    [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'FAILURE' }],
+  ]) {
+    await f.savePr(f.pr(f.baseSha, { statusCheckRollup }));
+    await assert.rejects(mergePullRequest({ ...input, allowNoChecks: true }), /at least one successful check/);
+  }
+  await assert.rejects(mergePullRequest({ ...input, method: 'force' as 'merge' }), /squash, merge, or rebase/);
+  await f.savePr(f.pr(f.baseSha, { statusCheckRollup: [] }));
+  const merged = await mergePullRequest({ ...input, method: 'rebase', allowNoChecks: true });
+  assert.equal(merged.state, 'MERGED');
+  assert.equal(merged.checksReported, false);
+  const [merge] = (await f.commands()).filter(({ file, args }) => file === 'gh' && args[1] === 'merge');
+  assert.ok(merge?.args.includes('--rebase') && !merge.args.includes('--squash'));
 });
 
 async function advanceMain(f: Fixture, branch = 'main') {

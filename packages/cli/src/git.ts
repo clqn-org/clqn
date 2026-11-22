@@ -317,6 +317,7 @@ export async function inspectPullRequest(input: {
     mergeCommitSha: pr.mergeCommit?.oid ?? null,
     url: pr.url,
     checksPassed: checksPassed(pr),
+    checksReported: (pr.statusCheckRollup?.length ?? 0) > 0,
   };
 }
 
@@ -410,20 +411,26 @@ export async function publishWorktree(input: {
   return { headSha, prNumber: pr.number, prUrl: pr.url };
 }
 
+export const mergeMethods = ['squash', 'merge', 'rebase'] as const;
 export async function mergePullRequest(input: {
   repository: { slug: string; branch: string; baseBranch?: string };
   prNumber: number;
   headSha: string;
+  method?: (typeof mergeMethods)[number];
+  // For repositories without CI. Pending or failing checks still block the merge.
+  allowNoChecks?: boolean;
 }) {
   if (!shaPattern.test(input.headSha)) throw new Error('Head SHA must be a full lowercase 40-character commit SHA');
+  const method = input.method ?? 'squash';
+  if (!mergeMethods.includes(method)) throw new Error('Merge method must be squash, merge, or rebase');
   const before = await inspectPullRequest(input);
   if (before.headSha !== input.headSha)
     throw new Error('Pull request head changed; review the new commit before merging');
   if (before.state === 'MERGED') return before;
   if (before.state !== 'OPEN') throw new Error('Pull request is closed without a merge');
-  if (!before.checksPassed)
+  if (!before.checksPassed && !(input.allowNoChecks && !before.checksReported))
     throw new Error(
-      'All reported checks must finish successfully before merging; at least one successful check is required',
+      'All reported checks must finish successfully before merging; at least one successful check is required unless --allow-no-checks is set and the repository reports none',
     );
   await command('gh', [
     'pr',
@@ -431,7 +438,7 @@ export async function mergePullRequest(input: {
     String(input.prNumber),
     '--repo',
     `github.com/${slug(input.repository.slug)}`,
-    '--squash',
+    `--${method}`,
     '--match-head-commit',
     input.headSha,
   ]);

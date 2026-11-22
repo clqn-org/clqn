@@ -88,7 +88,7 @@ clqn task check <task-id>
 clqn task merge <task-id>
 ```
 
-Merge requires the recorded head, at least one successful check, and no failed or pending checks. Neutral/skipped checks alone are insufficient. clqn requests a squash merge with `gh pr merge --match-head-commit`; GitHub permissions, reviews, protections, and queues still apply.
+Merge requires the recorded head, at least one successful check, and no failed or pending checks. Neutral/skipped checks alone are insufficient. For repositories without CI, `task merge --allow-no-checks` merges when GitHub reports no checks at all; pending or failing checks still block. clqn requests a squash merge with `gh pr merge --match-head-commit`; pass `--method merge` or `--method rebase` to match the repository's settings. GitHub permissions, reviews, protections, and queues still apply.
 
 After a queued or direct GitHub merge, rerun `task merge` to verify the merged head and record integration. Identical reports are safe to repeat. Inspect queued merges before retrying a failed command.
 

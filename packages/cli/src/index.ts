@@ -17,6 +17,7 @@ import { type Config, readConfig, removeConfig, writeConfig } from './config.js'
 import {
   inspectPullRequest,
   localRepository,
+  mergeMethods,
   mergePullRequest,
   openTaskWorktree,
   publishWorktree,
@@ -656,7 +657,11 @@ task
   .command('merge <id>')
   .description('Merge a passing PR as leader/orchestrator and record confirmed integration')
   .option('--clan <id>', 'clan ID')
-  .action(async (id: string, options: { clan?: string }) => {
+  .option('--method <method>', 'squash, merge, or rebase', 'squash')
+  .option('--allow-no-checks', 'merge when the repository reports no checks; pending or failing checks still block')
+  .action(async (id: string, options: { clan?: string; method: string; allowNoChecks?: boolean }) => {
+    const method = mergeMethods.find((value) => value === options.method);
+    if (!method) throw new Error('Merge method must be squash, merge, or rebase');
     const api = await client();
     const clanId = await selectedClan(options);
     await requireCoordinator(api, clanId);
@@ -664,7 +669,13 @@ task
     const repository = value.repository;
     if (!repository?.prNumber || !repository.headSha) throw new Error('Task has no reported PR and head commit');
     if (value.status !== 'claimed') throw new Error('Only claimed tasks can be integrated');
-    const result = await mergePullRequest({ repository, prNumber: repository.prNumber, headSha: repository.headSha });
+    const result = await mergePullRequest({
+      repository,
+      prNumber: repository.prNumber,
+      headSha: repository.headSha,
+      method,
+      allowNoChecks: options.allowNoChecks === true,
+    });
     if (result.state !== 'MERGED' || !result.mergeCommitSha) {
       throw new Error(
         'PR is not confirmed merged. Run task check and retry task merge after GitHub completes the merge',
