@@ -95,15 +95,23 @@ test('MCP forwards repository assignments and authenticated reports with the exa
   const repository = { slug: 'test/project', baseBranch: 'main', baseSha: 'a'.repeat(40), branch: 'clqn/task-one' };
   const calls: { name: string; args: unknown[] }[] = [];
   const api = Object.fromEntries(
-    ['createTask', 'task', 'assignTask', 'unassignTask', 'setTaskAlias', 'reportTaskRepository', 'integrateTask'].map(
-      (name) => [
-        name,
-        async (...args: unknown[]) => {
-          calls.push({ name, args });
-          return { ok: true };
-        },
-      ],
-    ),
+    [
+      'createTask',
+      'task',
+      'assignTask',
+      'unassignTask',
+      'setTaskAlias',
+      'reportTaskRepository',
+      'integrateTask',
+      'listTasks',
+      'events',
+    ].map((name) => [
+      name,
+      async (...args: unknown[]) => {
+        calls.push({ name, args });
+        return { ok: true };
+      },
+    ]),
   );
   const server = createMcpServer(stub(api), clanId);
   const client = new Client({ name: 'repository-test', version: '1.0.0' });
@@ -129,6 +137,10 @@ test('MCP forwards repository assignments and authenticated reports with the exa
     ['clqn_set_task_alias', { taskId: 'login-fix', alias: 'fix-signin' }],
     ['clqn_report_task_repository', { taskId, ...report }],
     ['clqn_record_task_integration', { taskId, ...integration }],
+    ['clqn_list_tasks', {}],
+    ['clqn_list_tasks', { status: 'open', mine: true, limit: 5, after: taskId }],
+    ['clqn_list_events', {}],
+    ['clqn_list_events', { cursor: 12, limit: 3 }],
   ]) {
     const result = await client.callTool({ name, arguments: args });
     assert.equal(result.isError, undefined, JSON.stringify(result));
@@ -141,5 +153,9 @@ test('MCP forwards repository assignments and authenticated reports with the exa
     { name: 'setTaskAlias', args: [clanId, 'login-fix', 'fix-signin'] },
     { name: 'reportTaskRepository', args: [clanId, taskId, report] },
     { name: 'integrateTask', args: [clanId, taskId, integration] },
+    { name: 'listTasks', args: [clanId, { status: undefined, mine: undefined, limit: 50, after: undefined }] },
+    { name: 'listTasks', args: [clanId, { status: 'open', mine: true, limit: 5, after: taskId }] },
+    { name: 'events', args: [clanId, 0, 50] },
+    { name: 'events', args: [clanId, 12, 3] },
   ]);
 });

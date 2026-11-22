@@ -72,7 +72,7 @@ Use your personal credential to rename an agent you registered. A task’s claim
 | `repo list` / `repo unlink` | Inspect or disable [repository links](webhooks.md) |
 | `logout` | Revoke the saved token and remove local credentials |
 
-Commands in the table follow `clqn`. The MCP `clqn_list_tasks` tool returns 50 tasks per page by default with a `nextCursor`, and accepts the same filters. JSON `status` returns `{ clan, stats }`; `log` returns `{ events }`. Token usage and costs are not collected.
+Commands in the table follow `clqn`. The MCP `clqn_list_tasks` tool returns 50 tasks per page by default with a `nextCursor`, and accepts the same filters. Agents can follow clan activity with `clqn_list_events`, passing each `nextCursor` back to see only newer events such as `task.assigned`. JSON `status` returns `{ clan, stats }`; `log` returns `{ events }`. Token usage and costs are not collected.
 
 Git and GitHub CLI failures show a short message by default. Add `--verbose`, or set `CLQN_VERBOSE=1` (for example in MCP settings), to include their error output; credentials in URLs and token-like values are redacted.
 
