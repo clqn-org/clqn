@@ -83,6 +83,10 @@ async function workspaceFixture(t: TestContext) {
     }
     if (request.url === '/v1/me') response.end(JSON.stringify(user));
     else if (request.url === '/v1/logout' && request.method === 'POST') response.end(JSON.stringify({ revoked: true }));
+    else if (request.url === `/v1/clans/${clan.id}/members/${user.id}/remove` && request.method === 'POST')
+      response.end(JSON.stringify({ removed: true }));
+    else if (request.url === `/v1/clans/${clan.id}/leave` && request.method === 'POST')
+      response.end(JSON.stringify({ left: true }));
     else if (request.url === '/v1/clans' && request.method === 'POST') {
       let body = '';
       for await (const chunk of request) body += chunk;
@@ -132,6 +136,21 @@ test('CLI invitations normalize email, support an explicit clan, and joining sel
   assert.deepEqual(JSON.parse((await f.call(['join', f.invitation.code, '--json'])).stdout), f.clan);
   assert.deepEqual(JSON.parse((await f.call(['members', '--json'])).stdout), f.members);
   assert.deepEqual(JSON.parse((await f.call(['invite', f.invitation.email, '--json'])).stdout), f.invitation);
+});
+
+test('CLI removes members by email and leaving clears the selected clan', async (t) => {
+  const f = await workspaceFixture(t);
+  await f.call(['login'], { input: f.token });
+  await f.call(['join', f.invitation.code]);
+  const removed = await f.call(['members', 'remove', 'Alice@Example.com', '--clan', f.clan.id, '--json']);
+  assert.deepEqual(JSON.parse(removed.stdout), { removed: true });
+  assert.equal(f.requests.at(-1)?.path, `/v1/clans/${f.clan.id}/members/${f.user.id}/remove`);
+  await assert.rejects(f.call(['members', 'remove', 'nobody@example.com', '--json']));
+  assert.deepEqual(JSON.parse((await f.call(['leave', '--json'])).stdout), { left: true });
+  await assert.rejects(f.call(['members', '--json']), (thrown) => {
+    assert.equal(JSON.parse((thrown as ExecError).stderr).error.code, 'COMMAND_FAILED');
+    return true;
+  });
 });
 
 test('CLI rejects malformed invitation input before making an HTTP request', async (t) => {

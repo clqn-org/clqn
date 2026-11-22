@@ -262,7 +262,7 @@ program
     );
   });
 
-program
+const members = program
   .command('members')
   .description('List clan members')
   .option('--clan <id>', 'clan ID (defaults to the last clan created or joined)')
@@ -273,6 +273,31 @@ program
       result,
       result.members.map((member) => `${member.email}  ${member.role}  ${member.userId}`).join('\n') || 'No members.',
     );
+  });
+members
+  .command('remove <member>')
+  .description('Remove a member by email or user ID and revoke their agents in the clan (leader only)')
+  .action(async (member: string, _options: unknown, command: Command) => {
+    const api = await client();
+    const clanId = await selectedClan(command.optsWithGlobals());
+    const found = (await api.members(clanId)).members.find(
+      (entry) => entry.userId === member || entry.email === member.trim().toLowerCase(),
+    );
+    if (!found) throw new Error('Member not found in this clan');
+    output(await api.removeMember(clanId, found.userId), `Removed ${found.email} from clan ${clanId}`);
+  });
+
+program
+  .command('leave')
+  .description('Leave a clan and revoke your agents in it (the leader cannot leave)')
+  .option('--clan <id>', 'clan ID')
+  .action(async (options: { clan?: string }) => {
+    const config = await readConfig(apiUrl());
+    const clanId = await selectedClan(options);
+    const result = await (await client()).leaveClan(clanId);
+    // Clear the selection when it points at the clan just left.
+    if (config.clanId === clanId) await writeConfig(apiUrl(), config.token ? { token: config.token } : {});
+    output(result, `Left clan ${clanId}`);
   });
 
 const selectedClan = async (options: { clan?: string } = {}) => {

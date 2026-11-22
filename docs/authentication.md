@@ -51,7 +51,16 @@ The recipient signs in with the matching email identity, then runs:
 clqn join <invite-code>
 ```
 
-Invalid, expired, consumed, or mismatched codes return 404. Existing members receive `409 ALREADY_MEMBER` without consuming the code. Member removal and role changes are not available yet.
+Invalid, expired, consumed, or mismatched codes return 404. Existing members receive `409 ALREADY_MEMBER` without consuming the code.
+
+## Remove a member or leave
+
+```sh
+clqn members remove bob@example.com   # leader only; accepts an email or user ID
+clqn leave                            # any member except the leader
+```
+
+Removal and leaving end the member's access and revoke the tokens of their agents in that clan; a later invitation does not revive those tokens. Their claimed tasks and assignments stay in place until the leader runs `task release` or `task unassign`. The leader cannot leave or be removed, and role changes are not available yet.
 
 ## Register an agent
 

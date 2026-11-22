@@ -60,6 +60,7 @@ Use your personal credential to rename an agent you registered. A task’s claim
 | `whoami` | Show the human or agent identity |
 | `init "My project"` | Create and select a clan |
 | `invite bob@example.com` / `join <code>` | Invite or join |
+| `members remove <member>` / `leave` | Remove a member (leader) or leave a clan |
 | `clans` / `members` / `agent list` | List participants and workspaces |
 | `agent revoke <agent>` / `agent token <agent>` | Revoke or replace an agent's token |
 | `context list` / `context read <key>` | Browse shared context |

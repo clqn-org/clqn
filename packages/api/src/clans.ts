@@ -1,5 +1,5 @@
-import { type Actor, createClanSchema, createInvitationSchema, joinInvitationSchema } from '@clqn/shared';
-import { Hono } from 'hono';
+import { type Actor, ApiError, createClanSchema, createInvitationSchema, joinInvitationSchema } from '@clqn/shared';
+import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
 import type { WorkspaceStore } from './store.js';
@@ -54,6 +54,26 @@ export function createClanRoutes(store: WorkspaceStore) {
     const members = id.success ? await store.members(c.get('user').id, id.data) : undefined;
     if (!members) return c.json({ error: { code: 'NOT_FOUND', message: 'Clan not found' } }, 404);
     return c.json({ members });
+  });
+  const emptyBody = async (c: Context) => {
+    const body = z
+      .object({})
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!body.success) throw new ApiError(400, 'INVALID_REQUEST', 'Expected an empty JSON object');
+  };
+  app.post('/clans/:clanId/members/:userId/remove', smallBody, async (c) => {
+    await emptyBody(c);
+    const userId = z.uuid().safeParse(c.req.param('userId'));
+    if (!userId.success) throw new ApiError(404, 'NOT_FOUND', 'Member not found');
+    await store.removeMember(c.get('user'), c.req.param('clanId'), userId.data);
+    return c.json({ removed: true as const });
+  });
+  app.post('/clans/:clanId/leave', smallBody, async (c) => {
+    await emptyBody(c);
+    const actor = c.get('user');
+    await store.removeMember(actor, c.req.param('clanId'), actor.id);
+    return c.json({ left: true as const });
   });
   return app;
 }

@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { type Actor, type Agent, ApiError, type Clan, type User } from '@clqn/shared';
-import { and, eq, gt, isNull, sql as query } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, sql as query } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { appendEvent, requireClan, requirePersonal } from './access.js';
@@ -37,6 +37,7 @@ export interface WorkspaceStore {
   createClan(userId: string, name: string): Promise<Clan>;
   listClans(userId: string): Promise<Clan[]>;
   members(userId: string, clanId: string): Promise<Member[] | undefined>;
+  removeMember(actor: Actor, clanId: string, userId: string): Promise<void>;
 }
 
 export function createStore(url: string, poolSize = 10) {
@@ -260,6 +261,39 @@ export function createStore(url: string, poolSize = 10) {
         .where(eq(schema.memberships.userId, userId))
         .orderBy(schema.clans.createdAt, schema.clans.id);
       return rows.map(({ clan }) => clanView(clan));
+    },
+    async removeMember(actor, clanId, userId) {
+      requirePersonal(actor);
+      await db.transaction(async (tx) => {
+        const membership = await requireClan(tx, actor, clanId);
+        const leaving = userId === actor.id;
+        if (!leaving && membership.role !== 'leader')
+          throw new ApiError(403, 'FORBIDDEN', 'Only the clan leader can remove members');
+        // Agent registration and token rotation hold a share lock on this row, so they cannot race the removal.
+        const [target] = await tx
+          .select()
+          .from(schema.memberships)
+          .where(and(eq(schema.memberships.clanId, clanId), eq(schema.memberships.userId, userId)))
+          .for('update');
+        if (!target) throw new ApiError(404, 'NOT_FOUND', 'Member not found');
+        if (target.role === 'leader')
+          throw new ApiError(409, 'LEADER_REQUIRED', 'The clan leader cannot leave or be removed');
+        // Delete agent tokens too, so a later invitation cannot revive them.
+        const owned = tx
+          .select({ id: schema.agents.id })
+          .from(schema.agents)
+          .where(and(eq(schema.agents.clanId, clanId), eq(schema.agents.ownerId, userId)));
+        await tx.delete(schema.credentials).where(inArray(schema.credentials.agentId, owned));
+        await tx
+          .delete(schema.memberships)
+          .where(and(eq(schema.memberships.clanId, clanId), eq(schema.memberships.userId, userId)));
+        await appendEvent(tx, {
+          clanId,
+          actorId: actor.id,
+          type: leaving ? 'member.left' : 'member.removed',
+          resourceId: userId,
+        });
+      });
     },
     async members(userId, clanId) {
       const [membership] = await db

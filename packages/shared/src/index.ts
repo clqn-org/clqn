@@ -112,6 +112,8 @@ export const membersSchema = z.object({
     }),
   ),
 });
+export const removedMemberSchema = z.object({ removed: z.literal(true) });
+export const leftClanSchema = z.object({ left: z.literal(true) });
 export const errorSchema = z.object({ error: z.object({ code: z.string(), message: z.string() }) });
 export type ApiErrorBody = z.infer<typeof errorSchema>;
 
@@ -198,6 +200,16 @@ export class ClqnClient {
   }
   members(clanId: string) {
     return this.request(`/v1/clans/${encodeURIComponent(clanId)}/members`, membersSchema);
+  }
+  removeMember(clanId: string, userId: string) {
+    return this.request(
+      `/v1/clans/${encodeURIComponent(clanId)}/members/${encodeURIComponent(userId)}/remove`,
+      removedMemberSchema,
+      {},
+    );
+  }
+  leaveClan(clanId: string) {
+    return this.request(`/v1/clans/${encodeURIComponent(clanId)}/leave`, leftClanSchema, {});
   }
   createInvitation(clanId: string, email: string): Promise<Invitation> {
     return this.request(
