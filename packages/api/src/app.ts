@@ -1,6 +1,7 @@
 import { type Actor, ApiError, healthSchema, VERSION } from '@clqn/shared';
 import { sql } from 'drizzle-orm';
 import { Hono } from 'hono';
+import { requestId } from 'hono/request-id';
 import type { WorkspaceDb } from './access.js';
 import { requirePersonal } from './access.js';
 import { createActivityRoutes } from './activity.js';
@@ -26,8 +27,10 @@ export function createApp(
   if (options.githubWebhookSecret !== undefined && options.githubWebhookSecret.trim().length < 32) {
     throw new Error('GITHUB_WEBHOOK_SECRET must contain at least 32 non-padding characters');
   }
-  const app = new Hono<{ Variables: { user: Actor; tokenHash: string } }>();
+  const app = new Hono<{ Variables: { user: Actor; tokenHash: string; requestId: string } }>();
   const rateLimit = createRateLimiter(options.requestsPerMinute ?? 300);
+  // Echoed as X-Request-Id and in 500 messages so a report can be matched to a log line.
+  app.use(requestId({ limitLength: 64 }));
   // Liveness only: this endpoint intentionally does not connect to the database.
   app.get('/health', (c) => c.json(healthSchema.parse({ status: 'ok', service: 'clqn-api', version: VERSION })));
   // Readiness: confirms the database answers, for load balancers and container health checks.
@@ -101,8 +104,22 @@ export function createApp(
       );
     }
     // Database errors may contain SQL parameters. Never log request credentials or user data.
-    console.error('API request failed', { name: error.name });
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' } }, 500);
+    // One JSON line per failure; Cloud Logging reads severity and message from it.
+    const id = c.get('requestId');
+    console.error(
+      JSON.stringify({
+        severity: 'ERROR',
+        message: 'API request failed',
+        error: error.name,
+        requestId: id,
+        method: c.req.method,
+        route: c.req.routePath,
+      }),
+    );
+    return c.json(
+      { error: { code: 'INTERNAL_ERROR', message: `An unexpected error occurred (request ID ${id})` } },
+      500,
+    );
   });
   return app;
 }

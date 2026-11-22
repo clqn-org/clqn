@@ -116,7 +116,7 @@ Allow public `/hooks/github/*` requests through to the API; GitHub signatures au
 
 ## Verify a deployment
 
-`GET /health` checks process liveness only; `GET /ready` returns `503` until the database answers, so use it for load balancer or startup probes. Test authenticated `whoami`, membership, context, and tasks. Run the [two-person acceptance check](authentication.md#manual-acceptance-check) to verify cloud networking, webhooks, and real agent settings.
+`GET /health` checks process liveness only; `GET /ready` returns `503` until the database answers, so use it for load balancer or startup probes. Every response carries an `X-Request-Id` header, and a `500` message repeats it; the API writes one JSON line per failure with that ID, the method, and the route pattern, never request bodies or credentials. Test authenticated `whoami`, membership, context, and tasks. Run the [two-person acceptance check](authentication.md#manual-acceptance-check) to verify cloud networking, webhooks, and real agent settings.
 
 ## Enable GitHub login
 

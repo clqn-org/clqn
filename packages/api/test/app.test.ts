@@ -65,6 +65,42 @@ test('missing, malformed, and unknown credentials never reach workspace operatio
   assert.equal(lookups, 1);
 });
 
+test('unexpected errors return a request ID that matches one log line without request data', async (t) => {
+  const failing = createApp(
+    stub({
+      authenticate: async () => {
+        throw new Error(`select ${token}`);
+      },
+    }),
+  );
+  const logged: string[] = [];
+  t.mock.method(console, 'error', (line: string) => logged.push(line));
+  const response = await failing.request('/v1/clans', { headers });
+  assert.equal(response.status, 500);
+  const id = response.headers.get('x-request-id');
+  assert.match(id ?? '', /^[0-9a-f-]{36}$/);
+  assert.equal(
+    errorSchema.parse(await response.json()).error.message,
+    `An unexpected error occurred (request ID ${id})`,
+  );
+  assert.equal(logged.length, 1);
+  assert.deepEqual(JSON.parse(logged[0]!), {
+    severity: 'ERROR',
+    message: 'API request failed',
+    error: 'Error',
+    requestId: id,
+    method: 'GET',
+    route: '/v1/*',
+  });
+  // A caller-supplied ID is kept when it is short and plain, and replaced otherwise.
+  const traced = await failing.request('/v1/clans', { headers: { ...headers, 'x-request-id': 'trace-1' } });
+  assert.equal(traced.headers.get('x-request-id'), 'trace-1');
+  for (const supplied of ['a b', 'x'.repeat(65)]) {
+    const replaced = await failing.request('/health', { headers: { 'x-request-id': supplied } });
+    assert.match(replaced.headers.get('x-request-id') ?? '', /^[0-9a-f-]{36}$/);
+  }
+});
+
 test('authentication hashes credentials and clan creation uses verified actor', async () => {
   const app = createApp(
     stub({
