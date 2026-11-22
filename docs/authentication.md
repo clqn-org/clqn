@@ -94,7 +94,7 @@ The orchestrator can assign open tasks and report integrations. It cannot change
 
 ## Collaboration rules
 
-- Context values are limited to 65,536 UTF-8 bytes. Writes require the current revision (`0` to create); stale writes return `409 REVISION_CONFLICT`. `context history <key>` reads immutable revisions.
+- Context values are limited to 65,536 UTF-8 bytes. Writes require the current revision (`0` to create); stale writes return `409 REVISION_CONFLICT`. `context history <key>` reads the latest 100 revisions. A clan holds up to 500 context entries; see [storage caps](hosting.md#migrate-then-deploy).
 - Only the assigned agent can claim assigned work. Unassigned work can be claimed by any clan member or agent. Concurrent claims cannot both succeed.
 - Only the exact claimant can report code or complete a task. The claimant or human leader can release it, clearing its assignment. Code tasks require recorded integration before completion.
 - State changes and audit events commit together. Event reads use ascending cursors with a maximum page size of 100.

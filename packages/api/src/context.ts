@@ -1,10 +1,11 @@
 import { type Actor, ApiError, contextKeySchema, writeContextSchema } from '@clqn/shared';
-import { and, eq } from 'drizzle-orm';
+import { and, count, eq, lte } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
-import { appendEvent, requireClan, type WorkspaceDb } from './access.js';
+import { appendEvent, lockClan, requireClan, type WorkspaceDb } from './access.js';
 import { contextEntries, contextRevisions } from './db/context.js';
+import { limitReached, limits } from './limits.js';
 
 type EntryRow = typeof contextEntries.$inferSelect;
 const view = ({ key, text, revision, updatedAt }: EntryRow) => ({
@@ -102,7 +103,26 @@ export function createContextRoutes(db: WorkspaceDb) {
             'Context revision changed; read the entry and retry with its current revision',
           );
         }
+        if (expectedRevision === 0) {
+          // Count after inserting, under the clan lock, so concurrent creations cannot exceed the cap.
+          await lockClan(tx, clanId);
+          const [entries] = await tx
+            .select({ n: count() })
+            .from(contextEntries)
+            .where(eq(contextEntries.clanId, clanId));
+          if (entries!.n > limits.contextEntriesPerClan)
+            throw limitReached(`A clan can hold at most ${limits.contextEntriesPerClan} context entries`);
+        }
         await tx.insert(contextRevisions).values(values);
+        await tx
+          .delete(contextRevisions)
+          .where(
+            and(
+              eq(contextRevisions.clanId, clanId),
+              eq(contextRevisions.key, key),
+              lte(contextRevisions.revision, revision - limits.contextRevisionsKept),
+            ),
+          );
         await appendEvent(tx, {
           clanId,
           actorId: actor.id,

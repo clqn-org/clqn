@@ -15,7 +15,7 @@ export const contextEntries = pgTable(
   (table) => [primaryKey({ columns: [table.clanId, table.key] })],
 );
 
-// Revisions are only inserted, never updated or deleted by the application.
+// Revisions are never updated; only the latest revisions per key are kept (see limits.ts).
 export const contextRevisions = pgTable(
   'context_revisions',
   {

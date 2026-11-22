@@ -1,11 +1,12 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { type Actor, type Agent, ApiError, type Clan, type User } from '@clqn/shared';
-import { and, eq, gt, inArray, isNull, sql as query } from 'drizzle-orm';
+import { and, count, eq, gt, inArray, isNull, sql as query } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { appendEvent, requireClan, requirePersonal } from './access.js';
+import { appendEvent, lockClan, requireClan, requirePersonal } from './access.js';
 import { resourceFilter, rethrowAliasConflict } from './aliases.js';
 import * as schema from './db/schema.js';
+import { limitReached, limits } from './limits.js';
 
 export const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
 export type Member = { userId: string; email: string; role: 'leader' | 'member'; createdAt: string };
@@ -90,6 +91,14 @@ export function createStore(url: string, poolSize = 10) {
             .values({ clanId, ownerId: actor.id, name, role, alias })
             .returning();
           if (!agent) throw new Error('Agent creation returned no row');
+          // Count after inserting, under the clan lock, so concurrent registrations cannot exceed the cap.
+          await lockClan(tx, clanId);
+          const [owned] = await tx
+            .select({ n: count() })
+            .from(schema.agents)
+            .where(and(eq(schema.agents.clanId, clanId), eq(schema.agents.ownerId, actor.id)));
+          if (owned!.n > limits.agentsPerMember)
+            throw limitReached(`You can register at most ${limits.agentsPerMember} agents in a clan`);
           await tx
             .insert(schema.credentials)
             .values({ userId: actor.id, agentId: agent.id, tokenHash: hashToken(token) });
@@ -189,6 +198,11 @@ export function createStore(url: string, poolSize = 10) {
     },
     async createClan(userId, name) {
       return db.transaction(async (tx) => {
+        // Lock the user so concurrent creations count each other.
+        await tx.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, userId)).for('update');
+        const [created] = await tx.select({ n: count() }).from(schema.clans).where(eq(schema.clans.createdBy, userId));
+        if (created!.n >= limits.clansPerUser)
+          throw limitReached(`You can create at most ${limits.clansPerUser} clans`);
         const [clan] = await tx.insert(schema.clans).values({ name, createdBy: userId }).returning();
         if (!clan) throw new Error('Clan creation returned no row');
         await tx.insert(schema.memberships).values({ clanId: clan.id, userId, role: 'leader' });

@@ -23,9 +23,14 @@ export async function requireClan(db: WorkspaceDb, actor: Actor, clanId: string,
   return membership;
 }
 
+// Serializes a clan's writers until commit. Take it after row locks, as appendEvent does, to keep one lock order.
+export async function lockClan(tx: Pick<WorkspaceDb, 'execute'>, clanId: string) {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${clanId}::text, 0))`);
+}
+
 // Allocate each clan's event cursor only after earlier writers commit, so polling cannot skip late commits.
 export async function appendEvent(tx: Pick<WorkspaceDb, 'execute' | 'insert'>, event: typeof events.$inferInsert) {
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${event.clanId}::text, 0))`);
+  await lockClan(tx, event.clanId);
   const [row] = await tx.insert(events).values(event).returning({ sequence: events.sequence });
   if (!row) throw new Error('Event creation returned no row');
   return row.sequence;

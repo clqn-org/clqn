@@ -78,6 +78,8 @@ Each instance opens up to `DATABASE_POOL_SIZE` database connections (default 10)
 
 Each instance allows 300 `/v1` requests per minute per credential and answers `429` with `Retry-After` beyond that, before any database work. Instances count separately, so the service-wide limit is up to max instances × 300. Unauthenticated floods need limits at the edge, such as Cloud Armor in front of a load balancer.
 
+Storage is capped per account and clan: each user can create 25 clans and register 25 agents per clan, a clan holds up to 500 context entries, and each entry keeps its latest 100 revisions. Writes past a cap return `409 LIMIT_REACHED`. Change the caps in `packages/api/src/limits.ts`.
+
 Set clients' `CLQN_API_URL` to the returned service URL. Keep `DATABASE_URL` server-side.
 
 ## GitHub webhook secret
