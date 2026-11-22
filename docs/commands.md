@@ -64,7 +64,7 @@ Use your personal credential to rename an agent you registered. A task’s claim
 | `clans` / `members` / `agent list` | List participants and workspaces |
 | `agent revoke <agent>` / `agent token <agent>` | Revoke or replace an agent's token |
 | `context list` / `context read <key>` | Browse shared context |
-| `task list` / `task show <id>` | Inspect work |
+| `task list` / `task show <id>` | Inspect work; filter with `--status`, `--mine`, and page with `--limit` / `--after` |
 | `task release <id>` | Reopen as claimant or human leader |
 | `limits` | Read saved [policy preferences](policies.md) |
 | `status` | Show member, agent, and task counts |
@@ -72,7 +72,7 @@ Use your personal credential to rename an agent you registered. A task’s claim
 | `repo list` / `repo unlink` | Inspect or disable [repository links](webhooks.md) |
 | `logout` | Revoke the saved token and remove local credentials |
 
-Commands in the table follow `clqn`. JSON `status` returns `{ clan, stats }`; `log` returns `{ events }`. Token usage and costs are not collected.
+Commands in the table follow `clqn`. The MCP `clqn_list_tasks` tool returns 50 tasks per page by default with a `nextCursor`, and accepts the same filters. JSON `status` returns `{ clan, stats }`; `log` returns `{ events }`. Token usage and costs are not collected.
 
 Git and GitHub CLI failures show a short message by default. Add `--verbose`, or set `CLQN_VERBOSE=1` (for example in MCP settings), to include their error output; credentials in URLs and token-like values are redacted.
 

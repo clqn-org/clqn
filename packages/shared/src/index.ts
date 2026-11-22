@@ -39,6 +39,7 @@ import {
   type RepositoryInput,
   type RepositoryReport,
   repositoryReportSchema,
+  type TaskListFilters,
   taskSchema,
   tasksSchema,
 } from './tasks.js';
@@ -365,8 +366,14 @@ export class ClqnClient {
       integrationReportSchema.parse(report),
     );
   }
-  listTasks(clanId: string) {
-    return this.request(`/v1/clans/${encodeURIComponent(clanId)}/tasks`, tasksSchema);
+  listTasks(clanId: string, filters: TaskListFilters = {}) {
+    const query = new URLSearchParams();
+    if (filters.status) query.set('status', filters.status);
+    if (filters.mine) query.set('mine', 'true');
+    if (filters.limit !== undefined) query.set('limit', String(filters.limit));
+    if (filters.after) query.set('after', filters.after);
+    const search = query.size ? `?${query}` : '';
+    return this.request(`/v1/clans/${encodeURIComponent(clanId)}/tasks${search}`, tasksSchema);
   }
   transitionTask(clanId: string, taskId: string, action: 'claim' | 'release' | 'complete') {
     return this.request(

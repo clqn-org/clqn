@@ -8,8 +8,9 @@ import {
   setAliasSchema,
   type Task,
   type TaskRepository,
+  taskListQuerySchema,
 } from '@clqn/shared';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, or, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
@@ -58,10 +59,40 @@ export function createTaskRoutes(db: WorkspaceDb) {
     }),
   );
   app.get('/', async (c) => {
+    const actor = c.get('user');
     const clanId = c.req.param('clanId')!;
-    await requireClan(db, c.get('user'), clanId);
-    const rows = await db.select().from(tasks).where(eq(tasks.clanId, clanId)).orderBy(tasks.createdAt, tasks.id);
-    return c.json({ tasks: rows.map(taskView) });
+    await requireClan(db, actor, clanId);
+    const query = taskListQuerySchema.safeParse(c.req.query());
+    if (!query.success)
+      throw new ApiError(
+        400,
+        'INVALID_REQUEST',
+        'Use status, mine=true, a limit between 1 and 200, and a task UUID cursor',
+      );
+    const { status, mine, limit, after } = query.data;
+    // "Mine" is work assigned to this agent or claimed by this exact credential identity.
+    const owned = and(
+      eq(tasks.ownerId, actor.id),
+      actor.agentId ? eq(tasks.ownerAgentId, actor.agentId) : isNull(tasks.ownerAgentId),
+    );
+    const rows = await db
+      .select()
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.clanId, clanId),
+          status ? eq(tasks.status, status) : undefined,
+          mine ? (actor.agentId ? or(eq(tasks.assignedAgentId, actor.agentId), owned) : owned) : undefined,
+          after
+            ? sql`(${tasks.createdAt}, ${tasks.id}) > (select created_at, id from tasks where id = ${after} and clan_id = ${clanId})`
+            : undefined,
+        ),
+      )
+      .orderBy(tasks.createdAt, tasks.id)
+      .limit(limit === undefined ? Number.MAX_SAFE_INTEGER : limit + 1);
+    const page = limit === undefined ? rows : rows.slice(0, limit);
+    const next = rows.length > page.length ? page.at(-1)?.id : undefined;
+    return c.json({ tasks: page.map(taskView), ...(next ? { nextCursor: next } : {}) });
   });
   app.get('/:taskId', async (c) => {
     const clanId = c.req.param('clanId')!;

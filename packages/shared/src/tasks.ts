@@ -86,5 +86,20 @@ export const taskSchema = z.object({
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
-export const tasksSchema = z.object({ tasks: z.array(taskSchema) });
+export const tasksSchema = z.object({ tasks: z.array(taskSchema), nextCursor: z.uuid().optional() });
+// Without a limit, every matching task is returned; with one, nextCursor marks the next page.
+export const taskListQuerySchema = z
+  .object({
+    status: z.enum(['open', 'claimed', 'completed']).optional(),
+    mine: z.literal('true').optional(),
+    limit: z.coerce.number().int().min(1).max(200).optional(),
+    after: z.uuid().optional(),
+  })
+  .strict();
+export interface TaskListFilters {
+  status?: 'open' | 'claimed' | 'completed' | undefined;
+  mine?: boolean | undefined;
+  limit?: number | undefined;
+  after?: string | undefined;
+}
 export type Task = z.infer<typeof taskSchema>;

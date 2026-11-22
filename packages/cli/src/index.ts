@@ -8,6 +8,7 @@ import {
   repositorySlugSchema,
   resourceAliasSchema,
   type Task,
+  taskListQuerySchema,
   type UpdatePolicy,
   updatePolicySchema,
   VERSION,
@@ -524,9 +525,23 @@ task
 task
   .command('list')
   .option('--clan <id>', 'clan ID')
-  .action(async (options: { clan?: string }) => {
-    const result = await (await client()).listTasks(await selectedClan(options));
-    output(result, result.tasks.map(describeTask).join('\n\n') || 'No tasks.');
+  .option('--status <status>', 'open, claimed, or completed')
+  .option('--mine', 'only tasks assigned to or claimed by this credential')
+  .option('--limit <number>', 'page size from 1 to 200 (default: all)')
+  .option('--after <task-id>', 'continue after this task (from the previous page)')
+  .action(async (options: { clan?: string; status?: string; mine?: boolean; limit?: string; after?: string }) => {
+    const filters = taskListQuerySchema.parse({
+      status: options.status,
+      mine: options.mine ? 'true' : undefined,
+      limit: options.limit,
+      after: options.after,
+    });
+    const result = await (await client()).listTasks(await selectedClan(options), {
+      ...filters,
+      mine: filters.mine === 'true',
+    });
+    const more = result.nextCursor ? `\n\nMore tasks: task list --after ${result.nextCursor}` : '';
+    output(result, (result.tasks.map(describeTask).join('\n\n') || 'No tasks.') + more);
   });
 task
   .command('show <id>')
