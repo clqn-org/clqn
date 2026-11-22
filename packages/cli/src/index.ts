@@ -281,17 +281,30 @@ const members = program
       result.members.map((member) => `${member.email}  ${member.role}  ${member.userId}`).join('\n') || 'No members.',
     );
   });
+const findMember = async (api: ClqnClient, clanId: string, member: string) => {
+  const found = (await api.members(clanId)).members.find(
+    (entry) => entry.userId === member || entry.email === member.trim().toLowerCase(),
+  );
+  if (!found) throw new Error('Member not found in this clan');
+  return found;
+};
 members
   .command('remove <member>')
   .description('Remove a member by email or user ID and revoke their agents in the clan (leader only)')
   .action(async (member: string, _options: unknown, command: Command) => {
     const api = await client();
     const clanId = await selectedClan(command.optsWithGlobals());
-    const found = (await api.members(clanId)).members.find(
-      (entry) => entry.userId === member || entry.email === member.trim().toLowerCase(),
-    );
-    if (!found) throw new Error('Member not found in this clan');
+    const found = await findMember(api, clanId, member);
     output(await api.removeMember(clanId, found.userId), `Removed ${found.email} from clan ${clanId}`);
+  });
+members
+  .command('transfer <member>')
+  .description('Make another member, by email or user ID, the clan leader; you become a member (leader only)')
+  .action(async (member: string, _options: unknown, command: Command) => {
+    const api = await client();
+    const clanId = await selectedClan(command.optsWithGlobals());
+    const found = await findMember(api, clanId, member);
+    output(await api.transferLeadership(clanId, found.userId), `${found.email} now leads clan ${clanId}`);
   });
 
 program

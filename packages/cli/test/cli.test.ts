@@ -87,7 +87,11 @@ async function workspaceFixture(t: TestContext) {
       response.end(JSON.stringify({ removed: true }));
     else if (request.url === `/v1/clans/${clan.id}/leave` && request.method === 'POST')
       response.end(JSON.stringify({ left: true }));
-    else if (request.url === '/v1/clans' && request.method === 'POST') {
+    else if (request.url === `/v1/clans/${clan.id}/leader` && request.method === 'POST') {
+      let body = '';
+      for await (const chunk of request) body += chunk;
+      response.end(JSON.stringify({ leaderId: JSON.parse(body).userId }));
+    } else if (request.url === '/v1/clans' && request.method === 'POST') {
       let body = '';
       for await (const chunk of request) body += chunk;
       assert.deepEqual(JSON.parse(body), { name: clan.name });
@@ -138,7 +142,7 @@ test('CLI invitations normalize email, support an explicit clan, and joining sel
   assert.deepEqual(JSON.parse((await f.call(['invite', f.invitation.email, '--json'])).stdout), f.invitation);
 });
 
-test('CLI removes members by email and leaving clears the selected clan', async (t) => {
+test('CLI removes members and transfers leadership by email, and leaving clears the selected clan', async (t) => {
   const f = await workspaceFixture(t);
   await f.call(['login'], { input: f.token });
   await f.call(['join', f.invitation.code]);
@@ -146,6 +150,8 @@ test('CLI removes members by email and leaving clears the selected clan', async 
   assert.deepEqual(JSON.parse(removed.stdout), { removed: true });
   assert.equal(f.requests.at(-1)?.path, `/v1/clans/${f.clan.id}/members/${f.user.id}/remove`);
   await assert.rejects(f.call(['members', 'remove', 'nobody@example.com', '--json']));
+  const transferred = await f.call(['members', 'transfer', 'alice@example.com', '--clan', f.clan.id, '--json']);
+  assert.deepEqual(JSON.parse(transferred.stdout), { leaderId: f.user.id });
   assert.deepEqual(JSON.parse((await f.call(['leave', '--json'])).stdout), { left: true });
   await assert.rejects(f.call(['members', '--json']), (thrown) => {
     assert.equal(JSON.parse((thrown as ExecError).stderr).error.code, 'COMMAND_FAILED');

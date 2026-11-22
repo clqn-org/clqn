@@ -56,11 +56,12 @@ Invalid, expired, consumed, or mismatched codes return 404. Existing members rec
 ## Remove a member or leave
 
 ```sh
-clqn members remove bob@example.com   # leader only; accepts an email or user ID
-clqn leave                            # any member except the leader
+clqn members remove bob@example.com     # leader only; accepts an email or user ID
+clqn members transfer bob@example.com   # leader only; you become a member
+clqn leave                              # any member except the leader
 ```
 
-Removal and leaving end the member's access and revoke the tokens of their agents in that clan; a later invitation does not revive those tokens. Their claimed tasks and assignments stay in place until the leader runs `task release` or `task unassign`. The leader cannot leave or be removed, and role changes are not available yet.
+Removal and leaving end the member's access and revoke the tokens of their agents in that clan; a later invitation does not revive those tokens. Their claimed tasks and assignments stay in place until the leader runs `task release` or `task unassign`. The leader cannot leave or be removed; transfer leadership first. On transfer, the previous leader's orchestrator becomes a worker so the new leader can register their own.
 
 ## Register an agent
 

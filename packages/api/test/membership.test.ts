@@ -8,7 +8,7 @@ import postgres from 'postgres';
 import { createApp } from '../src/app.js';
 import { createStore } from '../src/store.js';
 
-test('PostgreSQL: leaders remove members, members leave, and agent tokens never outlive membership', {
+test('PostgreSQL: leaders remove members or hand off leadership, members leave, and agent tokens never outlive membership', {
   skip: !process.env.TEST_DATABASE_URL && 'Set TEST_DATABASE_URL to run PostgreSQL integration tests',
 }, async (t) => {
   const url = process.env.TEST_DATABASE_URL!;
@@ -94,4 +94,52 @@ test('PostgreSQL: leaders remove members, members leave, and agent tokens never 
   const types =
     await sql`select type from events where clan_id = ${clan.id} and type in ('member.removed', 'member.left')`;
   assert.equal(types.filter((row) => row.type === 'member.left').length, 1);
+  // Leadership moves only by the leader's personal credential, and only to a current member.
+  const transfer = (token: string, userId: unknown) => post(token, `/v1/clans/${clan.id}/leader`, { userId });
+  const leaders = async () =>
+    (await sql`select user_id from memberships where clan_id = ${clan.id} and role = 'leader'`).map(
+      (row) => row.user_id,
+    );
+  const bobAgentAgain = await (await post(bob.token, `/v1/clans/${clan.id}/agents`, { name: 'Again' })).json();
+  assert.equal((await transfer(bob.token, bob.user.id)).status, 403);
+  assert.equal((await transfer(bobAgentAgain.token, bob.user.id)).status, 403);
+  assert.equal((await transfer(alice.token, alice.user.id)).status, 400);
+  assert.equal((await transfer(alice.token, 'not-a-uuid')).status, 400);
+  assert.equal((await transfer(alice.token, carol.user.id)).status, 404);
+  const orchestrator = await (
+    await post(alice.token, `/v1/clans/${clan.id}/agents`, { name: 'Lead', role: 'orchestrator' })
+  ).json();
+  // Concurrent transfers and removals leave exactly one leader.
+  await join(carol);
+  const raced = await Promise.all([transfer(alice.token, bob.user.id), transfer(alice.token, carol.user.id)]);
+  assert.deepEqual(raced.map((r) => r.status).sort(), [200, 403]);
+  assert.equal((await leaders()).length, 1);
+  const [winner] = await leaders();
+  const other = winner === bob.user.id ? carol : bob;
+  const newLeader = winner === bob.user.id ? bob : carol;
+  // The old orchestrator keeps working as a worker, and the new leader can register their own.
+  const [demoted] = await sql`select role from agents where id = ${orchestrator.agent.id}`;
+  assert.equal(demoted?.role, 'worker');
+  assert.equal(
+    (await post(newLeader.token, `/v1/clans/${clan.id}/agents`, { name: 'Next', role: 'orchestrator' })).status,
+    201,
+  );
+  // Whichever commits first wins: a transfer demotes the remover, and a removal leaves nobody to promote.
+  const [handedOff, removed] = await Promise.all([
+    transfer(newLeader.token, alice.user.id),
+    remove(newLeader.token, alice.user.id),
+  ]);
+  const outcome = [handedOff.status, removed.status];
+  assert.ok([200, 403].join() === outcome.join() || [404, 200].join() === outcome.join(), outcome.join());
+  assert.equal((await leaders()).length, 1);
+  // A former leader can leave once someone else leads.
+  if (handedOff.status === 200) {
+    assert.equal((await transfer(alice.token, newLeader.user.id)).status, 200);
+    assert.deepEqual(await (await post(alice.token, `/v1/clans/${clan.id}/leave`)).json(), { left: true });
+  }
+  assert.deepEqual(await leaders(), [newLeader.user.id]);
+  assert.equal((await remove(newLeader.token, other.user.id)).status, 200);
+  const [changes] =
+    await sql`select count(*)::integer as n from events where clan_id = ${clan.id} and type = 'clan.leader_changed'`;
+  assert.equal(changes?.n, handedOff.status === 200 ? 3 : 1);
 });

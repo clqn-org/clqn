@@ -1,4 +1,11 @@
-import { type Actor, ApiError, createClanSchema, createInvitationSchema, joinInvitationSchema } from '@clqn/shared';
+import {
+  type Actor,
+  ApiError,
+  createClanSchema,
+  createInvitationSchema,
+  joinInvitationSchema,
+  transferLeadershipSchema,
+} from '@clqn/shared';
 import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
@@ -74,6 +81,12 @@ export function createClanRoutes(store: WorkspaceStore) {
     const actor = c.get('user');
     await store.removeMember(actor, c.req.param('clanId'), actor.id);
     return c.json({ left: true as const });
+  });
+  app.post('/clans/:clanId/leader', smallBody, async (c) => {
+    const body = transferLeadershipSchema.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) throw new ApiError(400, 'INVALID_REQUEST', 'Provide the user ID of the new leader');
+    await store.transferLeadership(c.get('user'), c.req.param('clanId'), body.data.userId);
+    return c.json({ leaderId: body.data.userId });
   });
   return app;
 }

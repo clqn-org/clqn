@@ -39,6 +39,7 @@ export interface WorkspaceStore {
   listClans(userId: string): Promise<Clan[]>;
   members(userId: string, clanId: string): Promise<Member[] | undefined>;
   removeMember(actor: Actor, clanId: string, userId: string): Promise<void>;
+  transferLeadership(actor: Actor, clanId: string, userId: string): Promise<void>;
 }
 
 export function createStore(url: string, poolSize = 10) {
@@ -279,8 +280,9 @@ export function createStore(url: string, poolSize = 10) {
     async removeMember(actor, clanId, userId) {
       requirePersonal(actor);
       await db.transaction(async (tx) => {
-        const membership = await requireClan(tx, actor, clanId);
         const leaving = userId === actor.id;
+        // Lock the actor's row so a concurrent leadership transfer cannot leave a stale leader check.
+        const membership = await requireClan(tx, actor, clanId, leaving ? 'update' : 'share');
         if (!leaving && membership.role !== 'leader')
           throw new ApiError(403, 'FORBIDDEN', 'Only the clan leader can remove members');
         // Agent registration and token rotation hold a share lock on this row, so they cannot race the removal.
@@ -307,6 +309,32 @@ export function createStore(url: string, poolSize = 10) {
           type: leaving ? 'member.left' : 'member.removed',
           resourceId: userId,
         });
+      });
+    },
+    async transferLeadership(actor, clanId, userId) {
+      requirePersonal(actor);
+      await db.transaction(async (tx) => {
+        // Lock the leader row first, so concurrent transfers or removals see the committed role.
+        const membership = await requireClan(tx, actor, clanId, 'update');
+        if (membership.role !== 'leader')
+          throw new ApiError(403, 'FORBIDDEN', 'Only the clan leader can transfer leadership');
+        if (userId === actor.id) throw new ApiError(400, 'INVALID_REQUEST', 'You are already the clan leader');
+        const [target] = await tx
+          .update(schema.memberships)
+          .set({ role: 'leader' })
+          .where(and(eq(schema.memberships.clanId, clanId), eq(schema.memberships.userId, userId)))
+          .returning();
+        if (!target) throw new ApiError(404, 'NOT_FOUND', 'Member not found');
+        await tx
+          .update(schema.memberships)
+          .set({ role: 'member' })
+          .where(and(eq(schema.memberships.clanId, clanId), eq(schema.memberships.userId, actor.id)));
+        // Only a leader's agent may orchestrate, and a clan has one orchestrator; free the slot for the new leader.
+        await tx
+          .update(schema.agents)
+          .set({ role: 'worker' })
+          .where(and(eq(schema.agents.clanId, clanId), eq(schema.agents.role, 'orchestrator')));
+        await appendEvent(tx, { clanId, actorId: actor.id, type: 'clan.leader_changed', resourceId: userId });
       });
     },
     async members(userId, clanId) {
