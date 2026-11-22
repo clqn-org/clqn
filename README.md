@@ -84,7 +84,7 @@ clqn agent add codex
 
 Connect each agent to MCP using its returned token: [agent setup](docs/index.md#connect-an-agent).
 
-Set token limits, allowed models, and approval preferences for your agents:
+Save token limits, allowed models, and approval preferences for your agents. These are recorded for the clan but [not enforced yet](docs/policies.md):
 
 ```sh
 clqn limits --tokens 100000 --models provider/model --control approve
