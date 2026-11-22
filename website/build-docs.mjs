@@ -9,7 +9,7 @@ const guides = [
   ['webhooks', 'GitHub webhooks'],
   ['policies', 'Agent policies'],
   ['database', 'Database setup'],
-  ['hosting', 'GCP hosting'],
+  ['hosting', 'Hosting'],
 ];
 
 // Only repository-authored Markdown enters this build. Render it once so the

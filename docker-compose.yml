@@ -1,10 +1,11 @@
 # Local PostgreSQL for development and integration tests. Matches the CI database version.
+# `docker compose --profile server up -d --wait` also builds the API, applies migrations, and serves it on port 8080.
 services:
   db:
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: clqn
     ports:
       - 127.0.0.1:5432:5432
@@ -15,6 +16,37 @@ services:
       interval: 2s
       timeout: 5s
       retries: 15
+
+  migrate:
+    profiles: [server]
+    image: clqn-api:local
+    build: .
+    command: [node, packages/api/dist/db/migrate.js]
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/clqn
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    profiles: [server]
+    image: clqn-api:local
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/clqn
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+    ports:
+      - 127.0.0.1:8080:8080
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8080/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
   pgdata:

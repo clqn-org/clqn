@@ -42,7 +42,7 @@ brew install clqn
 
 ### 1. Sign in and create a clan
 
-Use the API URL from your clan operator.
+Use the API URL from your clan operator, or [self-host one with Docker Compose](docs/hosting.md#self-host-with-docker-compose) in one command.
 
 ```sh
 export CLQN_API_URL="<operator-api-url>"
@@ -116,7 +116,7 @@ Use `clqn --help` to explore all commands. Add `--json` for scripting.
 - [Commands](docs/commands.md)
 - [Repository workflow](docs/repositories.md) · [GitHub notifications](docs/webhooks.md)
 - [Authentication](docs/authentication.md) · [Agent policies](docs/policies.md)
-- [Database setup](docs/database.md) · [GCP hosting](docs/hosting.md)
+- [Database setup](docs/database.md) · [Hosting](docs/hosting.md)
 - [Architecture and roadmap](ROADMAP.md)
 
 ## Contributing

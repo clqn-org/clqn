@@ -14,9 +14,10 @@ if (!Number.isInteger(poolSize) || poolSize < 1 || poolSize > 100) {
 const connection = process.env.DATABASE_URL ? createStore(process.env.DATABASE_URL, poolSize) : undefined;
 const server = serve(
   {
+    // Empty values, as Docker Compose passes for unset variables, leave a feature disabled.
     fetch: createApp(connection?.store, connection?.db, {
-      githubWebhookSecret: process.env.GITHUB_WEBHOOK_SECRET,
-      githubClientId: process.env.GITHUB_CLIENT_ID,
+      githubWebhookSecret: process.env.GITHUB_WEBHOOK_SECRET || undefined,
+      githubClientId: process.env.GITHUB_CLIENT_ID || undefined,
     }).fetch,
     port,
     hostname,

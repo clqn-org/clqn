@@ -1,6 +1,26 @@
-# GCP hosting
+# Hosting
 
-Run the API as one Cloud Run service with managed Cloud SQL PostgreSQL. CLI and MCP run locally and connect to the operator's HTTPS API URL.
+CLI and MCP run locally and connect to the operator's API URL. Self-host the API with Docker Compose on one machine, or run it on Cloud Run with managed Cloud SQL PostgreSQL.
+
+## Self-host with Docker Compose
+
+From a clone of this repository, one command builds the API, starts PostgreSQL, applies migrations, and serves the API on `127.0.0.1:8080`:
+
+```sh
+docker compose --profile server up -d --wait
+docker compose exec api node packages/api/dist/manage-user.js create you@example.com
+printf '%s' '<token>' | clqn --api-url http://127.0.0.1:8080 login
+```
+
+The second command prints a one-time personal token; deliver tokens privately. Rerun the first command after pulling updates; it rebuilds the image and applies new migrations.
+
+Set `POSTGRES_PASSWORD`, `GITHUB_CLIENT_ID` ([GitHub login](authentication.md)), and `GITHUB_WEBHOOK_SECRET` ([webhooks](webhooks.md)) in a private `.env` file next to `docker-compose.yml` to configure them. Set `POSTGRES_PASSWORD` before the first start; the database keeps its original password afterward.
+
+Authenticated clients require HTTPS except on loopback. To share the API with teammates, put a TLS reverse proxy in front of port 8080, for example `caddy reverse-proxy --from clqn.example.com --to 127.0.0.1:8080`, and give them the HTTPS URL. Back up the `pgdata` volume.
+
+## Cloud Run on GCP
+
+Run the API as one Cloud Run service with managed Cloud SQL PostgreSQL. The following sections cover this setup.
 
 ## Build and run the container
 
