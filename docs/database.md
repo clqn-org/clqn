@@ -6,7 +6,7 @@ Use local PostgreSQL for development or managed PostgreSQL on GCP. For developme
 npm run db:migrate
 ```
 
-Startup does not apply migrations. Database credentials belong on the server, never in CLI or MCP settings. `GET /health` checks process liveness only.
+Startup does not apply migrations. Database credentials belong on the server, never in CLI or MCP settings. `GET /health` checks process liveness only; `GET /ready` also confirms the database answers.
 
 ## Schema changes
 

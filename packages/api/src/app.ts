@@ -1,4 +1,5 @@
 import { type Actor, ApiError, healthSchema, VERSION } from '@clqn/shared';
+import { sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { WorkspaceDb } from './access.js';
 import { requirePersonal } from './access.js';
@@ -29,6 +30,17 @@ export function createApp(
   const rateLimit = createRateLimiter(options.requestsPerMinute ?? 300);
   // Liveness only: this endpoint intentionally does not connect to the database.
   app.get('/health', (c) => c.json(healthSchema.parse({ status: 'ok', service: 'clqn-api', version: VERSION })));
+  // Readiness: confirms the database answers, for load balancers and container health checks.
+  app.get('/ready', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    try {
+      if (!db) throw new Error('Database is not configured');
+      await db.execute(sql`select 1`);
+      return c.json({ status: 'ready' });
+    } catch {
+      return c.json({ status: 'unavailable' }, 503);
+    }
+  });
   app.route('/hooks/github', createGithubWebhookRoutes(db, options.githubWebhookSecret));
   app.route('/auth/github', createGithubLoginRoutes(db, options.githubClientId));
   app.use('/v1/*', async (c, next) => {

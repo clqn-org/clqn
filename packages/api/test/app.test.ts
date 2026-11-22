@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { errorSchema, healthSchema } from '@clqn/shared';
+import type { WorkspaceDb } from '../src/access.js';
 import { createApp } from '../src/app.js';
 import { hashToken, type WorkspaceStore } from '../src/store.js';
 
@@ -8,6 +9,22 @@ test('health endpoint satisfies the shared contract without a database', async (
   const response = await createApp().request('/health');
   assert.equal(response.status, 200);
   assert.equal(healthSchema.parse(await response.json()).status, 'ok');
+});
+
+test('readiness reports whether the database answers', async () => {
+  assert.equal((await createApp().request('/ready')).status, 503);
+  const ready = createApp(undefined, { execute: async () => [] } as unknown as WorkspaceDb);
+  const response = await ready.request('/ready');
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { status: 'ready' });
+  const down = createApp(undefined, {
+    execute: async () => {
+      throw new Error('connection refused');
+    },
+  } as unknown as WorkspaceDb);
+  const failed = await down.request('/ready');
+  assert.equal(failed.status, 503);
+  assert.deepEqual(await failed.json(), { status: 'unavailable' });
 });
 
 test('workspace endpoints require credentials', async () => {
