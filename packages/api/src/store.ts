@@ -24,6 +24,13 @@ export interface WorkspaceStore {
     alias?: string,
   ): Promise<{ agent: Agent; token: string }>;
   setAgentAlias(actor: Actor, clanId: string, reference: string, alias: string): Promise<Agent>;
+  resetAgentCredentials(
+    actor: Actor,
+    clanId: string,
+    reference: string,
+    reissue: boolean,
+  ): Promise<{ agent: Agent; token?: string }>;
+  revokeToken(tokenHash: string): Promise<boolean>;
   listAgents(actor: Actor, clanId: string): Promise<Agent[]>;
   agentStatus(actor: Actor): Promise<Agent | undefined>;
   authenticate(tokenHash: string): Promise<Actor | undefined>;
@@ -73,7 +80,7 @@ export function createStore(url: string, poolSize = 10) {
       const token = `clqn_${randomBytes(32).toString('base64url')}`;
       try {
         return await db.transaction(async (tx) => {
-          const membership = await requireClan(tx, actor, clanId);
+          const membership = await requireClan(tx, actor, clanId, 'share');
           if (role === 'orchestrator' && membership.role !== 'leader') {
             throw new ApiError(403, 'FORBIDDEN', 'Only the clan leader can register the orchestrator');
           }
@@ -119,6 +126,41 @@ export function createStore(url: string, poolSize = 10) {
           return agentView(updated!);
         })
         .catch(rethrowAliasConflict);
+    },
+    async resetAgentCredentials(actor, clanId, reference, reissue) {
+      requirePersonal(actor);
+      return db.transaction(async (tx) => {
+        const membership = await requireClan(tx, actor, clanId, 'share');
+        const [agent] = await tx
+          .select()
+          .from(schema.agents)
+          .where(resourceFilter(schema.agents, clanId, reference))
+          .for('update');
+        if (!agent) throw new ApiError(404, 'NOT_FOUND', 'Agent not found');
+        // Owners revoke or rotate; the leader may revoke any agent but never receives another member's token.
+        if (agent.ownerId !== actor.id && (reissue || membership.role !== 'leader'))
+          throw new ApiError(403, 'FORBIDDEN', 'Only the registered owner or the clan leader can revoke an agent');
+        await tx.delete(schema.credentials).where(eq(schema.credentials.agentId, agent.id));
+        const token = reissue ? `clqn_${randomBytes(32).toString('base64url')}` : undefined;
+        if (token)
+          await tx
+            .insert(schema.credentials)
+            .values({ userId: agent.ownerId, agentId: agent.id, tokenHash: hashToken(token) });
+        await appendEvent(tx, {
+          clanId,
+          actorId: actor.id,
+          type: reissue ? 'agent.token_rotated' : 'agent.revoked',
+          resourceId: agent.id,
+        });
+        return token ? { agent: agentView(agent), token } : { agent: agentView(agent) };
+      });
+    },
+    async revokeToken(tokenHash) {
+      const rows = await db
+        .delete(schema.credentials)
+        .where(eq(schema.credentials.tokenHash, tokenHash))
+        .returning({ id: schema.credentials.id });
+      return rows.length > 0;
     },
     async listAgents(actor, clanId) {
       await requireClan(db, actor, clanId);

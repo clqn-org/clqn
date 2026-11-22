@@ -82,6 +82,7 @@ async function workspaceFixture(t: TestContext) {
       return;
     }
     if (request.url === '/v1/me') response.end(JSON.stringify(user));
+    else if (request.url === '/v1/logout' && request.method === 'POST') response.end(JSON.stringify({ revoked: true }));
     else if (request.url === '/v1/clans' && request.method === 'POST') {
       let body = '';
       for await (const chunk of request) body += chunk;
@@ -177,7 +178,8 @@ test('CLI login, clan creation, membership, and logout persist API-scoped privat
   await f.call(['login'], { input: f.token });
   assert.deepEqual(JSON.parse((await f.call(['members', '--json'])).stdout), f.members);
   const logout = JSON.parse((await f.call(['logout', '--json'])).stdout);
-  assert.deepEqual(logout, { credentialsRemoved: true, environmentTokenActive: false });
+  assert.deepEqual(logout, { credentialsRemoved: true, tokenRevoked: true, environmentTokenActive: false });
+  assert.deepEqual(f.requests.at(-1), { path: '/v1/logout', authorization: `Bearer ${f.token}` });
   assert.deepEqual(await readdir(f.directory), []);
   await assert.rejects(f.call(['whoami', '--json']), (thrown) => {
     const error = thrown as ExecError;
@@ -211,6 +213,8 @@ test('failed login preserves credentials, environment override works, and anothe
   assert.equal(other.requests.at(-1)?.authorization, undefined);
   const result = await f.call(['logout', '--json'], { env: { CLQN_TOKEN: 'env_token' } });
   assert.equal(JSON.parse(result.stdout).environmentTokenActive, true);
+  // Only the saved token is revoked; an environment token is left alone.
+  assert.equal(f.requests.at(-1)?.authorization, `Bearer ${f.token}`);
 });
 
 test('login requires token input and members requires a selected clan', async (t) => {

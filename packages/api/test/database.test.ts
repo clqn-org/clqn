@@ -187,12 +187,12 @@ test('PostgreSQL: identity, clan isolation, concurrent creation, and credential 
   assert.equal(cliClan.createdBy, alice.user.id);
   assert.equal((await runCli(['members'])).members[0].role, 'leader');
   const cliInvite = await runCli(['invite', bob.user.email]);
-  await runCli(['logout']);
+  // Logout revokes the saved token on the server, not just the local copy.
+  assert.equal((await runCli(['logout'])).tokenRevoked, true);
   await runCli(['login'], bob.token);
   assert.equal((await runCli(['join', cliInvite.code])).id, cliClan.id);
   assert.equal((await runCli(['members'])).members.length, 2);
   assert.equal((await runCli(['logout'])).credentialsRemoved, true);
-  assert.equal(await connection.revokeCredential(alice.credentialId), true);
   assert.equal(await connection.revokeCredential(alice.credentialId), false);
   const denied = await app.request('/v1/me', { headers: auth(alice.token) });
   assert.equal(denied.status, 401);

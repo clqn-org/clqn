@@ -61,6 +61,7 @@ Use your personal credential to rename an agent you registered. A task’s claim
 | `init "My project"` | Create and select a clan |
 | `invite bob@example.com` / `join <code>` | Invite or join |
 | `clans` / `members` / `agent list` | List participants and workspaces |
+| `agent revoke <agent>` / `agent token <agent>` | Revoke or replace an agent's token |
 | `context list` / `context read <key>` | Browse shared context |
 | `task list` / `task show <id>` | Inspect work |
 | `task release <id>` | Reopen as claimant or human leader |
@@ -68,7 +69,7 @@ Use your personal credential to rename an agent you registered. A task’s claim
 | `status` | Show member, agent, and task counts |
 | `log` | Show the latest ten events, newest first, in UTC |
 | `repo list` / `repo unlink` | Inspect or disable [repository links](webhooks.md) |
-| `logout` | Remove local credentials and clan selection |
+| `logout` | Revoke the saved token and remove local credentials |
 
 Commands in the table follow `clqn`. JSON `status` returns `{ clan, stats }`; `log` returns `{ events }`. Token usage and costs are not collected.
 

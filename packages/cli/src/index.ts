@@ -181,15 +181,28 @@ program
 
 program
   .command('logout')
-  .description('Remove local credentials and selected clan for this API (does not revoke the token)')
+  .description('Revoke the saved token for this API and remove local credentials and clan selection')
   .action(async () => {
+    const { token } = await readConfig(apiUrl()).catch((): Config => ({}));
+    let revoked = false;
+    if (token) {
+      try {
+        revoked = (await new ClqnClient(apiUrl(), token).logout()).revoked;
+      } catch {
+        // Local removal still happens when the API is unreachable; the output reports the failed revocation.
+      }
+    }
     await removeConfig(apiUrl());
     const environmentTokenActive = Boolean(process.env.CLQN_TOKEN);
     output(
-      { credentialsRemoved: true, environmentTokenActive },
-      environmentTokenActive
-        ? 'Local credentials removed. CLQN_TOKEN is still set; unset it to stop using that token.'
-        : 'Local credentials removed.',
+      { credentialsRemoved: true, tokenRevoked: revoked, environmentTokenActive },
+      [
+        'Local credentials removed.',
+        token && !revoked ? 'The saved token could not be revoked on the server.' : '',
+        environmentTokenActive ? 'CLQN_TOKEN is still set and was not revoked; unset it to stop using that token.' : '',
+      ]
+        .filter(Boolean)
+        .join(' '),
     );
   });
 
@@ -361,6 +374,22 @@ agent
       result.agents.map((a) => `${displayId(a)}  ${a.name}  role=${a.role}  owner=${a.ownerId}`).join('\n') ||
         'No agents.',
     );
+  });
+agent
+  .command('revoke <agent>')
+  .description('Revoke an agent’s tokens (its owner or the clan leader)')
+  .option('--clan <id>', 'clan ID')
+  .action(async (id: string, options: { clan?: string }) => {
+    const result = await (await client()).revokeAgent(await selectedClan(options), id);
+    output(result, `Revoked tokens for ${displayId(result.agent)}`);
+  });
+agent
+  .command('token <agent>')
+  .description('Replace the token of an agent you registered; the old token stops working')
+  .option('--clan <id>', 'clan ID')
+  .action(async (id: string, options: { clan?: string }) => {
+    const result = await (await client()).rotateAgentToken(await selectedClan(options), id);
+    output(result, `New token for ${displayId(result.agent)} (shown once): ${result.token}`);
   });
 agent
   .command('alias <agent> <alias>')

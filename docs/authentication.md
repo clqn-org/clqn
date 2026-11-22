@@ -33,7 +33,7 @@ Set `CLQN_API_URL` or `--api-url` to your operator's URL. Authenticated requests
 
 Credentials and clan selection are stored per API origin in `~/.config/clqn` (`CLQN_CONFIG_DIR` overrides it), with private directory/file permissions. Login clears the previous clan selection; `init` and `join` select a clan. Use `--clan <id>` to override it.
 
-`CLQN_TOKEN` overrides the saved token. Logout removes local credentials and selection; it does not unset that variable or revoke the server token.
+`CLQN_TOKEN` overrides the saved token. Logout revokes the saved token on the server, then removes local credentials and selection. It does not revoke or unset `CLQN_TOKEN`. If the API is unreachable, local credentials are still removed and the output reports that revocation failed.
 
 ## Invite another member
 
@@ -64,7 +64,14 @@ Use your personal credential. Configure the returned one-time token in the agent
 
 Agents act as distinct task owners under their human owner. Their tokens are restricted to one clan and require the owner's continued membership. Agents cannot create clans, invite people, or register agents. `whoami` shows the agent and owner, not whether the agent is running.
 
-Operators revoke agent tokens with the same server command, using the credential ID from the `credentials` table. Public credential management is not available yet.
+Revoke or replace agent tokens with your personal credential:
+
+```sh
+clqn agent revoke codex   # owner or clan leader; the agent stays listed but cannot authenticate
+clqn agent token codex    # owner only; prints a new one-time token and invalidates the old one
+```
+
+The leader can revoke any agent in the clan but cannot obtain another member's agent token. Operators can still revoke any credential with `npm run user -- revoke <credential-id>`.
 
 ## Designated orchestrator
 

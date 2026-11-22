@@ -31,6 +31,22 @@ export function createAgentRoutes(store: WorkspaceStore) {
       await store.setAgentAlias(c.get('user'), c.req.param('clanId'), c.req.param('agentId'), parsed.data.alias),
     );
   });
+  for (const action of ['revoke', 'token'] as const) {
+    app.post(`/clans/:clanId/agents/:agentId/${action}`, smallBody, async (c) => {
+      const body = z
+        .object({})
+        .strict()
+        .safeParse(await c.req.json().catch(() => null));
+      if (!body.success) throw new ApiError(400, 'INVALID_REQUEST', 'Expected an empty JSON object');
+      const result = await store.resetAgentCredentials(
+        c.get('user'),
+        c.req.param('clanId'),
+        c.req.param('agentId'),
+        action === 'token',
+      );
+      return c.json(action === 'token' ? result : { agent: result.agent, revoked: true });
+    });
+  }
   app.get('/clans/:clanId/agents', async (c) => {
     const id = z.uuid().safeParse(c.req.param('clanId'));
     if (!id.success) return c.json({ error: { code: 'NOT_FOUND', message: 'Clan not found' } }, 404);

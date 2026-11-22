@@ -10,13 +10,15 @@ export function requirePersonal(actor: Actor): void {
   if (actor.agentId) throw new ApiError(403, 'FORBIDDEN', 'A personal credential is required');
 }
 
-export async function requireClan(db: WorkspaceDb, actor: Actor, clanId: string) {
+// Inside a transaction, lock the membership row so credential writes cannot race a member's removal.
+export async function requireClan(db: WorkspaceDb, actor: Actor, clanId: string, lock?: 'share' | 'update') {
   if (!z.uuid().safeParse(clanId).success) throw new ApiError(404, 'NOT_FOUND', 'Clan not found');
   if (actor.agentId && actor.clanId !== clanId) throw new ApiError(404, 'NOT_FOUND', 'Clan not found');
-  const [membership] = await db
+  const query = db
     .select()
     .from(memberships)
     .where(and(eq(memberships.userId, actor.id), eq(memberships.clanId, clanId)));
+  const [membership] = await (lock ? query.for(lock) : query);
   if (!membership) throw new ApiError(404, 'NOT_FOUND', 'Clan not found');
   return membership;
 }

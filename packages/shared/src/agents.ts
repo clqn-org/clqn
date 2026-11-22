@@ -36,3 +36,5 @@ export const agentRegistrationSchema = z.object({
   token: z.string().regex(/^clqn_[A-Za-z0-9_-]{43}$/),
 });
 export const agentsSchema = z.object({ agents: z.array(agentSchema) });
+export const revokedAgentSchema = z.object({ agent: agentSchema, revoked: z.literal(true) });
+export const logoutSchema = z.object({ revoked: z.boolean() });

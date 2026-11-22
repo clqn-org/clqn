@@ -25,7 +25,7 @@ export function createApp(
   if (options.githubWebhookSecret !== undefined && options.githubWebhookSecret.trim().length < 32) {
     throw new Error('GITHUB_WEBHOOK_SECRET must contain at least 32 non-padding characters');
   }
-  const app = new Hono<{ Variables: { user: Actor } }>();
+  const app = new Hono<{ Variables: { user: Actor; tokenHash: string } }>();
   const rateLimit = createRateLimiter(options.requestsPerMinute ?? 300);
   // Liveness only: this endpoint intentionally does not connect to the database.
   app.get('/health', (c) => c.json(healthSchema.parse({ status: 'ok', service: 'clqn-api', version: VERSION })));
@@ -63,9 +63,12 @@ export function createApp(
         requirePersonal(user);
     }
     c.set('user', user);
+    c.set('tokenHash', tokenHash);
     await next();
   });
   app.get('/v1/me', (c) => c.json(c.get('user')));
+  // Revokes only the presented credential; other logins and agent tokens keep working.
+  app.post('/v1/logout', async (c) => c.json({ revoked: await store!.revokeToken(c.get('tokenHash')) }));
   if (store) {
     app.route('/v1', createClanRoutes(store));
     app.route('/v1', createAgentRoutes(store));

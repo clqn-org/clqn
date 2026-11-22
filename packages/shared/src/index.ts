@@ -14,7 +14,15 @@ export * from './policy.js';
 
 import { z } from 'zod';
 import { eventsSchema, statsSchema, statusSchema } from './activity.js';
-import { actorSchema, agentRegistrationSchema, agentSchema, agentsSchema, registerAgentSchema } from './agents.js';
+import {
+  actorSchema,
+  agentRegistrationSchema,
+  agentSchema,
+  agentsSchema,
+  logoutSchema,
+  registerAgentSchema,
+  revokedAgentSchema,
+} from './agents.js';
 import { setAliasSchema } from './aliases.js';
 import {
   contextEntrySchema,
@@ -179,6 +187,9 @@ export class ClqnClient {
   whoami(signal?: AbortSignal) {
     return this.request('/v1/me', actorSchema, undefined, signal);
   }
+  logout() {
+    return this.request('/v1/logout', logoutSchema, {});
+  }
   createClan(name: string): Promise<Clan> {
     return this.request('/v1/clans', clanSchema, createClanSchema.parse({ name }));
   }
@@ -210,6 +221,20 @@ export class ClqnClient {
       `/v1/clans/${encodeURIComponent(clanId)}/agents/${encodeURIComponent(agentId)}/alias`,
       agentSchema,
       setAliasSchema.parse({ alias }),
+    );
+  }
+  revokeAgent(clanId: string, agentId: string) {
+    return this.request(
+      `/v1/clans/${encodeURIComponent(clanId)}/agents/${encodeURIComponent(agentId)}/revoke`,
+      revokedAgentSchema,
+      {},
+    );
+  }
+  rotateAgentToken(clanId: string, agentId: string) {
+    return this.request(
+      `/v1/clans/${encodeURIComponent(clanId)}/agents/${encodeURIComponent(agentId)}/token`,
+      agentRegistrationSchema,
+      {},
     );
   }
   listAgents(clanId: string) {
