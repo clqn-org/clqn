@@ -1,5 +1,5 @@
 # Local PostgreSQL for development and integration tests. Matches the CI database version.
-# `docker compose --profile server up -d --wait` also builds the API, applies migrations, and serves it on port 8080.
+# `docker compose --profile server up --build -d --wait` also builds the API, applies migrations, and serves it on port 8080.
 services:
   db:
     image: postgres:17-alpine
