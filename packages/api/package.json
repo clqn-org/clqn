@@ -10,6 +10,7 @@
     "start": "node --env-file-if-exists=../../.env dist/index.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node --env-file-if-exists=../../.env --import tsx src/db/migrate.ts",
+    "db:cleanup": "node --env-file-if-exists=../../.env --import tsx src/cleanup.ts",
     "user": "node --env-file-if-exists=../../.env --import tsx src/manage-user.ts"
   },
   "dependencies": {
