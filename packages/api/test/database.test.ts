@@ -12,6 +12,7 @@ import { serve } from '@hono/node-server';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
+import { sourceNodeArgs } from '../../../scripts/test-node.js';
 import { createApp } from '../src/app.js';
 import { createStore, hashToken } from '../src/store.js';
 
@@ -171,7 +172,8 @@ test('PostgreSQL: identity, clan isolation, concurrent creation, and credential 
     const command = promisify(execFile)(
       process.execPath,
       [
-        fileURLToPath(new URL('../../cli/dist/index.js', import.meta.url)),
+        ...sourceNodeArgs,
+        fileURLToPath(new URL('../../cli/src/index.ts', import.meta.url)),
         '--api-url',
         `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
         '--json',

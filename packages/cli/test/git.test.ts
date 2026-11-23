@@ -10,6 +10,7 @@ import test, { type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import type { ClqnClient } from '@clqn/shared';
+import { sourceNodeArgs } from '../../../scripts/test-node.js';
 import {
   inspectPullRequest,
   localRepository,
@@ -442,7 +443,7 @@ test('main sync refuses to overwrite ignored local files that become tracked rem
   assert.equal(await readFile(join(f.repoPath, 'merged.txt'), 'utf8'), 'private ignored contents\n');
 });
 
-const cli = fileURLToPath(new URL('../dist/index.js', import.meta.url));
+const cli = fileURLToPath(new URL('../src/index.ts', import.meta.url));
 test('MCP sync follows notifications from a dirty feature worktree without moving that branch', {
   timeout: 15000,
 }, async (t) => {
@@ -535,6 +536,7 @@ test('MCP automatically catches up main and stops syncing on stdin close or SIGT
     const child = spawn(
       process.execPath,
       [
+        ...sourceNodeArgs,
         cli,
         '--api-url',
         `http://127.0.0.1:${(server.address() as AddressInfo).port}`,

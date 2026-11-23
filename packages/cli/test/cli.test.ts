@@ -7,9 +7,10 @@ import test, { type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { ApiError, ClqnClient } from '@clqn/shared';
+import { sourceNodeArgs } from '../../../scripts/test-node.js';
 
 const run = promisify(execFile);
-const cli = fileURLToPath(new URL('../dist/index.js', import.meta.url));
+const cli = fileURLToPath(new URL('../src/index.ts', import.meta.url));
 
 // execFile rejects with the exit code and captured output.
 type ExecError = Error & { code: number; stdout: string; stderr: string };
@@ -28,7 +29,14 @@ async function fixture(t: TestContext, status: number, body: unknown) {
 test('CLI emits parseable JSON from an HTTP response', async (t) => {
   const body = { status: 'ok', service: 'clqn-api', version: '0.1.0' };
   const url = await fixture(t, 200, body);
-  const { stdout, stderr } = await run(process.execPath, [cli, 'health', '--json', '--api-url', url]);
+  const { stdout, stderr } = await run(process.execPath, [
+    ...sourceNodeArgs,
+    cli,
+    'health',
+    '--json',
+    '--api-url',
+    url,
+  ]);
   assert.deepEqual(JSON.parse(stdout), body);
   assert.equal(stderr, '');
 });
@@ -36,13 +44,16 @@ test('CLI emits parseable JSON from an HTTP response', async (t) => {
 test('CLI returns nonzero and structured errors when the API fails', async (t) => {
   const body = { error: { code: 'UNAVAILABLE', message: 'Try again later' } };
   const url = await fixture(t, 503, body);
-  await assert.rejects(run(process.execPath, [cli, '--json', '--api-url', url, 'health']), (thrown) => {
-    const error = thrown as ExecError;
-    assert.equal(error.code, 1);
-    assert.equal(error.stdout, '');
-    assert.deepEqual(JSON.parse(error.stderr), body);
-    return true;
-  });
+  await assert.rejects(
+    run(process.execPath, [...sourceNodeArgs, cli, '--json', '--api-url', url, 'health']),
+    (thrown) => {
+      const error = thrown as ExecError;
+      assert.equal(error.code, 1);
+      assert.equal(error.stdout, '');
+      assert.deepEqual(JSON.parse(error.stderr), body);
+      return true;
+    },
+  );
   await assert.rejects(new ClqnClient(url).health(), ApiError);
 });
 
@@ -130,7 +141,7 @@ async function workspaceFixture(t: TestContext) {
   const call = (args: string[], options: { env?: Record<string, string>; input?: string } = {}) => {
     const environment: NodeJS.ProcessEnv = { ...process.env, CLQN_CONFIG_DIR: directory, ...options.env };
     if (!options.env || !Object.hasOwn(options.env, 'CLQN_TOKEN')) delete environment.CLQN_TOKEN;
-    const result = run(process.execPath, [cli, '--api-url', url, ...args], { env: environment });
+    const result = run(process.execPath, [...sourceNodeArgs, cli, '--api-url', url, ...args], { env: environment });
     result.child.stdin?.end(options.input);
     return result;
   };
@@ -253,7 +264,7 @@ test('failed login preserves credentials, environment override works, and anothe
   const otherEnvironment: NodeJS.ProcessEnv = { ...process.env, CLQN_CONFIG_DIR: f.directory };
   delete otherEnvironment.CLQN_TOKEN;
   await assert.rejects(
-    run(process.execPath, [cli, '--api-url', other.url, 'whoami', '--json'], {
+    run(process.execPath, [...sourceNodeArgs, cli, '--api-url', other.url, 'whoami', '--json'], {
       env: otherEnvironment,
     }),
   );

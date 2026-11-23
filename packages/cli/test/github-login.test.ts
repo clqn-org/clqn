@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
+import { sourceNodeArgs } from '../../../scripts/test-node.js';
 import { readConfig } from '../src/config.js';
 
 test('GitHub CLI saves only clqn token, prints identity without credentials, uses POST polling', async (t) => {
@@ -44,7 +45,7 @@ test('GitHub CLI saves only clqn token, prints identity without credentials, use
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const result = await promisify(execFile)(
     process.execPath,
-    ['packages/cli/dist/index.js', '--api-url', url, '--json', 'login', '--github'],
+    [...sourceNodeArgs, 'packages/cli/src/index.ts', '--api-url', url, '--json', 'login', '--github'],
     {
       env: { ...process.env, CLQN_CONFIG_DIR: dir, CLQN_TOKEN: '' },
       timeout: 15000,
@@ -94,7 +95,7 @@ test('GitHub CLI login retries a temporary poll failure until the code expires',
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const result = await promisify(execFile)(
     process.execPath,
-    ['packages/cli/dist/index.js', '--api-url', url, '--json', 'login', '--github'],
+    [...sourceNodeArgs, 'packages/cli/src/index.ts', '--api-url', url, '--json', 'login', '--github'],
     {
       env: { ...process.env, CLQN_CONFIG_DIR: dir, CLQN_TOKEN: '' },
       timeout: 30000,
