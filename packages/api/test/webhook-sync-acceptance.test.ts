@@ -14,13 +14,14 @@ import { serve } from '@hono/node-server';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
+import { sourceNodeArgs } from '../../../scripts/test-node.js';
 import type { MainSyncResult } from '../../cli/src/git.js';
 import { runMcpSync } from '../../cli/src/mcp-sync.js';
 import { createApp } from '../src/app.js';
 import { createStore } from '../src/store.js';
 
 const execute = promisify(execFile);
-const cli = fileURLToPath(new URL('../../cli/dist/index.js', import.meta.url));
+const cli = fileURLToPath(new URL('../../cli/src/index.ts', import.meta.url));
 
 test('webhook sync acceptance: main notifications trigger Git fetches while idle polls and task branches do not', {
   skip: !process.env.TEST_DATABASE_URL && 'Set TEST_DATABASE_URL to run PostgreSQL integration tests',
@@ -152,11 +153,15 @@ process.stdin.on('end',()=>{
     { mode: 0o755 },
   );
   const cliEnv = { ...env, PATH: `${bin}:${process.env.PATH}` };
-  const linked = await execute(process.execPath, [cli, '--api-url', apiUrl, '--json', 'repo', 'link'], {
-    cwd: personal,
-    env: cliEnv,
-    encoding: 'utf8',
-  });
+  const linked = await execute(
+    process.execPath,
+    [...sourceNodeArgs, cli, '--api-url', apiUrl, '--json', 'repo', 'link'],
+    {
+      cwd: personal,
+      env: cliEnv,
+      encoding: 'utf8',
+    },
+  );
   const setup = await api.linkRepository(clan.id, 'test/project');
   assert.ok(!linked.stdout.includes(setup.webhook.secret));
   assert.ok(!linked.stderr.includes(setup.webhook.secret));

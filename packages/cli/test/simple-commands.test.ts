@@ -9,9 +9,10 @@ import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { sourceNodeArgs } from '../../../scripts/test-node.js';
 
 const run = promisify(execFile);
-const cli = fileURLToPath(new URL('../dist/index.js', import.meta.url));
+const cli = fileURLToPath(new URL('../src/index.ts', import.meta.url));
 const clanId = '84367b51-14c7-43de-84a1-faf0207eadb3';
 const userId = 'd724b185-7509-4bc1-adf6-eb7978f96a1a';
 const otherUserId = 'ab840359-0218-4c43-aa5b-3da942cc566d';
@@ -117,7 +118,10 @@ async function fixture(t: TestContext) {
       CLQN_TEST_EXECUTIONS: executions,
     };
     if (options.savedLogin) delete env.CLQN_TOKEN;
-    const result = run(process.execPath, [cli, '--api-url', apiUrl, ...args], { env, cwd: directory });
+    const result = run(process.execPath, [...sourceNodeArgs, cli, '--api-url', apiUrl, ...args], {
+      env,
+      cwd: directory,
+    });
     result.child.stdin?.end(options.input);
     return result;
   };

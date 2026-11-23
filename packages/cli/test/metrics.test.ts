@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { sourceNodeArgs } from '../../../scripts/test-node.js';
 import { renderActivity, renderMetrics } from '../src/metrics.js';
 
 const stats = { members: 2, agents: 3, tasks: { open: 5, claimed: 3, completed: 12 } };
@@ -77,10 +78,11 @@ test('status shows only metrics and log shows only recent activity in human and 
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
-  const cli = fileURLToPath(new URL('../dist/index.js', import.meta.url));
+  const cli = fileURLToPath(new URL('../src/index.ts', import.meta.url));
   const run = promisify(execFile);
   const call = (command: string, json = false) =>
     run(process.execPath, [
+      ...sourceNodeArgs,
       cli,
       '--api-url',
       `http://127.0.0.1:${(server.address() as AddressInfo).port}`,

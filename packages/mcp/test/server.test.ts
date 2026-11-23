@@ -8,6 +8,7 @@ import { serve } from '@hono/node-server';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { sourceNodeArgs } from '../../../scripts/test-node.js';
 import { createApp } from '../../api/src/app.js';
 import { createMcpServer } from '../src/index.js';
 
@@ -43,7 +44,8 @@ test('CLI stdio MCP process reaches the real HTTP API', async (t) => {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [
-      fileURLToPath(new URL('../../cli/dist/index.js', import.meta.url)),
+      ...sourceNodeArgs,
+      fileURLToPath(new URL('../../cli/src/index.ts', import.meta.url)),
       '--api-url',
       `http://127.0.0.1:${(http.address() as AddressInfo).port}`,
       'mcp',

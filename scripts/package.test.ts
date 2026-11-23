@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -53,7 +54,7 @@ test('release installs without workspace dependencies and serves CLI and MCP', {
   // Windows places the npm command shim directly in the installation prefix.
   const cli = process.platform === 'win32' ? 'cmd.exe' : join(directory, 'bin', 'clqn');
   const launcher = process.platform === 'win32' ? ['/d', '/c', '.\\clqn.cmd'] : [];
-  const env = { ...process.env, CLQN_CONFIG_DIR: join(directory, 'config') };
+  const env: NodeJS.ProcessEnv = { ...process.env, CLQN_CONFIG_DIR: join(directory, 'config') };
   delete env.CLQN_TOKEN;
   delete env.CLQN_CLAN_ID;
   const options = { cwd: directory, env };
@@ -69,7 +70,7 @@ test('release installs without workspace dependencies and serves CLI and MCP', {
   t.after(() => server.close());
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
-  const apiUrl = `http://127.0.0.1:${server.address().port}`;
+  const apiUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   assert.deepEqual(
     JSON.parse((await exec(cli, [...launcher, '--api-url', apiUrl, '--json', 'health'], options)).stdout),
     health,
@@ -85,11 +86,12 @@ test('release installs without workspace dependencies and serves CLI and MCP', {
     stderr += chunk;
   });
   const responses = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
-  const send = (message) => child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
-  const receive = async (id) => {
+  const send = (message: { id?: number; method: string; params?: object }) =>
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
+  const receive = async (id: number) => {
     const { value, done } = await responses.next();
     assert.equal(done, false, stderr);
-    const message = JSON.parse(value);
+    const message = JSON.parse(value!);
     assert.equal(message.id, id);
     assert.equal(message.error, undefined);
     return message.result;
@@ -102,7 +104,7 @@ test('release installs without workspace dependencies and serves CLI and MCP', {
   assert.equal((await receive(1)).serverInfo.name, 'clqn');
   send({ method: 'notifications/initialized' });
   send({ id: 2, method: 'tools/list', params: {} });
-  assert.ok((await receive(2)).tools.some((tool) => tool.name === 'clqn_health'));
+  assert.ok((await receive(2)).tools.some((tool: { name: string }) => tool.name === 'clqn_health'));
   send({ id: 3, method: 'tools/call', params: { name: 'clqn_health', arguments: {} } });
   assert.deepEqual(JSON.parse((await receive(3)).content[0].text), health);
   const closed = once(child, 'close');

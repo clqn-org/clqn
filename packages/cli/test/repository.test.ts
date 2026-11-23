@@ -10,9 +10,10 @@ import test, { type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import type { Actor, Task, TaskRepository } from '@clqn/shared';
+import { sourceNodeArgs } from '../../../scripts/test-node.js';
 
 const run = promisify(execFile);
-const cli = fileURLToPath(new URL('../dist/index.js', import.meta.url));
+const cli = fileURLToPath(new URL('../src/index.ts', import.meta.url));
 
 // execFile rejects with the exit code and captured output.
 type ExecError = Error & { code: number; stdout: string; stderr: string };
@@ -153,7 +154,7 @@ async function fixture(
       mode: 0o700,
     });
   const call = (args: string[]) =>
-    run(process.execPath, [cli, '--api-url', apiUrl, ...args], {
+    run(process.execPath, [...sourceNodeArgs, cli, '--api-url', apiUrl, ...args], {
       env: {
         ...process.env,
         CLQN_CONFIG_DIR: join(directory, 'config'),
