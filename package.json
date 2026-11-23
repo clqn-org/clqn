@@ -25,6 +25,7 @@
     "test:package": "node --test scripts/package.test.mjs",
     "db:generate": "npm run db:generate --workspace @clqn/api",
     "db:migrate": "npm run db:migrate --workspace @clqn/api",
+    "db:cleanup": "npm run db:cleanup --workspace @clqn/api",
     "user": "npm run user --workspace @clqn/api --"
   },
   "devDependencies": {

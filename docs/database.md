@@ -29,6 +29,12 @@ PostgreSQL stores identities, clan memberships, invitations, agents, policies, c
 
 See [authentication](authentication.md) for credentials and permissions.
 
+## Maintenance
+
+Run `npm run db:cleanup` daily with the server's private `DATABASE_URL` (or root `.env`). It removes events older than 90 days and webhook delivery IDs older than 30 days, and keeps the latest 100 context revisions per key, including entries that are no longer updated. Current context, tasks, repository links, and event sequence numbers are preserved. It prints deletion counts, never credentials or record contents.
+
+For Docker, run `docker compose exec api node packages/api/dist/cleanup.js`. For Cloud Run, deploy a single-task job using the migration job's image, database secret, network, and service account, with `--command node --args packages/api/dist/cleanup.js`. Schedule that job daily with [Cloud Scheduler](https://cloud.google.com/run/docs/execute/jobs-on-schedule). Include its one database connection in the service's connection budget. Event cursors resume from the retained history, so offline agents should refresh current state if their events have expired.
+
 ## Integration checks
 
 Set `TEST_DATABASE_URL` to a dedicated test database and run `npm test`. The suite applies migrations, exercises authorization, concurrent writes, ownership, and CLI/MCP flows, then deletes its test records. Never use production.
