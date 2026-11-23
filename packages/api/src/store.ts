@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { type Actor, type Agent, ApiError, type Clan, type User } from '@clqn/shared';
+import { type Actor, type Agent, ApiError, type Clan, type PageQuery, type User } from '@clqn/shared';
 import { and, count, eq, gt, inArray, isNull, sql as query } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
@@ -32,12 +32,12 @@ export interface WorkspaceStore {
     reissue: boolean,
   ): Promise<{ agent: Agent; token?: string }>;
   revokeToken(tokenHash: string): Promise<boolean>;
-  listAgents(actor: Actor, clanId: string): Promise<(Agent & { active: boolean })[]>;
+  listAgents(actor: Actor, clanId: string, page?: PageQuery): Promise<(Agent & { active: boolean })[]>;
   agentStatus(actor: Actor): Promise<Agent | undefined>;
   authenticate(tokenHash: string): Promise<Actor | undefined>;
   createClan(userId: string, name: string): Promise<Clan>;
-  listClans(userId: string): Promise<Clan[]>;
-  members(userId: string, clanId: string): Promise<Member[] | undefined>;
+  listClans(userId: string, page?: PageQuery, clanId?: string): Promise<Clan[]>;
+  members(userId: string, clanId: string, page?: PageQuery): Promise<Member[] | undefined>;
   removeMember(actor: Actor, clanId: string, userId: string): Promise<void>;
   transferLeadership(actor: Actor, clanId: string, userId: string): Promise<void>;
 }
@@ -173,7 +173,7 @@ export function createStore(url: string, poolSize = 10) {
         .returning({ id: schema.credentials.id });
       return rows.length > 0;
     },
-    async listAgents(actor, clanId) {
+    async listAgents(actor, clanId, page) {
       await requireClan(db, actor, clanId);
       const rows = await db
         .select({
@@ -182,8 +182,16 @@ export function createStore(url: string, poolSize = 10) {
           active: query<boolean>`exists (select 1 from credentials c where c.agent_id = agents.id)`,
         })
         .from(schema.agents)
-        .where(eq(schema.agents.clanId, clanId))
-        .orderBy(schema.agents.createdAt, schema.agents.id);
+        .where(
+          and(
+            eq(schema.agents.clanId, clanId),
+            page?.after
+              ? query`(agents.created_at, agents.id) > (select created_at, id from agents where id = ${page.after} and clan_id = ${clanId})`
+              : undefined,
+          ),
+        )
+        .orderBy(schema.agents.createdAt, schema.agents.id)
+        .limit((page?.limit ?? 100) + 1);
       return rows.map(({ agent, active }) => ({ ...agentView(agent), active }));
     },
     async agentStatus(actor) {
@@ -272,13 +280,25 @@ export function createStore(url: string, poolSize = 10) {
         return clanView(clan);
       });
     },
-    async listClans(userId) {
+    async listClans(userId, page, clanId) {
       const rows = await db
         .select({ clan: schema.clans })
         .from(schema.memberships)
         .innerJoin(schema.clans, eq(schema.memberships.clanId, schema.clans.id))
-        .where(eq(schema.memberships.userId, userId))
-        .orderBy(schema.clans.createdAt, schema.clans.id);
+        .where(
+          and(
+            eq(schema.memberships.userId, userId),
+            clanId ? eq(schema.clans.id, clanId) : undefined,
+            page?.after
+              ? query`(clans.created_at, clans.id) > (
+            select c.created_at, c.id from clans c join memberships m on m.clan_id = c.id
+            where c.id = ${page.after} and m.user_id = ${userId}
+          )`
+              : undefined,
+          ),
+        )
+        .orderBy(schema.clans.createdAt, schema.clans.id)
+        .limit((page?.limit ?? 100) + 1);
       return rows.map(({ clan }) => clanView(clan));
     },
     async removeMember(actor, clanId, userId) {
@@ -341,7 +361,7 @@ export function createStore(url: string, poolSize = 10) {
         await appendEvent(tx, { clanId, actorId: actor.id, type: 'clan.leader_changed', resourceId: userId });
       });
     },
-    async members(userId, clanId) {
+    async members(userId, clanId, page) {
       const [membership] = await db
         .select({ userId: schema.memberships.userId })
         .from(schema.memberships)
@@ -356,8 +376,16 @@ export function createStore(url: string, poolSize = 10) {
         })
         .from(schema.memberships)
         .innerJoin(schema.users, eq(schema.memberships.userId, schema.users.id))
-        .where(eq(schema.memberships.clanId, clanId))
-        .orderBy(schema.memberships.createdAt, schema.users.id);
+        .where(
+          and(
+            eq(schema.memberships.clanId, clanId),
+            page?.after
+              ? query`(memberships.created_at, users.id) > (select created_at, user_id from memberships where user_id = ${page.after} and clan_id = ${clanId})`
+              : undefined,
+          ),
+        )
+        .orderBy(schema.memberships.createdAt, schema.users.id)
+        .limit((page?.limit ?? 100) + 1);
       return rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() }));
     },
   };

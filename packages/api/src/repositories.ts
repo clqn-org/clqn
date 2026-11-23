@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { appendEvent, requireClan, requirePersonal, type WorkspaceDb } from './access.js';
 import { githubDeliveries, linkedRepositories } from './db/schema.js';
 import { tasks } from './db/tasks.js';
+import { pageResponse, parsePage } from './pagination.js';
 
 const metadata = (row: typeof linkedRepositories.$inferSelect): LinkedRepository => ({
   id: row.id,
@@ -41,12 +42,21 @@ export function createRepositoryRoutes(db: WorkspaceDb, master?: string) {
   app.get('/', async (c) => {
     const clanId = c.req.param('clanId')!;
     await requireClan(db, c.get('user'), clanId);
+    const page = parsePage(c.req.query());
     const rows = await db
       .select()
       .from(linkedRepositories)
-      .where(eq(linkedRepositories.clanId, clanId))
-      .orderBy(linkedRepositories.createdAt, linkedRepositories.id);
-    return c.json({ repositories: rows.map(metadata) });
+      .where(
+        and(
+          eq(linkedRepositories.clanId, clanId),
+          page.after
+            ? sql`(created_at, id) > (select created_at, id from linked_repositories where id = ${page.after} and clan_id = ${clanId})`
+            : undefined,
+        ),
+      )
+      .orderBy(linkedRepositories.createdAt, linkedRepositories.id)
+      .limit(page.limit + 1);
+    return c.json(pageResponse('repositories', rows.map(metadata), page.limit, (row) => row.id));
   });
   app.get('/:repositoryId', async (c) => {
     const clanId = c.req.param('clanId')!;

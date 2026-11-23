@@ -88,3 +88,7 @@ clqn repo link owner/project
 ```
 
 Use either `--code` (optionally with `--base-branch`) or explicit repository flags. `start` prints the worktree path without changing your shell directory. If preparation fails after claiming, fix the local issue and retry; the task remains claimed. Existing unrelated directories and branches are never overwritten.
+
+## API list pagination
+
+Clan, member, agent, repository and context list endpoints return at most 100 items by default. Use `?limit=1..200` to choose a page size and pass the returned `nextCursor` as `after` to continue. Context cursors are keys; the other cursors are UUIDs. CLI and MCP lists follow these pages automatically to preserve existing results. Task lists expose pages directly through `--limit` and `--after`. Context history is bounded to the latest 100 revisions.
