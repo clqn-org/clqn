@@ -1,0 +1,1 @@
+CREATE INDEX "github_deliveries_received_at_idx" ON "github_deliveries" USING btree ("received_at");

@@ -232,12 +232,8 @@ export function createGithubWebhookRoutes(db?: WorkspaceDb, master?: string) {
           .onConflictDoNothing()
           .returning();
         if (!recorded) return { accepted: true, duplicate: true };
-        // GitHub redelivers for a few days at most; older IDs only take space.
-        await tx
-          .delete(githubDeliveries)
-          .where(
-            and(eq(githubDeliveries.bindingId, id), lt(githubDeliveries.receivedAt, sql`now() - interval '7 days'`)),
-          );
+        // Bound deduplication history, including links that no longer receive deliveries.
+        await tx.delete(githubDeliveries).where(lt(githubDeliveries.receivedAt, sql`now() - interval '30 days'`));
         if (!('ref' in payload.data)) return confirmMerge(tx, current, payload.data);
         // Notify on the repository's default branch, whatever its name.
         const defaultRef = `refs/heads/${payload.data.repository.default_branch}`;

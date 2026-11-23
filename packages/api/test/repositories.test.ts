@@ -166,13 +166,23 @@ test('PostgreSQL: scoped repository links authenticate raw webhooks, deduplicate
   assert.equal(outcomes.filter((result) => result.duplicate).length, 1);
   const received = linkedRepositorySchema.parse(await (await request(worker.token, `/${setup.repository.id}`)).json());
   assert.ok(received.lastEventSequence > 0);
-  // Delivery IDs older than GitHub's redelivery window are pruned on the next delivery.
+  // Keep 30 days of IDs and prune inactive links too when recording a new delivery.
   const stale = randomUUID();
+  const recent = randomUUID();
+  const inactive = linkedRepositorySetupSchema.parse(
+    await (await request(bob.token, '', { slug: 'other/project' }, other.id)).json(),
+  );
+  const inactiveStale = randomUUID();
   await sql`insert into github_deliveries (binding_id, delivery_id, received_at)
-    values (${setup.repository.id}, ${stale}, now() - interval '8 days')`;
+    values (${setup.repository.id}, ${stale}, now() - interval '31 days'),
+      (${setup.repository.id}, ${recent}, now() - interval '29 days'),
+      (${inactive.repository.id}, ${inactiveStale}, now() - interval '31 days')`;
   await signed({ ...push, ref: 'refs/heads/other' });
-  const [pruned] = await sql`select count(*)::integer as n from github_deliveries where delivery_id = ${stale}`;
+  const [pruned] = await sql`select count(*)::integer as n from github_deliveries
+    where delivery_id in (${stale}, ${inactiveStale})`;
   assert.equal(pruned?.n, 0);
+  const [retained] = await sql`select count(*)::integer as n from github_deliveries where delivery_id = ${recent}`;
+  assert.equal(retained?.n, 1);
   const sameDeliveryDifferentBody = await signed({ ...push, after: 'b'.repeat(40) }, { delivery });
   assert.equal((await sameDeliveryDifferentBody.json()).duplicate, true);
   const ignoredDelivery = randomUUID();
