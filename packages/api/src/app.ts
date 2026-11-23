@@ -1,19 +1,20 @@
-import { type Actor, ApiError, healthSchema, VERSION } from '@clqn/shared';
-import { sql } from 'drizzle-orm';
+import { type Actor, ApiError } from '@clqn/shared';
 import { Hono } from 'hono';
 import { requestId } from 'hono/request-id';
-import type { WorkspaceDb } from './access.js';
-import { requirePersonal } from './access.js';
-import { createActivityRoutes } from './activity.js';
-import { createAgentRoutes } from './agents.js';
-import { createClanRoutes } from './clans.js';
-import { createContextRoutes } from './context.js';
-import { createGithubLoginRoutes } from './github-login.js';
-import { createPolicyRoutes } from './policy.js';
-import { createRateLimiter } from './rate-limit.js';
-import { createGithubWebhookRoutes, createRepositoryRoutes } from './repositories.js';
-import { hashToken, type WorkspaceStore } from './store.js';
-import { createTaskRoutes } from './tasks.js';
+import { hashToken, type WorkspaceStore } from './db/store.js';
+import type { WorkspaceDb } from './lib/access.js';
+import { requirePersonal } from './lib/access.js';
+import { createRateLimiter } from './lib/rate-limit.js';
+import { createActivityRoutes } from './routes/activity.js';
+import { createAgentRoutes } from './routes/agents.js';
+import { createClanRoutes } from './routes/clans.js';
+import { createContextRoutes } from './routes/context.js';
+import { createGithubLoginRoutes } from './routes/github-login.js';
+import { createHealthRoutes } from './routes/health.js';
+import { createIdentityRoutes } from './routes/identity.js';
+import { createPolicyRoutes } from './routes/policy.js';
+import { createGithubWebhookRoutes, createRepositoryRoutes } from './routes/repositories.js';
+import { createTaskRoutes } from './routes/tasks.js';
 
 export function createApp(
   store?: WorkspaceStore,
@@ -31,19 +32,7 @@ export function createApp(
   const rateLimit = createRateLimiter(options.requestsPerMinute ?? 300);
   // Echoed as X-Request-Id and in 500 messages so a report can be matched to a log line.
   app.use(requestId({ limitLength: 64 }));
-  // Liveness only: this endpoint intentionally does not connect to the database.
-  app.get('/health', (c) => c.json(healthSchema.parse({ status: 'ok', service: 'clqn-api', version: VERSION })));
-  // Readiness: confirms the database answers, for load balancers and container health checks.
-  app.get('/ready', async (c) => {
-    c.header('Cache-Control', 'no-store');
-    try {
-      if (!db) throw new Error('Database is not configured');
-      await db.execute(sql`select 1`);
-      return c.json({ status: 'ready' });
-    } catch {
-      return c.json({ status: 'unavailable' }, 503);
-    }
-  });
+  app.route('/', createHealthRoutes(db));
   app.route('/hooks/github', createGithubWebhookRoutes(db, options.githubWebhookSecret));
   app.route('/auth/github', createGithubLoginRoutes(db, options.githubClientId));
   app.use('/v1/*', async (c, next) => {
@@ -87,9 +76,7 @@ export function createApp(
     c.set('tokenHash', tokenHash);
     await next();
   });
-  app.get('/v1/me', (c) => c.json(c.get('user')));
-  // Revokes only the presented credential; other logins and agent tokens keep working.
-  app.post('/v1/logout', async (c) => c.json({ revoked: await store!.revokeToken(c.get('tokenHash')) }));
+  app.route('/v1', createIdentityRoutes(store));
   if (store) {
     app.route('/v1', createClanRoutes(store));
     app.route('/v1', createAgentRoutes(store));

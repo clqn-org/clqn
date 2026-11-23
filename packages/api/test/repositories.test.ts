@@ -7,7 +7,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 import { createApp } from '../src/app.js';
-import { createStore } from '../src/store.js';
+import { createStore } from '../src/db/store.js';
 
 const master = '0123456789abcdef'.repeat(4);
 test('webhook configuration fails closed and setup schemas constrain secret destinations', async () => {

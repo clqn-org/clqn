@@ -6,9 +6,9 @@ import { ClqnClient } from '@clqn/shared';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
-import type { WorkspaceDb } from '../src/access.js';
-import { createGithubLoginRoutes, githubRequest, verifiedIdentity } from '../src/github-login.js';
-import { createStore } from '../src/store.js';
+import { createStore } from '../src/db/store.js';
+import type { WorkspaceDb } from '../src/lib/access.js';
+import { createGithubLoginRoutes, githubRequest, verifiedIdentity } from '../src/routes/github-login.js';
 
 test('GitHub identity requires stable ID and verified primary email', () => {
   assert.deepEqual(
@@ -135,13 +135,13 @@ test('PostgreSQL: GitHub single use, concurrent completion, identity conflicts, 
   assert.equal((await post('/poll', { handle: first.handle })).status, 'expired');
   ids.push(complete.user.id);
   assert.equal(
-    (await connection.store.authenticate((await import('../src/store.js')).hashToken(complete.token)))?.id,
+    (await connection.store.authenticate((await import('../src/db/store.js')).hashToken(complete.token)))?.id,
     complete.user.id,
   );
   const [credential] = await sql`select id from credentials where user_id = ${complete.user.id}`;
   await connection.revokeCredential(credential!.id);
   assert.equal(
-    await connection.store.authenticate((await import('../src/store.js')).hashToken(complete.token)),
+    await connection.store.authenticate((await import('../src/db/store.js')).hashToken(complete.token)),
     undefined,
   );
   const second = await start();

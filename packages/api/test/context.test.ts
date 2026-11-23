@@ -13,7 +13,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 import { createApp } from '../src/app.js';
-import { createStore } from '../src/store.js';
+import { createStore } from '../src/db/store.js';
 
 test('context contracts require optimistic revisions and bound UTF-8 text', () => {
   assert.equal(writeContextSchema.safeParse({ text: 'hello', expectedRevision: 0 }).success, true);

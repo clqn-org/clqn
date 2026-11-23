@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
-import type { WorkspaceDb } from '../access.js';
-import { limits } from '../limits.js';
+import type { WorkspaceDb } from '../lib/access.js';
+import { limits } from '../lib/limits.js';
 
 // Operator-only maintenance. Keep current state; prune only old activity and historical records.
 export async function cleanupDatabase(db: WorkspaceDb) {

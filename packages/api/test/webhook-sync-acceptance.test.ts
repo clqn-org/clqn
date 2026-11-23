@@ -18,7 +18,7 @@ import { sourceNodeArgs } from '../../../scripts/test-node.js';
 import type { MainSyncResult } from '../../cli/src/git.js';
 import { runMcpSync } from '../../cli/src/mcp-sync.js';
 import { createApp } from '../src/app.js';
-import { createStore } from '../src/store.js';
+import { createStore } from '../src/db/store.js';
 
 const execute = promisify(execFile);
 const cli = fileURLToPath(new URL('../../cli/src/index.ts', import.meta.url));

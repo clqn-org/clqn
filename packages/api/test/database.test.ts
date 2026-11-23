@@ -14,7 +14,7 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 import { sourceNodeArgs } from '../../../scripts/test-node.js';
 import { createApp } from '../src/app.js';
-import { createStore, hashToken } from '../src/store.js';
+import { createStore, hashToken } from '../src/db/store.js';
 
 // Use a dedicated database: migrations are applied, and only this test's users/clans are deleted.
 test('PostgreSQL: identity, clan isolation, concurrent creation, and credential revocation', {

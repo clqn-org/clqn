@@ -6,7 +6,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 import { createApp } from '../src/app.js';
-import { createStore } from '../src/store.js';
+import { createStore } from '../src/db/store.js';
 
 test('PostgreSQL: leaders remove members or hand off leadership, members leave, and agent tokens never outlive membership', {
   skip: !process.env.TEST_DATABASE_URL && 'Set TEST_DATABASE_URL to run PostgreSQL integration tests',

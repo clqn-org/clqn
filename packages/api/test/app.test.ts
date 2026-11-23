@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { errorSchema, healthSchema } from '@clqn/shared';
-import type { WorkspaceDb } from '../src/access.js';
 import { createApp } from '../src/app.js';
-import { hashToken, type WorkspaceStore } from '../src/store.js';
+import { hashToken, type WorkspaceStore } from '../src/db/store.js';
+import type { WorkspaceDb } from '../src/lib/access.js';
 
 test('health endpoint satisfies the shared contract without a database', async () => {
   const response = await createApp().request('/health');

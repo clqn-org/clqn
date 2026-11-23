@@ -3,10 +3,10 @@ import { and, count, eq, gt, lte } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
-import { appendEvent, lockClan, requireClan, type WorkspaceDb } from './access.js';
-import { contextEntries, contextRevisions } from './db/context.js';
-import { limitReached, limits } from './limits.js';
-import { pageResponse, parsePage } from './pagination.js';
+import { contextEntries, contextRevisions } from '../db/context.js';
+import { appendEvent, lockClan, requireClan, type WorkspaceDb } from '../lib/access.js';
+import { limitReached, limits } from '../lib/limits.js';
+import { pageResponse, parsePage } from '../lib/pagination.js';
 
 type EntryRow = typeof contextEntries.$inferSelect;
 const view = ({ key, text, revision, updatedAt }: EntryRow) => ({

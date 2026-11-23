@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createApp } from '../src/app.js';
-import type { WorkspaceStore } from '../src/store.js';
+import type { WorkspaceStore } from '../src/db/store.js';
 
 const alice = { id: '65fd2b48-b47f-4862-a85d-af491cdb8a3c', email: 'alice@example.com' };
 const clanId = 'e6faf7c5-0b04-45de-8eba-c1fda2a17a89';

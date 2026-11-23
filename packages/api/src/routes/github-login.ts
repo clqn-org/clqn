@@ -4,10 +4,10 @@ import { eq, lt, sql } from 'drizzle-orm';
 import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
-import type { WorkspaceDb } from './access.js';
-import { credentials, githubLogins, users } from './db/schema.js';
-import { createRateLimiter } from './rate-limit.js';
-import { hashToken } from './store.js';
+import { credentials, githubLogins, users } from '../db/schema.js';
+import { hashToken } from '../db/store.js';
+import type { WorkspaceDb } from '../lib/access.js';
+import { createRateLimiter } from '../lib/rate-limit.js';
 
 const unavailable = () => new Error('GitHub authentication unavailable');
 // Fixed destinations, no redirects, bounded requests, and no upstream bodies in errors.
