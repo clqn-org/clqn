@@ -89,8 +89,8 @@ export function createTaskRoutes(db: WorkspaceDb) {
         ),
       )
       .orderBy(tasks.createdAt, tasks.id)
-      .limit(limit === undefined ? Number.MAX_SAFE_INTEGER : limit + 1);
-    const page = limit === undefined ? rows : rows.slice(0, limit);
+      .limit(limit + 1);
+    const page = rows.slice(0, limit);
     const next = rows.length > page.length ? page.at(-1)?.id : undefined;
     return c.json({ tasks: page.map(taskView), ...(next ? { nextCursor: next } : {}) });
   });
