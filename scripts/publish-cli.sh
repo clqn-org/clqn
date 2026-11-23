@@ -5,7 +5,7 @@ tag=${GITHUB_REF_NAME:?Missing release tag}
 [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "Expected a stable vX.Y.Z tag" >&2; exit 1; }
 version=${tag#v}
 name="clqn-cli-$version.tgz"
-archive="dist/$name"
+archive="./dist/$name"
 
 # The formula on main is the checksum users will install through Homebrew.
 cmp Formula/clqn.rb dist/clqn.rb

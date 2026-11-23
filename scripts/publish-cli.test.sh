@@ -29,6 +29,7 @@ npm() {
   case "$1" in
     --version) echo 11.13.0 ;;
     publish)
+      [[ "$2" == ./dist/clqn-cli-1.2.3.tgz ]] || return 1
       [[ ! -f remote/npm.json ]] || return 1
       node -e '
         const hash = require("node:crypto").createHash("sha512").update(require("node:fs").readFileSync(process.argv[1]));
