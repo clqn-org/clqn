@@ -11,9 +11,9 @@ import { and, eq, lt, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
-import { appendEvent, requireClan, requirePersonal, type WorkspaceDb } from './access.js';
-import { githubDeliveries, linkedRepositories } from './db/schema.js';
-import { tasks } from './db/tasks.js';
+import { githubDeliveries, linkedRepositories } from '../db/schema.js';
+import { tasks } from '../db/tasks.js';
+import { appendEvent, requireClan, requirePersonal, type WorkspaceDb } from '../lib/access.js';
 
 const metadata = (row: typeof linkedRepositories.$inferSelect): LinkedRepository => ({
   id: row.id,

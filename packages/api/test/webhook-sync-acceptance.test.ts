@@ -17,7 +17,7 @@ import postgres from 'postgres';
 import type { MainSyncResult } from '../../cli/src/git.js';
 import { runMcpSync } from '../../cli/src/mcp-sync.js';
 import { createApp } from '../src/app.js';
-import { createStore } from '../src/store.js';
+import { createStore } from '../src/db/store.js';
 
 const execute = promisify(execFile);
 const cli = fileURLToPath(new URL('../../cli/dist/index.js', import.meta.url));

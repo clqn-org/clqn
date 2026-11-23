@@ -7,8 +7,8 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { Hono } from 'hono';
 import postgres from 'postgres';
-import { createStore } from '../src/store.js';
-import { createTaskRoutes } from '../src/tasks.js';
+import { createStore } from '../src/db/store.js';
+import { createTaskRoutes } from '../src/routes/tasks.js';
 
 type TestApp = Hono<{ Variables: { user: Actor } }>;
 

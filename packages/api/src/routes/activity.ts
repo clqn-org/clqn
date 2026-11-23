@@ -2,9 +2,9 @@ import { type Actor, ApiError } from '@clqn/shared';
 import { and, asc, count, desc, eq, gt } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { requireClan, type WorkspaceDb } from './access.js';
-import { agents, clans, events, memberships } from './db/schema.js';
-import { tasks } from './db/tasks.js';
+import { agents, clans, events, memberships } from '../db/schema.js';
+import { tasks } from '../db/tasks.js';
+import { requireClan, type WorkspaceDb } from '../lib/access.js';
 
 const eventView = (row: typeof events.$inferSelect) => ({ ...row, createdAt: row.createdAt.toISOString() });
 export function createActivityRoutes(db: WorkspaceDb) {

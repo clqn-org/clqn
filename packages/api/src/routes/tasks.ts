@@ -14,10 +14,10 @@ import { and, eq, isNull, or, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
-import { appendEvent, requireClan, type WorkspaceDb } from './access.js';
-import { resourceFilter, rethrowAliasConflict } from './aliases.js';
-import { agents, linkedRepositories, memberships } from './db/schema.js';
-import { tasks } from './db/tasks.js';
+import { agents, linkedRepositories, memberships } from '../db/schema.js';
+import { tasks } from '../db/tasks.js';
+import { appendEvent, requireClan, type WorkspaceDb } from '../lib/access.js';
+import { resourceFilter, rethrowAliasConflict } from '../lib/aliases.js';
 
 const taskView = (row: typeof tasks.$inferSelect): Task => ({
   ...row,

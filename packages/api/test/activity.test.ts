@@ -8,10 +8,10 @@ import { sql as query } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
-import { appendEvent } from '../src/access.js';
 import { createApp } from '../src/app.js';
+import { createStore } from '../src/db/store.js';
 import { tasks } from '../src/db/tasks.js';
-import { createStore } from '../src/store.js';
+import { appendEvent } from '../src/lib/access.js';
 
 test('PostgreSQL: clan activity, bounded cursor pagination, atomic audit, and commit-ordered polling', {
   skip: !process.env.TEST_DATABASE_URL && 'Set TEST_DATABASE_URL to run PostgreSQL integration tests',

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { createStore } from './store.js';
+import { createStore } from './db/store.js';
 
 const [action, value, ...extra] = process.argv.slice(2);
 if (extra.length || !value || !['create', 'revoke'].includes(action ?? '')) {

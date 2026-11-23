@@ -7,8 +7,8 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import { Hono } from 'hono';
 import postgres from 'postgres';
-import { createStore } from '../src/store.js';
-import { createTaskRoutes } from '../src/tasks.js';
+import { createStore } from '../src/db/store.js';
+import { createTaskRoutes } from '../src/routes/tasks.js';
 
 test('PostgreSQL: task lists filter by status and caller and page with a stable cursor', {
   skip: !process.env.TEST_DATABASE_URL && 'Set TEST_DATABASE_URL to run PostgreSQL integration tests',

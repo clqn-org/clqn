@@ -2,7 +2,7 @@ import { type Actor, ApiError } from '@clqn/shared';
 import { and, eq, sql } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { z } from 'zod';
-import { events, memberships } from './db/schema.js';
+import { events, memberships } from '../db/schema.js';
 
 export type WorkspaceDb = PostgresJsDatabase;
 

@@ -1,8 +1,8 @@
 import { ApiError, resourceReferenceSchema } from '@clqn/shared';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { agents } from './db/schema.js';
-import type { tasks } from './db/tasks.js';
+import { agents } from '../db/schema.js';
+import type { tasks } from '../db/tasks.js';
 
 export function resourceFilter(table: typeof agents | typeof tasks, clanId: string, value: string | undefined) {
   const parsed = resourceReferenceSchema.safeParse(value);

@@ -3,10 +3,10 @@ import { type Actor, type Agent, ApiError, type Clan, type User } from '@clqn/sh
 import { and, count, eq, gt, inArray, isNull, sql as query } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { appendEvent, lockClan, requireClan, requirePersonal } from './access.js';
-import { resourceFilter, rethrowAliasConflict } from './aliases.js';
-import * as schema from './db/schema.js';
-import { limitReached, limits } from './limits.js';
+import { appendEvent, lockClan, requireClan, requirePersonal } from '../lib/access.js';
+import { resourceFilter, rethrowAliasConflict } from '../lib/aliases.js';
+import { limitReached, limits } from '../lib/limits.js';
+import * as schema from './schema.js';
 
 export const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
 export type Member = { userId: string; email: string; role: 'leader' | 'member'; createdAt: string };

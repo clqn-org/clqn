@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createApp } from '../src/app.js';
-import { createRateLimiter } from '../src/rate-limit.js';
-import type { WorkspaceStore } from '../src/store.js';
+import type { WorkspaceStore } from '../src/db/store.js';
+import { createRateLimiter } from '../src/lib/rate-limit.js';
 
 const alice = { id: '65fd2b48-b47f-4862-a85d-af491cdb8a3c', email: 'alice@example.com' };
 const auth = (letter: string) => ({ authorization: `Bearer clqn_${letter.repeat(43)}` });

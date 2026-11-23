@@ -9,7 +9,7 @@ import {
 import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
-import type { WorkspaceStore } from './store.js';
+import type { WorkspaceStore } from '../db/store.js';
 
 export function createClanRoutes(store: WorkspaceStore) {
   const app = new Hono<{ Variables: { user: Actor } }>();

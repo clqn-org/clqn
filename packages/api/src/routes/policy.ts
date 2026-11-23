@@ -2,8 +2,8 @@ import { type Actor, ApiError, defaultPolicy, policySettingsSchema, updatePolicy
 import { and, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { appendEvent, requireClan, requirePersonal, type WorkspaceDb } from './access.js';
-import { memberships } from './db/schema.js';
+import { memberships } from '../db/schema.js';
+import { appendEvent, requireClan, requirePersonal, type WorkspaceDb } from '../lib/access.js';
 
 export function createPolicyRoutes(db: WorkspaceDb) {
   const app = new Hono<{ Variables: { user: Actor } }>();
