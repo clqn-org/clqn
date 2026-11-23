@@ -157,7 +157,10 @@ export const githubDeliveries = pgTable(
     deliveryId: uuid('delivery_id').notNull(),
     receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [primaryKey({ columns: [table.bindingId, table.deliveryId] })],
+  (table) => [
+    primaryKey({ columns: [table.bindingId, table.deliveryId] }),
+    index('github_deliveries_received_at_idx').on(table.receivedAt),
+  ],
 );
 
 // Short-lived authorization attempts. Only the opaque clqn polling handle is hashed.

@@ -48,6 +48,7 @@ export * from './activity.js';
 export * from './agents.js';
 export * from './aliases.js';
 export * from './context.js';
+export * from './pagination.js';
 export * from './tasks.js';
 
 export const githubStartSchema = z.object({
@@ -102,8 +103,9 @@ export const invitationSchema = z.object({
   expiresAt: z.iso.datetime(),
 });
 export type Invitation = z.infer<typeof invitationSchema>;
-export const clansSchema = z.object({ clans: z.array(clanSchema) });
+export const clansSchema = z.object({ clans: z.array(clanSchema), nextCursor: z.uuid().optional() });
 export const membersSchema = z.object({
+  nextCursor: z.uuid().optional(),
   members: z.array(
     z.object({
       userId: z.uuid(),
@@ -173,6 +175,28 @@ export class ClqnClient {
     }
     return schema.parse(await response.json());
   }
+  private async pages<T extends { nextCursor?: string | undefined }>(
+    path: string,
+    schema: z.ZodType<T>,
+    signal?: AbortSignal,
+  ): Promise<T[]> {
+    const pages: T[] = [];
+    const seen = new Set<string>();
+    let after: string | undefined;
+    do {
+      const page = await this.request(
+        after ? `${path}?after=${encodeURIComponent(after)}` : path,
+        schema,
+        undefined,
+        signal,
+      );
+      pages.push(page);
+      after = page.nextCursor;
+      if (after && seen.has(after)) throw new Error('Pagination cursor did not advance');
+      if (after) seen.add(after);
+    } while (after);
+    return pages;
+  }
   private requireSecureLogin() {
     if (this.baseUrl.protocol !== 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(this.baseUrl.hostname)) {
       throw new Error('GitHub login requires HTTPS except on loopback');
@@ -198,11 +222,15 @@ export class ClqnClient {
   createClan(name: string): Promise<Clan> {
     return this.request('/v1/clans', clanSchema, createClanSchema.parse({ name }));
   }
-  listClans() {
-    return this.request('/v1/clans', clansSchema);
+  async listClans() {
+    return { clans: (await this.pages('/v1/clans', clansSchema)).flatMap((page) => page.clans) };
   }
-  members(clanId: string) {
-    return this.request(`/v1/clans/${encodeURIComponent(clanId)}/members`, membersSchema);
+  async members(clanId: string) {
+    return {
+      members: (await this.pages(`/v1/clans/${encodeURIComponent(clanId)}/members`, membersSchema)).flatMap(
+        (page) => page.members,
+      ),
+    };
   }
   removeMember(clanId: string, userId: string) {
     return this.request(
@@ -259,8 +287,12 @@ export class ClqnClient {
       {},
     );
   }
-  listAgents(clanId: string) {
-    return this.request(`/v1/clans/${encodeURIComponent(clanId)}/agents`, agentsSchema);
+  async listAgents(clanId: string) {
+    return {
+      agents: (await this.pages(`/v1/clans/${encodeURIComponent(clanId)}/agents`, agentsSchema)).flatMap(
+        (page) => page.agents,
+      ),
+    };
   }
   agentStatus() {
     return this.request('/v1/agent', agentSchema);
@@ -282,13 +314,12 @@ export class ClqnClient {
       linkRepositorySchema.parse({ slug }),
     );
   }
-  repositories(clanId: string, signal?: AbortSignal) {
-    return this.request(
-      `/v1/clans/${encodeURIComponent(clanId)}/repositories`,
-      linkedRepositoriesSchema,
-      undefined,
-      signal,
-    );
+  async repositories(clanId: string, signal?: AbortSignal) {
+    return {
+      repositories: (
+        await this.pages(`/v1/clans/${encodeURIComponent(clanId)}/repositories`, linkedRepositoriesSchema, signal)
+      ).flatMap((page) => page.repositories),
+    };
   }
   repository(clanId: string, repositoryId: string, signal?: AbortSignal) {
     return this.request(
@@ -305,8 +336,12 @@ export class ClqnClient {
       {},
     );
   }
-  listContext(clanId: string) {
-    return this.request(`/v1/clans/${encodeURIComponent(clanId)}/context`, contextListSchema);
+  async listContext(clanId: string) {
+    return {
+      entries: (await this.pages(`/v1/clans/${encodeURIComponent(clanId)}/context`, contextListSchema)).flatMap(
+        (page) => page.entries,
+      ),
+    };
   }
   readContext(clanId: string, key: string) {
     contextKeySchema.parse(key);

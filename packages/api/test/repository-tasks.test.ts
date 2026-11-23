@@ -195,6 +195,14 @@ test('PostgreSQL: orchestrator delegates isolated repository work and integratio
   const reported = await report(owner.token, pr);
   assert.equal(reported.status, 200);
   assert.equal((await reported.json()).repository.prUrl, 'https://github.com/example/project/pull/1');
+  // Releasing pushed work or an open PR preserves the exact repository state for the next owner.
+  const beforeRelease = taskSchema.parse(await (await request(owner.token, '/ship')).json());
+  const handoff = await request(owner.token, '/ship/release', {});
+  assert.equal(handoff.status, 200);
+  assert.deepEqual(taskSchema.parse(await handoff.json()).repository, beforeRelease.repository);
+  assert.equal((await request(loser.token, '/ship/claim', {})).status, 200);
+  assert.equal((await request(alice.token, '/ship/release', {})).status, 200);
+  assert.equal((await request(owner.token, '/ship/claim', {})).status, 200);
   const integrate = (token: string, headSha = pushed.repository.headSha) =>
     request(token, '/ship/integration', {
       headSha,
@@ -208,6 +216,16 @@ test('PostgreSQL: orchestrator delegates isolated repository work and integratio
   assert.equal((await integration.json()).repository.state, 'merged');
   assert.equal((await integrate(orchestrator.token)).status, 200);
   assert.equal((await report(owner.token, pr)).status, 409);
+  for (const token of [owner.token, alice.token]) {
+    const release = await request(token, '/ship/release', {});
+    assert.equal(release.status, 409);
+    assert.equal((await release.json()).error.code, 'TASK_CONFLICT');
+  }
+  const stillClaimed = taskSchema.parse(await (await request(owner.token, '/ship')).json());
+  assert.equal(stillClaimed.status, 'claimed');
+  assert.equal(stillClaimed.ownerAgentId, owner.agent.id);
+  assert.equal(stillClaimed.repository?.state, 'merged');
+  assert.equal((await request(loser.token, '/ship/claim', {})).status, 409);
   assert.equal((await request(bob.token, `/${task.id}/complete`, {})).status, 409);
   assert.equal((await request(owner.token, '/ship/complete', {})).status, 200);
   // A completed task frees its branch name for new work.

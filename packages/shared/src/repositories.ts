@@ -10,7 +10,10 @@ export const linkedRepositorySchema = z.object({
   lastEventSequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
 });
 export type LinkedRepository = z.infer<typeof linkedRepositorySchema>;
-export const linkedRepositoriesSchema = z.object({ repositories: z.array(linkedRepositorySchema) });
+export const linkedRepositoriesSchema = z.object({
+  repositories: z.array(linkedRepositorySchema),
+  nextCursor: z.uuid().optional(),
+});
 export const linkedRepositorySetupSchema = z.object({
   repository: linkedRepositorySchema,
   webhook: z.object({

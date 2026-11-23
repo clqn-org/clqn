@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { setImmediate } from 'node:timers/promises';
 import { createApp } from '../src/app.js';
 import type { WorkspaceStore } from '../src/db/store.js';
 import { createRateLimiter } from '../src/lib/rate-limit.js';
@@ -57,5 +58,26 @@ test('API rejects a credential over its limit before authenticating it', async (
     error: { code: 'RATE_LIMITED', message: 'Too many requests; try again later' },
   });
   assert.equal(lookups, 2);
+  assert.equal((await app.request('/v1/me', { headers: auth('b') })).status, 200);
+});
+
+test('concurrent authentication cannot admit more requests than the credential limit', async () => {
+  let lookups = 0;
+  const store = {
+    authenticate: async () => {
+      lookups++;
+      await setImmediate();
+      return alice;
+    },
+  } as Partial<WorkspaceStore> as WorkspaceStore;
+  const app = createApp(store, undefined, { requestsPerMinute: 2 });
+  const responses = await Promise.all(Array.from({ length: 8 }, () => app.request('/v1/me', { headers: auth('a') })));
+  assert.equal(responses.filter((response) => response.status === 200).length, 2);
+  const rejected = responses.filter((response) => response.status === 429);
+  assert.equal(rejected.length, 6);
+  assert.ok(rejected.every((response) => Number(response.headers.get('retry-after')) >= 1));
+  const before = lookups;
+  assert.equal((await app.request('/v1/me', { headers: auth('a') })).status, 429);
+  assert.equal(lookups, before);
   assert.equal((await app.request('/v1/me', { headers: auth('b') })).status, 200);
 });

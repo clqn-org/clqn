@@ -53,6 +53,12 @@ export function createApp(
     const user = await store.authenticate(tokenHash);
     if (!user)
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'A valid bearer credential is required' } }, 401);
+    // Authentication yields: another request may have consumed the remaining allowance meanwhile.
+    const concurrentRetryAfter = rateLimit.retryAfter(tokenHash);
+    if (concurrentRetryAfter) {
+      c.header('Retry-After', String(concurrentRetryAfter));
+      return c.json({ error: { code: 'RATE_LIMITED', message: 'Too many requests; try again later' } }, 429);
+    }
     rateLimit.record(tokenHash);
     if (user.agentId) {
       const clanPath = c.req.path.match(/^\/v1\/clans\/([^/]+)/);

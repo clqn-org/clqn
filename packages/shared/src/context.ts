@@ -23,7 +23,10 @@ export const contextEntrySchema = z.object({
   revision: z.number().int().positive(),
   updatedAt: z.iso.datetime(),
 });
-export const contextListSchema = z.object({ entries: z.array(contextEntrySchema.omit({ text: true })) });
+export const contextListSchema = z.object({
+  entries: z.array(contextEntrySchema.omit({ text: true })),
+  nextCursor: contextKeySchema.optional(),
+});
 export const contextHistorySchema = z.object({ revisions: z.array(contextEntrySchema) });
 export type ContextEntry = z.infer<typeof contextEntrySchema>;
 export type WriteContext = z.infer<typeof writeContextSchema>;

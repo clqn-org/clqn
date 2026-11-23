@@ -9,9 +9,10 @@ import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { sourceNodeArgs } from '../../../scripts/test-node.js';
 
 const run = promisify(execFile);
-const cli = fileURLToPath(new URL('../dist/index.js', import.meta.url));
+const cli = fileURLToPath(new URL('../src/index.ts', import.meta.url));
 const clanId = '28c42b15-9a81-480d-9ff5-596a2e9e7428';
 const userId = 'dbab0ddd-41bd-42ba-83c7-d48078552cc7';
 
@@ -70,7 +71,7 @@ async function fixture(t: TestContext, { conflict = false } = {}) {
   const call = (args: string[], overrides: Record<string, string> = {}) => {
     // Never read the caller's saved login or inherit their active clan/token.
     const env = { ...process.env, CLQN_CONFIG_DIR: directory, CLQN_TOKEN: token, CLQN_CLAN_ID: clanId, ...overrides };
-    return run(process.execPath, [cli, '--api-url', url, ...args], { env });
+    return run(process.execPath, [...sourceNodeArgs, cli, '--api-url', url, ...args], { env });
   };
   return { call, requests, token, initial: { ...policy } };
 }

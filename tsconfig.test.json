@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.base.json",
-  "compilerOptions": { "noEmit": true },
-  "include": ["packages/*/test/**/*.ts"]
+  "compilerOptions": { "noEmit": true, "customConditions": ["clqn-source"] },
+  "include": ["packages/*/test/**/*.ts", "scripts/*.test.ts"]
 }

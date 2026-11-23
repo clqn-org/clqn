@@ -114,4 +114,14 @@ test('PostgreSQL: task lists filter by status and caller and page with a stable 
     const response = await app.request(`${path}${query}`);
     assert.equal(response.status, 400, query);
   }
+  // Requests without an explicit limit still page, including the continuation request.
+  await sql`insert into tasks (clan_id, description)
+    select ${clan.id}, 'More work ' || n from generate_series(1, 100) n`;
+  const firstDefault = await list();
+  assert.equal(firstDefault.tasks.length, 100);
+  assert.ok(firstDefault.nextCursor);
+  const lastDefault = await list(`?after=${firstDefault.nextCursor}`);
+  assert.equal(lastDefault.tasks.length, 5);
+  assert.equal(lastDefault.nextCursor, undefined);
+  assert.equal(new Set([...firstDefault.tasks, ...lastDefault.tasks].map((task) => task.id)).size, 105);
 });

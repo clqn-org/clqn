@@ -16,10 +16,11 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
+import { sourceNodeArgs } from '../../../scripts/test-node.js';
 import { createApp } from '../src/app.js';
 import { createStore } from '../src/db/store.js';
 
-const cliPath = fileURLToPath(new URL('../../cli/dist/index.js', import.meta.url));
+const cliPath = fileURLToPath(new URL('../../cli/src/index.ts', import.meta.url));
 
 type ActivityEvent = { type: string; sequence: number; agentId: string | null; resourceId: string | null };
 
@@ -75,7 +76,11 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
   const aliceEnv = { ...baseEnv, CLQN_CONFIG_DIR: join(directory, 'alice') };
   const bobEnv = { ...baseEnv, CLQN_CONFIG_DIR: join(directory, 'bob') };
   const runRaw = async (env: Record<string, string>, args: string[], input?: string) => {
-    const command = promisify(execFile)(process.execPath, [cliPath, '--api-url', apiUrl, '--json', ...args], { env });
+    const command = promisify(execFile)(
+      process.execPath,
+      [...sourceNodeArgs, cliPath, '--api-url', apiUrl, '--json', ...args],
+      { env },
+    );
     command.child.stdin?.end(input);
     return (await command).stdout;
   };
@@ -112,7 +117,7 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
     clients.push(client);
     const transport = new StdioClientTransport({
       command: process.execPath,
-      args: [cliPath, '--api-url', apiUrl, 'mcp'],
+      args: [...sourceNodeArgs, cliPath, '--api-url', apiUrl, 'mcp'],
       cwd: directory,
       env,
       stderr: 'pipe',

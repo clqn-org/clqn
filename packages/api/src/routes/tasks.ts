@@ -89,8 +89,8 @@ export function createTaskRoutes(db: WorkspaceDb) {
         ),
       )
       .orderBy(tasks.createdAt, tasks.id)
-      .limit(limit === undefined ? Number.MAX_SAFE_INTEGER : limit + 1);
-    const page = limit === undefined ? rows : rows.slice(0, limit);
+      .limit(limit + 1);
+    const page = rows.slice(0, limit);
     const next = rows.length > page.length ? page.at(-1)?.id : undefined;
     return c.json({ tasks: page.map(taskView), ...(next ? { nextCursor: next } : {}) });
   });
@@ -359,6 +359,8 @@ export function createTaskRoutes(db: WorkspaceDb) {
         if (action === 'claim') {
           if (row.assignedAgentId && row.assignedAgentId !== actor.agentId) throw conflict();
         } else if (!leaderReset && !ownTask(row, actor)) throw conflict();
+        if (action === 'release' && row.repository?.state === 'merged')
+          throw new ApiError(409, 'TASK_CONFLICT', 'Merged tasks must be completed by their owner, not released');
         if (action === 'complete' && row.repository && row.repository.state !== 'merged')
           throw new ApiError(
             409,

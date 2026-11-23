@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
 import type { WorkspaceStore } from '../db/store.js';
+import { pageResponse, parsePage } from '../lib/pagination.js';
 
 export function createAgentRoutes(store: WorkspaceStore) {
   const app = new Hono<{ Variables: { user: Actor } }>();
@@ -50,7 +51,10 @@ export function createAgentRoutes(store: WorkspaceStore) {
   app.get('/clans/:clanId/agents', async (c) => {
     const id = z.uuid().safeParse(c.req.param('clanId'));
     if (!id.success) return c.json({ error: { code: 'NOT_FOUND', message: 'Clan not found' } }, 404);
-    return c.json({ agents: await store.listAgents(c.get('user'), id.data) });
+    const page = parsePage(c.req.query());
+    return c.json(
+      pageResponse('agents', await store.listAgents(c.get('user'), id.data, page), page.limit, (agent) => agent.id),
+    );
   });
   app.get('/agent', async (c) => {
     const agent = await store.agentStatus(c.get('user'));
