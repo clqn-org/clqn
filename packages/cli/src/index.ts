@@ -547,7 +547,7 @@ task
   .option('--clan <id>', 'clan ID')
   .option('--status <status>', 'open, claimed, or completed')
   .option('--mine', 'only tasks assigned to or claimed by this credential')
-  .option('--limit <number>', 'page size from 1 to 200 (default: all)')
+  .option('--limit <number>', 'page size from 1 to 200 (default: 100)')
   .option('--after <task-id>', 'continue after this task (from the previous page)')
   .action(async (options: { clan?: string; status?: string; mine?: boolean; limit?: string; after?: string }) => {
     const filters = taskListQuerySchema.parse({

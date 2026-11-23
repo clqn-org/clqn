@@ -91,12 +91,12 @@ export const taskSchema = z.object({
   updatedAt: z.iso.datetime(),
 });
 export const tasksSchema = z.object({ tasks: z.array(taskSchema), nextCursor: z.uuid().optional() });
-// Without a limit, every matching task is returned; with one, nextCursor marks the next page.
+// Every request is bounded; nextCursor marks the next page.
 export const taskListQuerySchema = z
   .object({
     status: z.enum(['open', 'claimed', 'completed']).optional(),
     mine: z.literal('true').optional(),
-    limit: z.coerce.number().int().min(1).max(200).optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(100),
     after: z.uuid().optional(),
   })
   .strict();
