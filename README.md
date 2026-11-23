@@ -49,7 +49,7 @@ With Docker, run a private API from a clone of this repository and sign in to it
 
 ```sh
 git clone https://github.com/rli8145/clqn && cd clqn
-docker compose --profile server up -d --wait
+docker compose --profile server up --build -d --wait
 docker compose exec api node packages/api/dist/manage-user.js create you@example.com   # prints a one-time token
 export CLQN_API_URL=http://127.0.0.1:8080
 printf '%s' '<token>' | clqn login

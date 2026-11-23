@@ -7,7 +7,7 @@ CLI and MCP run locally and connect to the operator's API URL. Self-host the API
 From a clone of this repository, one command builds the API, starts PostgreSQL, applies migrations, and serves the API on `127.0.0.1:8080`:
 
 ```sh
-docker compose --profile server up -d --wait
+docker compose --profile server up --build -d --wait
 docker compose exec api node packages/api/dist/manage-user.js create you@example.com
 printf '%s' '<token>' | clqn --api-url http://127.0.0.1:8080 login
 ```
