@@ -359,6 +359,8 @@ export function createTaskRoutes(db: WorkspaceDb) {
         if (action === 'claim') {
           if (row.assignedAgentId && row.assignedAgentId !== actor.agentId) throw conflict();
         } else if (!leaderReset && !ownTask(row, actor)) throw conflict();
+        if (action === 'release' && row.repository?.state === 'merged')
+          throw new ApiError(409, 'TASK_CONFLICT', 'Merged tasks must be completed by their owner, not released');
         if (action === 'complete' && row.repository && row.repository.state !== 'merged')
           throw new ApiError(
             409,
