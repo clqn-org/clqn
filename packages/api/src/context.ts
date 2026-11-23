@@ -1,11 +1,12 @@
 import { type Actor, ApiError, contextKeySchema, writeContextSchema } from '@clqn/shared';
-import { and, count, eq, lte } from 'drizzle-orm';
+import { and, count, eq, gt, lte } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
 import { appendEvent, lockClan, requireClan, type WorkspaceDb } from './access.js';
 import { contextEntries, contextRevisions } from './db/context.js';
 import { limitReached, limits } from './limits.js';
+import { pageResponse, parsePage } from './pagination.js';
 
 type EntryRow = typeof contextEntries.$inferSelect;
 const view = ({ key, text, revision, updatedAt }: EntryRow) => ({
@@ -31,12 +32,21 @@ export function createContextRoutes(db: WorkspaceDb) {
   app.get('/', async (c) => {
     const clanId = parseClan(c.req.param('clanId'));
     await requireClan(db, c.get('user'), clanId);
+    const page = parsePage(c.req.query(), contextKeySchema);
     const rows = await db
       .select({ key: contextEntries.key, revision: contextEntries.revision, updatedAt: contextEntries.updatedAt })
       .from(contextEntries)
-      .where(eq(contextEntries.clanId, clanId))
-      .orderBy(contextEntries.key);
-    return c.json({ entries: rows.map((row) => ({ ...row, updatedAt: row.updatedAt.toISOString() })) });
+      .where(and(eq(contextEntries.clanId, clanId), page.after ? gt(contextEntries.key, page.after) : undefined))
+      .orderBy(contextEntries.key)
+      .limit(page.limit + 1);
+    return c.json(
+      pageResponse(
+        'entries',
+        rows.map((row) => ({ ...row, updatedAt: row.updatedAt.toISOString() })),
+        page.limit,
+        (row) => row.key,
+      ),
+    );
   });
   app.get('/:key/history', async (c) => {
     const clanId = parseClan(c.req.param('clanId'));

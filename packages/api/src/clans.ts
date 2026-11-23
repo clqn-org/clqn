@@ -9,6 +9,7 @@ import {
 import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
+import { pageResponse, parsePage } from './pagination.js';
 import type { WorkspaceStore } from './store.js';
 
 export function createClanRoutes(store: WorkspaceStore) {
@@ -19,8 +20,16 @@ export function createClanRoutes(store: WorkspaceStore) {
   });
   app.get('/clans', async (c) => {
     const actor = c.get('user');
-    const clans = await store.listClans(actor.id);
-    return c.json({ clans: actor.agentId ? clans.filter((clan) => clan.id === actor.clanId) : clans });
+    const page = parsePage(c.req.query());
+    const clans = await store.listClans(actor.id, page, actor.agentId ? actor.clanId : undefined);
+    return c.json(
+      pageResponse(
+        'clans',
+        actor.agentId ? clans.filter((clan) => clan.id === actor.clanId) : clans,
+        page.limit,
+        (clan) => clan.id,
+      ),
+    );
   });
   app.post('/clans', smallBody, async (c) => {
     const raw = await c.req.text();
@@ -58,9 +67,10 @@ export function createClanRoutes(store: WorkspaceStore) {
   });
   app.get('/clans/:clanId/members', async (c) => {
     const id = z.uuid().safeParse(c.req.param('clanId'));
-    const members = id.success ? await store.members(c.get('user').id, id.data) : undefined;
+    const page = parsePage(c.req.query());
+    const members = id.success ? await store.members(c.get('user').id, id.data, page) : undefined;
     if (!members) return c.json({ error: { code: 'NOT_FOUND', message: 'Clan not found' } }, 404);
-    return c.json({ members });
+    return c.json(pageResponse('members', members, page.limit, (member) => member.userId));
   });
   const emptyBody = async (c: Context) => {
     const body = z
