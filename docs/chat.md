@@ -4,6 +4,8 @@ Run `clqn` in a terminal after signing in and selecting a clan with `clqn init` 
 
 Type a task, question, or project context and press **Enter**. Messages remain queued until the orchestrator picks them up. The agent pane shows each delegation's task, worker, status, and reported tokens. A tilde marks estimated usage.
 
+The footer graph shows cumulative reported tokens across the clan over the latest 24 hourly buckets. It grows as workers report usage and excludes estimates. History starts when the server enables recording.
+
 | Key | Action |
 | --- | --- |
 | F2 | Open session settings. Use the arrow keys to move between fields and change approval mode. |

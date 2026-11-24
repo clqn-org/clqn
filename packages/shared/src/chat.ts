@@ -18,6 +18,7 @@ const chatText = z
   .max(4000)
   .refine((text) => !text.includes('\0'));
 const tokenCount = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+export const chatTokenHistoryHours = 24;
 export const sendChatSchema = z.object({ id: z.uuid(), text: chatText, replyTo: z.uuid().optional() }).strict();
 export type SendChat = z.infer<typeof sendChatSchema>;
 export const chatDecisionSchema = z.discriminatedUnion('action', [
@@ -89,6 +90,8 @@ export const chatStateSchema = chatHistorySchema.extend({
   queued: z.number().int().nonnegative(),
   running: z.number().int().nonnegative(),
   usage: z.object({ tokens: tokenCount, reserved: tokenCount, agents: z.number().int().nonnegative() }),
+  // Older servers have totals but no timestamped reports.
+  reportedTokensByHour: z.array(tokenCount).length(chatTokenHistoryHours).optional(),
 });
 export type ChatState = z.infer<typeof chatStateSchema>;
 export const chatInboxSchema = chatHistorySchema.extend({

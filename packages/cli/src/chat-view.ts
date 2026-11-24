@@ -166,6 +166,23 @@ function settingsLines(settings: SettingsView, columns: number, paint: Paint) {
   ];
 }
 
+function tokenTrend(hours: number[], columns: number, paint: Paint) {
+  let total = 0;
+  const cumulative = hours.map((tokens) => {
+    total = Math.min(Number.MAX_SAFE_INTEGER, total + tokens);
+    return total;
+  });
+  const caption = `Clan tokens · 24h  ${number(total)}`;
+  const slots = Math.min(hours.length, columns - width(caption) - 2);
+  if (slots < 1) return paint(clip(caption, columns), 'muted');
+  const levels = '▁▂▃▄▅▆▇█';
+  const trend = Array.from({ length: slots }, (_, slot) => {
+    const end = Math.ceil(((slot + 1) * hours.length) / slots) - 1;
+    return levels[total ? Math.round(((levels.length - 1) * cumulative[end]!) / total) : 0];
+  }).join('');
+  return `${paint(caption, 'muted')}  ${paint(trend, 'accent')}`;
+}
+
 export function chatFrame(view: View): Frame {
   const columns = Math.max(1, view.columns);
   const rows = Math.max(1, view.rows);
@@ -261,7 +278,9 @@ export function chatFrame(view: View): Frame {
     notice,
   ].filter(Boolean);
   const older = view.scroll > 0 && rows >= 15;
-  const height = Math.max(1, rows - 8 - attention.length - Number(older) - Number(!right));
+  const transcriptRows = rows - 8 - attention.length - Number(older) - Number(!right);
+  const trend = transcriptRows > 1 ? state?.reportedTokensByHour : undefined;
+  const height = Math.max(1, transcriptRows - Number(trend !== undefined));
   const end = Math.max(0, transcript.length - view.scroll);
   const visible = transcript.slice(Math.max(0, end - height), end);
   for (let i = 0; i < height; i++) {
@@ -289,6 +308,7 @@ export function chatFrame(view: View): Frame {
   }
   lines.push(...attention, rule);
   const composer = compose(view, content, paint);
+  const composerRow = lines.length;
   lines.push(composer.line, rule);
 
   if (state) {
@@ -303,6 +323,7 @@ export function chatFrame(view: View): Frame {
       (content >= 52 ? `${bar}  ` : '') + paint(clip(summary, content >= 52 ? content - 9 : content), 'muted'),
     );
   } else lines.push('');
+  if (trend) lines.push(tokenTrend(trend, content, paint));
   const actions = [
     'F2 Settings',
     pending ? (view.approvalFocused ? '↑↓ Choose  Y Approve  N Decline  Esc Back' : 'F3 Approvals') : '',
@@ -311,5 +332,5 @@ export function chatFrame(view: View): Frame {
     'Ctrl+C Quit',
   ].filter(Boolean);
   lines.push(paint(clip(actions.join('  ·  '), content), 'muted'));
-  return finish(view.approvalFocused ? undefined : { row: lines.length - 4, column: composer.column });
+  return finish(view.approvalFocused ? undefined : { row: composerRow, column: composer.column });
 }

@@ -78,6 +78,7 @@ test('PostgreSQL: shared chat, held work, owner approvals, and competing delegat
     });
 
   assert.equal((await chat(outsider.token)).status, 404);
+  assert.equal((await chat(outsider.token, '/state')).status, 404);
   assert.equal((await chat(member.token, '/join', defaultChatSettings)).status, 404);
   assert.equal((await chat(host.token, '/join', defaultChatSettings)).status, 200);
   assert.equal((await chat(member.token, '/state')).status, 403);
@@ -136,12 +137,38 @@ test('PostgreSQL: shared chat, held work, owner approvals, and competing delegat
   assert.equal((await state(member.token)).running, 1);
   const usage = `/tasks/${run.taskId}/usage`;
   assert.equal((await chat(otherWorker.token, usage, { tokens: 20 })).status, 403);
+  assert.deepEqual((await state(host.token)).reportedTokensByHour, Array(24).fill(0));
+  await sql`insert into chat_token_hours values
+    (${clan.id}, date_trunc('hour', now(), 'UTC') - interval '3 hours', 7),
+    (${clan.id}, date_trunc('hour', now(), 'UTC') - interval '25 hours', 99)`;
+  assert.equal((await chat(winner.token, usage, { tokens: 12 })).status, 200);
   const result = { tokens: 20, result: { id: randomUUID(), text: 'Reviewed the guide.' } };
-  assert.equal((await chat(winner.token, usage, result)).status, 200);
-  assert.equal((await chat(winner.token, usage, result)).status, 200);
+  const reports = await Promise.all([chat(winner.token, usage, result), chat(winner.token, usage, result)]);
+  assert.deepEqual(
+    reports.map(({ status }) => status),
+    [200, 200],
+  );
+  const changedResult = { tokens: 25, result: { ...result.result, text: 'Different report' } };
+  assert.equal((await chat(winner.token, usage, changedResult)).status, 409);
   assert.equal((await request(winner.token, `/tasks/${run.taskId}/complete`, {})).status, 200);
   active = await state(member.token);
   assert.deepEqual(active.usage, { tokens: 20, reserved: 0, agents: 0 });
+  const trend = (await state(host.token)).reportedTokensByHour!;
+  assert.equal(trend.length, 24);
+  // The last two buckets cover a report even if the UTC hour turns during the test.
+  assert.ok(trend.slice(-5, -2).includes(7));
+  assert.equal(
+    trend.slice(-2).reduce((sum, tokens) => sum + tokens, 0),
+    20,
+  );
+  assert.equal(
+    trend.reduce((sum, tokens) => sum + tokens, 0),
+    27,
+  );
+  assert.equal(
+    active.reportedTokensByHour?.reduce((sum, tokens) => sum + tokens, 0),
+    27,
+  );
   assert.equal(active.runs[0]?.status, 'done');
   assert.equal(active.messages.filter(({ id }) => id === result.result.id).length, 1);
 

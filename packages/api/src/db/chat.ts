@@ -73,3 +73,15 @@ export const chatMessages = pgTable(
     uniqueIndex('chat_messages_task_idx').on(table.taskId).where(sql`${table.taskId} is not null`),
   ],
 );
+
+export const chatTokenHours = pgTable(
+  'chat_token_hours',
+  {
+    clanId: uuid('clan_id')
+      .notNull()
+      .references(() => chats.clanId, { onDelete: 'cascade' }),
+    hour: timestamp('hour', { withTimezone: true }).notNull(),
+    tokens: bigint('tokens', { mode: 'number' }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.clanId, table.hour] })],
+);
