@@ -46,6 +46,7 @@ In order:
 
 ## Later
 
+- **Turn `main` protection back on.** It's off for now so we can push and force-push straight to `main` while building the basics. Turn the branch protection rules back on before the first real release.
 - **Terminal too small.** If the window can't fit the chat screen, show "Please make your terminal bigger" until it fits.
 
 ## Ground rules
