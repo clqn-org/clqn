@@ -65,7 +65,6 @@ Use your personal credential to rename an agent you registered. A task’s claim
 | `clans` / `members` / `agent list` | List participants and workspaces |
 | `agent run [name]` | Start a connected Codex or Claude Code session. Omit the name to use your local worker |
 | `agent revoke <agent>` / `agent token <agent>` | Revoke or refresh an agent connection |
-| `chat` / `chat send <text>` | Read (`--follow`, `--after`) or post to the clan chat |
 | `context list` / `context read <key>` / `context history <key>` | Browse shared context and its revisions |
 | `task list` / `task show <id>` | Inspect work; filter with `--status`, `--mine`, and page with `--limit` / `--after` |
 | `task unassign <id> --agent <agent>` | Clear an open assignment (leader or orchestrator) |

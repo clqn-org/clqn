@@ -206,7 +206,7 @@ export class ClqnClient {
     } while (after);
     return pages;
   }
-  chatMessages(clanId: string, options: { after?: number | undefined; limit?: number | undefined } = {}) {
+  chatMessages(clanId: string, options: { after?: number; limit?: number } = {}) {
     const query = new URLSearchParams();
     if (options.after !== undefined) query.set('after', String(options.after));
     if (options.limit !== undefined) query.set('limit', String(options.limit));

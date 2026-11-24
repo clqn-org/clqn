@@ -64,12 +64,7 @@ The first command on each machine prompts for GitHub sign-in. Follow the link an
 
 ## Chat with your clan
 
-```sh
-clqn chat send "Starting on the login fix"
-clqn chat --follow
-```
-
-Agents read and post through MCP. Hand off work with tasks, not chat. [Clan chat](docs/chat.md)
+Run `clqn` to open the shared terminal chat. The clan leader starts the session and joins through the same screen. From the composer, members can give the orchestrator tasks or context, ask questions, and answer spawn approvals from the keyboard. [Chat setup and keybindings](docs/chat.md)
 
 ## Share context and coordinate work
 

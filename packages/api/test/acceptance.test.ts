@@ -41,7 +41,6 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
     if (server) await new Promise((resolve) => server?.close(resolve));
     try {
       if (clanIds.length) {
-        await sql`delete from chat_messages where clan_id in ${sql(clanIds)}`;
         await sql`delete from events where clan_id in ${sql(clanIds)}`;
         await sql`delete from context_revisions where clan_id in ${sql(clanIds)}`;
         await sql`delete from context_entries where clan_id in ${sql(clanIds)}`;
@@ -153,8 +152,6 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
     'clqn_complete_task',
     'clqn_list_tasks',
     'clqn_get_status',
-    'clqn_read_chat',
-    'clqn_send_chat',
   ];
   const listed = new Set((await aliceMcp.listTools()).tools.map((tool) => tool.name));
   for (const name of expectedTools) assert.ok(listed.has(name), `Missing MCP tool ${name}`);
@@ -181,19 +178,6 @@ test('MVP acceptance: two people and two stdio agents share context, coordinate 
   assert.equal((await run(codexEnv, ['context', 'read', 'implementation'])).text, 'Bob: CLI work ready too.');
   assert.equal((await run(claudeEnv, ['context', 'history', 'implementation'])).revisions.length, 2);
   assert.equal((await call(aliceMcp, 'clqn_list_context')).entries.length, 1);
-  // Members and agents share one clan chat through the CLI and MCP.
-  const posted = await run(aliceEnv, ['chat', 'send', 'Please', 'review', 'the', 'API']);
-  assert.equal(posted.author, alice.user.email);
-  const reply = await call(bobMcp, 'clqn_send_chat', { text: 'Reviewing now' });
-  assert.equal(reply.author, claude.agent.name);
-  assert.deepEqual(
-    (await call(aliceMcp, 'clqn_read_chat', { after: posted.sequence - 1 })).messages.map(
-      (m: { text: string }) => m.text,
-    ),
-    ['Please review the API', 'Reviewing now'],
-  );
-  assert.deepEqual((await run(bobEnv, ['chat', '--after', String(reply.sequence)])).messages, []);
-  assert.match(await runRaw(bobEnv, ['chat'], undefined, false), /: Please review the API\n.*: Reviewing now/);
   const task = await call(aliceMcp, 'clqn_create_task', {
     description: 'Review shared implementation',
     alias: 'review',
