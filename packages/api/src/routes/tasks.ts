@@ -14,6 +14,7 @@ import { and, eq, isNull, or, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
+import { isChatTask } from '../db/chat-actions.js';
 import { agents, linkedRepositories, memberships } from '../db/schema.js';
 import { tasks } from '../db/tasks.js';
 import { appendEvent, requireClan, type WorkspaceDb } from '../lib/access.js';
@@ -197,6 +198,8 @@ export function createTaskRoutes(db: WorkspaceDb) {
       if (!row) throw missingTask();
       if (row.status !== 'open' || (row.assignedAgentId && row.assignedAgentId !== agent.id)) throw conflict();
       if (row.assignedAgentId === agent.id) return taskView(row);
+      if (await isChatTask(tx, row.id))
+        throw new ApiError(409, 'TASK_CONFLICT', 'Request a new delegation in chat to reassign this task');
       const [updated] = await tx
         .update(tasks)
         .set({ assignedAgentId: agent.id, updatedAt: sql`now()` })
@@ -358,6 +361,7 @@ export function createTaskRoutes(db: WorkspaceDb) {
         if (row.status !== (action === 'claim' ? 'open' : 'claimed')) throw conflict();
         if (action === 'claim') {
           if (row.assignedAgentId && row.assignedAgentId !== actor.agentId) throw conflict();
+          if (!row.assignedAgentId && (await isChatTask(tx, row.id))) throw conflict();
         } else if (!leaderReset && !ownTask(row, actor)) throw conflict();
         if (action === 'release' && row.repository?.state === 'merged')
           throw new ApiError(409, 'TASK_CONFLICT', 'Merged tasks must be completed by their owner, not released');

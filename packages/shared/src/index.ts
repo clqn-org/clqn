@@ -24,7 +24,22 @@ import {
   revokedAgentSchema,
 } from './agents.js';
 import { setAliasSchema } from './aliases.js';
-import { chatMessageSchema, chatMessagesSchema, sendChatSchema } from './chat.js';
+import {
+  type ChatDecision,
+  type ChatSettings,
+  type ChatUsage,
+  chatDecisionSchema,
+  chatHistorySchema,
+  chatInboxSchema,
+  chatInfoSchema,
+  chatMessageSchema,
+  chatMessageStatusSchema,
+  chatSettingsSchema,
+  chatStateSchema,
+  chatUsageSchema,
+  type SendChat,
+  sendChatSchema,
+} from './chat.js';
 import {
   contextEntrySchema,
   contextHistorySchema,
@@ -206,18 +221,52 @@ export class ClqnClient {
     } while (after);
     return pages;
   }
-  chatMessages(clanId: string, options: { after?: number; limit?: number } = {}) {
-    const query = new URLSearchParams();
-    if (options.after !== undefined) query.set('after', String(options.after));
-    if (options.limit !== undefined) query.set('limit', String(options.limit));
-    const suffix = query.size ? `?${query}` : '';
-    return this.request(`/v1/clans/${encodeURIComponent(clanId)}/chat${suffix}`, chatMessagesSchema);
+  private chatPath(clanId: string) {
+    return `/v1/clans/${encodeURIComponent(clanId)}/chat`;
   }
-  sendChat(clanId: string, text: string) {
+  chatInfo(clanId: string, signal?: AbortSignal) {
+    return this.request(this.chatPath(clanId), chatInfoSchema, undefined, signal);
+  }
+  joinChat(clanId: string, settings: ChatSettings, signal?: AbortSignal) {
     return this.request(
-      `/v1/clans/${encodeURIComponent(clanId)}/chat`,
-      chatMessageSchema,
-      sendChatSchema.parse({ text }),
+      `${this.chatPath(clanId)}/join`,
+      chatSettingsSchema,
+      chatSettingsSchema.parse(settings),
+      signal,
+    );
+  }
+  chatState(clanId: string, signal?: AbortSignal) {
+    return this.request(`${this.chatPath(clanId)}/state`, chatStateSchema, undefined, signal);
+  }
+  chatHistory(clanId: string, before: number, signal?: AbortSignal) {
+    return this.request(`${this.chatPath(clanId)}/history?before=${before}`, chatHistorySchema, undefined, signal);
+  }
+  sendChat(clanId: string, message: SendChat, signal?: AbortSignal) {
+    return this.request(`${this.chatPath(clanId)}/messages`, chatMessageSchema, sendChatSchema.parse(message), signal);
+  }
+  chatInbox(clanId: string) {
+    return this.request(`${this.chatPath(clanId)}/inbox`, chatInboxSchema);
+  }
+  decideChat(clanId: string, id: string, decision: ChatDecision) {
+    return this.request(
+      `${this.chatPath(clanId)}/messages/${encodeURIComponent(id)}/decision`,
+      z.object({ status: chatMessageStatusSchema, blocker: z.string().nullable() }),
+      chatDecisionSchema.parse(decision),
+    );
+  }
+  approveChat(clanId: string, id: string, approve: boolean, signal?: AbortSignal) {
+    return this.request(
+      `${this.chatPath(clanId)}/messages/${encodeURIComponent(id)}/approval`,
+      z.object({ ok: z.literal(true) }),
+      { approve },
+      signal,
+    );
+  }
+  reportChatUsage(clanId: string, taskId: string, usage: ChatUsage) {
+    return this.request(
+      `${this.chatPath(clanId)}/tasks/${encodeURIComponent(taskId)}/usage`,
+      z.object({ ok: z.literal(true) }),
+      chatUsageSchema.parse(usage),
     );
   }
   private requireSecureLogin() {
