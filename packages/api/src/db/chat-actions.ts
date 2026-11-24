@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { type Actor, ApiError, type ChatDecision, type ChatUsage, type SendChat } from '@clqn/shared';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, lt, sql } from 'drizzle-orm';
 import { appendEvent, requireClan, type WorkspaceDb } from '../lib/access.js';
-import { type ChatProposal, chatMembers, chatMessages, chats } from './chat.js';
-import { chatUsage, memberScope, messageScope, workerBusy } from './chat-read.js';
+import { type ChatProposal, chatMembers, chatMessages, chats, chatTokenHours } from './chat.js';
+import { chatUsage, currentChatHour, firstChatHour, memberScope, messageScope, workerBusy } from './chat-read.js';
 import { agents, credentials } from './schema.js';
 import { tasks } from './tasks.js';
 
@@ -223,8 +223,22 @@ export async function reportChat(db: WorkspaceDb, actor: Actor, clanId: string, 
   if (!row) throw missing('Chat task');
   if (row.owner !== actor.agentId || row.message.workerId !== actor.agentId)
     throw new ApiError(403, 'FORBIDDEN', 'Only the task’s claimant can report usage');
-  if (usage.tokens < (row.message.tokens ?? 0)) throw conflict('Cumulative usage cannot decrease');
+  const delta = usage.tokens - (row.message.tokens ?? 0);
+  if (delta < 0) throw conflict('Cumulative usage cannot decrease');
   await db.update(chatMessages).set({ tokens: usage.tokens }).where(eq(chatMessages.id, row.message.id));
+  if (delta > 0) {
+    // The caller holds the session lock, so retries add only newly reported usage.
+    await db
+      .insert(chatTokenHours)
+      .values({ clanId, hour: currentChatHour, tokens: delta })
+      .onConflictDoUpdate({
+        target: [chatTokenHours.clanId, chatTokenHours.hour],
+        set: { tokens: sql`least(${chatTokenHours.tokens} + excluded.tokens, ${Number.MAX_SAFE_INTEGER})` },
+      });
+    await db
+      .delete(chatTokenHours)
+      .where(and(eq(chatTokenHours.clanId, clanId), lt(chatTokenHours.hour, firstChatHour)));
+  }
   if (usage.result) {
     await addChatMessage(db, {
       ...usage.result,
