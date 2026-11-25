@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -18,11 +19,13 @@ import {
   type MainSyncResult,
   mergePullRequest,
   openTaskWorktree,
+  prepareFollowUpWorktree,
   prepareWorktree,
   publishWorktree,
   redactOutput,
   repositoryForNewTask,
   syncMain,
+  taskBranch,
   taskWorktreeLocation,
 } from '../src/git.js';
 import { runMcpSync } from '../src/mcp-sync.js';
@@ -144,6 +147,39 @@ test('preparing a task worktree preserves a dirty personal checkout and starts a
   const commands = await f.commands();
   assert.ok(commands.some(({ args }) => args.includes('fetch')));
   assert.ok(!commands.some(({ args }) => args.some((x) => ['pull', 'reset', 'stash', '--force'].includes(x))));
+});
+
+test('follow-up work starts from the earlier task’s local branch, or its copy on origin', async (t) => {
+  const f = await fixture(t);
+  const [earlier, local, remote, missing] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+  const first = join(f.root, 'first');
+  await prepareWorktree({ ...f, worktreePath: first, repository: { ...f.repository, branch: taskBranch(earlier) } });
+  await writeFile(join(first, 'feature.txt'), 'feature\n');
+  await commitWork(first, 'Add feature');
+  const head = await git(first, ['rev-parse', 'HEAD']);
+
+  const next = await prepareFollowUpWorktree({ repoPath: f.repoPath, taskId: local, after: earlier });
+  assert.equal(next.branch, `clqn/task-${local}`);
+  assert.equal(await git(next.path, ['rev-parse', 'HEAD']), head);
+  assert.equal(await readFile(join(next.path, 'feature.txt'), 'utf8'), 'feature\n');
+  assert.equal(await git(f.repoPath, ['symbolic-ref', '--short', 'HEAD']), 'main');
+
+  // Another machine has only origin's copy, once the earlier branch is pushed.
+  await git(first, ['push', f.remote, `HEAD:refs/heads/${taskBranch(earlier)}`]);
+  await git(f.repoPath, ['worktree', 'remove', '--force', first]);
+  await git(f.repoPath, ['worktree', 'remove', '--force', next.path]);
+  await git(f.repoPath, ['branch', '-D', taskBranch(earlier), taskBranch(local)]);
+  const fetched = await prepareFollowUpWorktree({ repoPath: f.repoPath, taskId: remote, after: earlier });
+  assert.equal(await git(fetched.path, ['rev-parse', 'HEAD']), head);
+
+  await assert.rejects(
+    prepareFollowUpWorktree({ repoPath: f.repoPath, taskId: randomUUID(), after: missing }),
+    /not on this machine or on origin/,
+  );
+  await assert.rejects(
+    prepareFollowUpWorktree({ repoPath: f.repoPath, taskId: randomUUID(), after: '../main' }),
+    /UUID/,
+  );
 });
 
 test("clqn commits a worker's changes, with hooks off, only at the root of a checkout", async (t) => {

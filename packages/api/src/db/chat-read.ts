@@ -5,7 +5,7 @@ import {
   chatTokenHistoryHours,
   defaultChatSettings,
 } from '@clqn/shared';
-import { and, asc, count, desc, eq, gt, inArray, isNotNull, lt, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, lt, ne, sql } from 'drizzle-orm';
 import type { WorkspaceDb } from '../lib/access.js';
 import { chatMembers, chatMessages, chats, chatTokenHours } from './chat.js';
 import { agents, clans, users } from './schema.js';
@@ -108,12 +108,20 @@ export async function chatTokenHistory(db: WorkspaceDb, clanId: string) {
   return rows.map(({ tokens }) => Number(tokens));
 }
 
-export async function workerBusy(db: WorkspaceDb, clanId: string, workerId: string) {
+// `after` is a task the new work builds on: work may wait on the same worker behind it.
+export async function workerBusy(db: WorkspaceDb, clanId: string, workerId: string, after?: string) {
   const [busy] = await db
     .select({ id: chatMessages.id })
     .from(chatMessages)
     .innerJoin(tasks, eq(tasks.id, chatMessages.taskId))
-    .where(and(messageScope(clanId), eq(chatMessages.workerId, workerId), activeRun))
+    .where(
+      and(
+        messageScope(clanId),
+        eq(chatMessages.workerId, workerId),
+        activeRun,
+        after ? ne(tasks.id, after) : undefined,
+      ),
+    )
     .limit(1);
   return Boolean(busy);
 }
@@ -127,25 +135,56 @@ export const runStatus = (row: { taskStatus: string; assigned: string | null; wo
         ? 'running'
         : 'queued';
 
-export async function chatActivity(db: WorkspaceDb, clanId: string, userId: string) {
-  const [rows, approvals, [queue], [running], questions] = await Promise.all([
+const runColumns = {
+  id: chatMessages.id,
+  proposal: chatMessages.proposal,
+  worker: agents.name,
+  tokens: chatMessages.tokens,
+  assigned: tasks.assignedAgentId,
+  workerId: agents.id,
+  taskId: tasks.id,
+  taskStatus: tasks.status,
+};
+
+// Recent delegations, active ones first, with the status of any earlier task each one builds on.
+export async function chatRuns(db: WorkspaceDb, clanId: string): Promise<(ChatRun & { description: string })[]> {
+  const delegated = () =>
     db
-      .select({
-        id: chatMessages.id,
-        proposal: chatMessages.proposal,
-        worker: agents.name,
-        tokens: chatMessages.tokens,
-        assigned: tasks.assignedAgentId,
-        workerId: agents.id,
-        taskId: tasks.id,
-        taskStatus: tasks.status,
-      })
+      .select(runColumns)
       .from(chatMessages)
       .innerJoin(agents, eq(agents.id, chatMessages.workerId))
-      .innerJoin(tasks, eq(tasks.id, chatMessages.taskId))
-      .where(and(messageScope(clanId), isNotNull(chatMessages.taskId)))
-      .orderBy(sql`case when ${activeRun} then 0 else 1 end`, desc(chatMessages.sequence))
-      .limit(40),
+      .innerJoin(tasks, eq(tasks.id, chatMessages.taskId));
+  const rows = await delegated()
+    .where(and(messageScope(clanId), isNotNull(chatMessages.taskId)))
+    .orderBy(sql`case when ${activeRun} then 0 else 1 end`, desc(chatMessages.sequence))
+    .limit(40);
+  const earlier = [...new Set(rows.flatMap(({ proposal }) => (proposal?.after ? [proposal.after] : [])))];
+  const bases = earlier.length
+    ? await delegated().where(and(messageScope(clanId), inArray(chatMessages.taskId, earlier)))
+    : [];
+  const status = new Map(bases.map((row) => [row.taskId, runStatus(row)]));
+  return rows.map((row) => {
+    const after = row.proposal!.after;
+    const base = after ? status.get(after) : undefined;
+    return {
+      messageId: row.id,
+      title: row.proposal!.title,
+      description: row.proposal!.description,
+      worker: row.worker,
+      estimatedTokens: row.proposal!.estimatedTokens,
+      model: row.proposal!.model ?? null,
+      taskId: row.taskId,
+      workerId: row.workerId,
+      status: runStatus(row),
+      tokens: row.tokens,
+      ...(after && base ? { after: { taskId: after, status: base } } : {}),
+    };
+  });
+}
+
+export async function chatActivity(db: WorkspaceDb, clanId: string, userId: string) {
+  const [runs, approvals, [queue], [running], questions] = await Promise.all([
+    chatRuns(db, clanId),
     db
       .select({ messageId: chatMessages.id, proposal: chatMessages.proposal, worker: agents.name })
       .from(chatMessages)
@@ -175,22 +214,11 @@ export async function chatActivity(db: WorkspaceDb, clanId: string, userId: stri
       .orderBy(desc(chatMessages.sequence))
       .limit(30),
   ]);
-  const runs: ChatRun[] = rows.map((row) => ({
-    messageId: row.id,
-    title: row.proposal!.title,
-    worker: row.worker,
-    estimatedTokens: row.proposal!.estimatedTokens,
-    model: row.proposal!.model ?? null,
-    taskId: row.taskId,
-    workerId: row.workerId,
-    status: runStatus(row),
-    tokens: row.tokens,
-  }));
   return {
     queued: queue!.total,
     running: running!.total,
     questions: questions.map(({ question }) => messageView(question)),
-    runs,
+    runs: runs.map(({ description: _description, ...run }) => run),
     approvals: approvals.map(({ proposal, ...row }) => ({
       ...row,
       title: proposal!.title,

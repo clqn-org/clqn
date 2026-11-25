@@ -29,6 +29,7 @@ import {
   chatIdentity,
   chatInfo,
   chatQueue,
+  chatRuns,
   chatTokenHistory,
   chatUsage,
   messageView,
@@ -180,12 +181,13 @@ export function createChatRoutes(db: WorkspaceDb) {
     const clanId = c.req.param('clanId')!;
     await requireOrchestrator(db, actor, clanId);
     await requireChat(db, clanId);
-    const [history, queued, held] = await Promise.all([
+    const [history, queued, held, runs] = await Promise.all([
       chatHistory(db, clanId),
       chatQueue(db, clanId, 'queued'),
       chatQueue(db, clanId, 'clarification'),
+      chatRuns(db, clanId),
     ]);
-    return c.json({ ...history, queued, held });
+    return c.json({ ...history, queued, held, runs });
   });
   app.post('/messages/:id/decision', async (c) => {
     const actor = c.get('user');

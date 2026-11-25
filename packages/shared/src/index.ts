@@ -54,6 +54,7 @@ import {
   type RepositoryReport,
   repositoryReportSchema,
   type TaskListFilters,
+  taskReleaseSchema,
   taskSchema,
   tasksSchema,
 } from './tasks.js';
@@ -493,11 +494,11 @@ export class ClqnClient {
     const search = query.size ? `?${query}` : '';
     return this.request(`/v1/clans/${encodeURIComponent(clanId)}/tasks${search}`, tasksSchema);
   }
-  transitionTask(clanId: string, taskId: string, action: 'claim' | 'release' | 'complete') {
+  transitionTask(clanId: string, taskId: string, action: 'claim' | 'release' | 'complete', reason?: string) {
     return this.request(
       `/v1/clans/${encodeURIComponent(clanId)}/tasks/${encodeURIComponent(taskId)}/${action}`,
       taskSchema,
-      {},
+      action === 'release' && reason ? taskReleaseSchema.parse({ reason }) : {},
     );
   }
 

@@ -90,6 +90,18 @@ export const taskSchema = z.object({
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
+// Why a claimed task was handed back. A released chat task goes back to the orchestrator with this reason.
+export const taskReleaseSchema = z
+  .object({
+    reason: z
+      .string()
+      .trim()
+      .min(1)
+      .max(500)
+      .refine((text) => !text.includes('\0'))
+      .optional(),
+  })
+  .strict();
 export const tasksSchema = z.object({ tasks: z.array(taskSchema), nextCursor: z.uuid().optional() });
 // Every request is bounded; nextCursor marks the next page.
 export const taskListQuerySchema = z

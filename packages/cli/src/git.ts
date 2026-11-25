@@ -239,6 +239,38 @@ export async function prepareWorktree(input: { repoPath: string; worktreePath: s
   return { path, branch, baseSha };
 }
 
+// Chat tasks use one branch per task, so later work can find the branch an earlier task left.
+export const taskBranch = (taskId: string) => {
+  if (!/^[0-9a-f-]{36}$/.test(taskId)) throw new Error('Task ID must be a UUID');
+  return `clqn/task-${taskId}`;
+};
+
+// Start a task's worktree from an earlier task's branch: the local one if that task ran on this machine,
+// otherwise the copy on origin once it has been pushed.
+export async function prepareFollowUpWorktree(input: { repoPath: string; taskId: string; after: string }) {
+  const { root, repository } = await localRepository(input.repoPath);
+  const base = taskBranch(input.after);
+  const branch = taskBranch(input.taskId);
+  let start = await git(root, ['rev-parse', '--verify', '--quiet', `refs/heads/${base}^{commit}`]).catch(() => '');
+  if (!shaPattern.test(start)) {
+    start = await git(root, ['fetch', '--no-tags', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`])
+      .then(() => git(root, ['rev-parse', '--verify', `refs/remotes/origin/${base}^{commit}`]))
+      .catch(() => '');
+    if (!shaPattern.test(start))
+      throw new Error(`the earlier task's branch ${base} is not on this machine or on origin`);
+  }
+  const { worktreePath } = await taskWorktreeLocation({
+    repoPath: root,
+    taskId: input.taskId,
+    repository: { slug: repository, baseBranch: base, baseSha: start, branch },
+  });
+  const path = await unusedPath(worktreePath);
+  if (inside(path, root)) throw new Error('Place task worktrees outside your current working tree');
+  // No pull, stash, reset, force, or checkout in the user's existing working tree.
+  await git(root, ['worktree', 'add', '-b', branch, path, start]);
+  return { path, branch, baseSha: start };
+}
+
 interface PullRequest {
   number: number;
   url: string;

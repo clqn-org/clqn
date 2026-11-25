@@ -119,7 +119,7 @@ async function admission(
     return 'This delegation would exceed your token limit';
   if (settings.agentLimit !== null && inUse >= settings.agentLimit)
     return 'This delegation would exceed your agent limit';
-  if (await workerBusy(db, clanId, worker.id)) return 'This worker already has a chat task';
+  if (await workerBusy(db, clanId, worker.id, proposal.after)) return 'This worker already has a chat task';
   return null;
 }
 
@@ -157,7 +157,9 @@ export async function decideChat(db: WorkspaceDb, actor: Actor, clanId: string, 
   const message = await getMessage(db, clanId, id);
   if (message.status !== 'queued') throw conflict('This message has already been handled');
   await markDecided(db, id);
-  const related = message.replyTo ? await getMessage(db, clanId, message.replyTo) : undefined;
+  // A member's reply may answer a clarification. A worker's retry note replies to the work it replaces instead.
+  const related =
+    message.replyTo && message.role === 'member' ? await getMessage(db, clanId, message.replyTo) : undefined;
   const held = related?.status === 'clarification' ? related : undefined;
   if (body.action === 'delegate') {
     if (related && !held) throw conflict('That clarification has already been resolved');
@@ -172,11 +174,19 @@ export async function decideChat(db: WorkspaceDb, actor: Actor, clanId: string, 
         'MODEL_NOT_ALLOWED',
         `The worker's owner allows only these models: ${models.join(', ')}. Choose one of them or another worker.`,
       );
+    if (body.after) {
+      const [earlier] = await db
+        .select({ id: chatMessages.id })
+        .from(chatMessages)
+        .where(and(messageScope(clanId), eq(chatMessages.taskId, body.after)));
+      if (!earlier) throw conflict('Build only on an earlier chat task from this clan');
+    }
     const proposal: ChatProposal = {
       title: body.title,
       description: body.description,
       estimatedTokens: body.estimatedTokens,
       model,
+      ...(body.after ? { after: body.after } : {}),
     };
     await db
       .update(chatMessages)
@@ -287,6 +297,40 @@ export async function reportChat(db: WorkspaceDb, actor: Actor, clanId: string, 
     });
   }
   return chatAcknowledged;
+}
+
+export const chatTaskAttempts = 3;
+
+// A released chat task goes back to the orchestrator: a queued note, replying to the work it replaces, says
+// why it stopped. After the last attempt the note only tells the clan. The caller holds the session lock.
+export async function requeueChatTask(db: WorkspaceDb, actor: Actor, clanId: string, taskId: string, reason?: string) {
+  const [row] = await db
+    .select({ message: chatMessages, worker: agents.name })
+    .from(chatMessages)
+    .innerJoin(agents, eq(agents.id, chatMessages.workerId))
+    .where(and(messageScope(clanId), eq(chatMessages.taskId, taskId)));
+  if (!row?.message.proposal) return;
+  // Each retry note that gets delegated adds one task to the chain of notes back to the original request.
+  let attempts = 1;
+  let current = row.message;
+  while (current.role === 'worker' && current.replyTo && attempts < chatTaskAttempts) {
+    current = await getMessage(db, clanId, current.replyTo);
+    if (current.taskId) attempts++;
+  }
+  const retry = attempts < chatTaskAttempts;
+  const why = reason?.trim() || 'it was handed back';
+  await addChatMessage(db, {
+    id: randomUUID(),
+    clanId,
+    authorId: actor.id,
+    author: row.worker,
+    role: 'worker',
+    text: retry
+      ? `Stopped before finishing “${row.message.proposal.title}”: ${why}. Back in the queue.`
+      : `Stopped before finishing “${row.message.proposal.title}”: ${why}. Not retrying after ${attempts} attempts; send it again to retry.`,
+    status: retry ? 'queued' : 'handled',
+    replyTo: row.message.id,
+  });
 }
 
 export async function isChatTask(db: WorkspaceDb, taskId: string) {

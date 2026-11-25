@@ -64,6 +64,8 @@ export const chatDecisionSchema = z.discriminatedUnion('action', [
       estimatedTokens: tokenCount.min(1),
       // Must be one of the worker owner's allowed models. Defaults to their first allowed model, or none if any is allowed.
       model: modelIdSchema.optional(),
+      // An earlier chat task this work builds on. The worker starts from that task's branch once it is done.
+      after: z.uuid().optional(),
     })
     .strict(),
 ]);
@@ -94,12 +96,15 @@ export const chatProposalSchema = z.object({
   // Null means the worker's default model. Older servers omit it.
   model: z.string().nullable().optional(),
 });
+export const chatRunStatusSchema = z.enum(['queued', 'running', 'done', 'released']);
 export const chatRunSchema = chatProposalSchema.extend({
   taskId: z.uuid(),
   // The assigned worker agent, so its owner's clqn can start it. Older servers omit it.
   workerId: z.uuid().optional(),
-  status: z.enum(['queued', 'running', 'done', 'released']),
+  status: chatRunStatusSchema,
   tokens: tokenCount.nullable(),
+  // The earlier task this run builds on, and how that task is going.
+  after: z.object({ taskId: z.uuid(), status: chatRunStatusSchema }).optional(),
 });
 export type ChatRun = z.infer<typeof chatRunSchema>;
 export const chatSessionSchema = z.object({ host: z.string(), clan: z.string() });
@@ -129,6 +134,8 @@ export type ChatState = z.infer<typeof chatStateSchema>;
 export const chatInboxSchema = chatHistorySchema.extend({
   queued: z.array(chatMessageSchema),
   held: z.array(chatMessageSchema),
+  // Recent delegations, so the orchestrator can retry one or build on it. Older servers omit them.
+  runs: z.array(chatRunSchema.extend({ description: z.string() })).optional(),
 });
 
 // 24h uses hourly buckets; 7d uses 6-hour buckets. The last bucket holds the current hour.

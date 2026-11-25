@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import test, { type TestContext } from 'node:test';
-import type { ChatRun, ChatState, ClqnClient } from '@clqn/shared';
+import { ApiError, type ChatRun, type ChatState, type ClqnClient } from '@clqn/shared';
 import { startAgentRunner } from '../src/agent-runner.js';
 import { agentCommand, agentOutput, agentProfilePath, readAgentsOff, saveAgentProfile } from '../src/agent-session.js';
 
@@ -419,4 +419,97 @@ test('workers run commands as the member allows: off, sandboxed by default, or u
   assert.equal(codex('orchestrator')[codex('orchestrator').indexOf('--sandbox') + 1], 'read-only');
   assert.ok(codex('worker', 'unrestricted').includes('--dangerously-bypass-approvals-and-sandbox'));
   assert.ok(!codex('worker', 'unrestricted').includes('--sandbox'));
+});
+
+test('stopped runs go back with a reason, and follow-ups wait for the task they build on', async (t) => {
+  const f = await fixture(t);
+  const workerId = randomUUID();
+  await saveAgentProfile({ agentId: workerId, clanId, server, token: token('w'), runtime: 'codex' });
+  const transitions: string[] = [];
+  let reasonsAccepted = true;
+  const api = {
+    whoami: async () => ({ id: userId, email: 'member@example.com' }),
+    listAgents: async () => ({ agents: [agent(workerId, 'worker')] }),
+    members: async () => ({ members: [{ userId, email: 'member@example.com', role: 'member' }] }),
+  } as unknown as ClqnClient;
+  const workerApi = {
+    transitionTask: async (_clan: string, taskId: string, action: string, reason?: string) => {
+      if (reason && !reasonsAccepted) throw new ApiError(400, 'INVALID_REQUEST', 'Expected an empty JSON object');
+      transitions.push([action, taskId.slice(0, 8), reason].filter(Boolean).join(' '));
+      return {};
+    },
+    task: async (_clan: string, taskId: string) => ({ id: taskId, description: 'Work' }),
+    reportChatUsage: async () => ({ ok: true }),
+  } as unknown as ClqnClient;
+  const workspaces: [string, string | undefined][] = [];
+  const runner = startAgentRunner({
+    api,
+    server,
+    clanId,
+    project: f.directory,
+    spawn: f.spawn,
+    runtimes: async () => ['codex'],
+    now: f.now,
+    agentClient: () => workerApi,
+    workspace: async (taskId, after) => {
+      workspaces.push([taskId.slice(0, 8), after?.slice(0, 8)]);
+      if (after === broken) throw new Error('the earlier task’s branch is not on this machine or on origin');
+      return f.directory;
+    },
+  });
+  t.after(() => runner.stop());
+  const run = (taskId: string, after?: ChatRun['after']): ChatRun => ({
+    messageId: randomUUID(),
+    title: 'Task',
+    worker: 'Codex',
+    workerId,
+    estimatedTokens: 500,
+    taskId,
+    status: 'queued',
+    tokens: null,
+    ...(after ? { after } : {}),
+  });
+  const [base, followUp, orphan, broken, lost] = [randomUUID(), randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+  const id = (taskId: string) => taskId.slice(0, 8);
+
+  // The follow-up waits while the earlier task is queued or running.
+  runner.update(chatState({ runs: [run(followUp, { taskId: base, status: 'running' })] }));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(f.spawned.length, 0);
+  assert.deepEqual(transitions, []);
+
+  // Once it is done, the follow-up starts from it. A failure goes back with the agent's error.
+  runner.update(chatState({ runs: [run(followUp, { taskId: base, status: 'done' })] }));
+  await until(() => f.spawned.length === 1);
+  assert.deepEqual(workspaces, [[id(followUp), id(base)]]);
+  f.spawned[0]!.child.finish(1, '{"type":"turn.failed","error":{"message":"Rate limited."}}');
+  await until(() => transitions.length === 2);
+  assert.deepEqual(transitions, [`claim ${id(followUp)}`, `release ${id(followUp)} the agent failed: Rate limited.`]);
+
+  // If the earlier task stopped, or its branch is missing, the follow-up goes back without running.
+  transitions.length = 0;
+  runner.update(
+    chatState({
+      runs: [run(orphan, { taskId: base, status: 'released' })],
+    }),
+  );
+  await until(() => transitions.length === 2);
+  assert.deepEqual(transitions, [
+    `claim ${id(orphan)}`,
+    `release ${id(orphan)} the task it builds on stopped before finishing`,
+  ]);
+  transitions.length = 0;
+  runner.update(chatState({ runs: [run(lost, { taskId: broken, status: 'done' })] }));
+  await until(() => transitions.length === 2);
+  assert.match(transitions[1]!, /^release \S+ the earlier task’s branch is not on this machine or on origin$/);
+  assert.equal(f.spawned.length, 1);
+
+  // Closing clqn hands a running task back; an older server that rejects reasons still gets the release.
+  transitions.length = 0;
+  reasonsAccepted = false;
+  const running = randomUUID();
+  runner.update(chatState({ runs: [run(running)] }));
+  await until(() => f.spawned.length === 2);
+  await runner.stop();
+  assert.deepEqual(transitions, [`claim ${id(running)}`, `release ${id(running)}`]);
 });

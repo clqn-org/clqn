@@ -9,12 +9,14 @@ import {
   type Task,
   type TaskRepository,
   taskListQuerySchema,
+  taskReleaseSchema,
 } from '@clqn/shared';
 import { and, eq, isNull, or, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
-import { isChatTask } from '../db/chat-actions.js';
+import { chats } from '../db/chat.js';
+import { isChatTask, requeueChatTask } from '../db/chat-actions.js';
 import { agents, linkedRepositories, memberships } from '../db/schema.js';
 import { tasks } from '../db/tasks.js';
 import { appendEvent, requireClan, type WorkspaceDb } from '../lib/access.js';
@@ -349,12 +351,21 @@ export function createTaskRoutes(db: WorkspaceDb) {
       const clanId = c.req.param('clanId')!;
       const membership = await requireClan(db, actor, clanId);
       const filter = resourceFilter(tasks, clanId, c.req.param('taskId'));
-      const body = z
-        .object({})
-        .strict()
-        .safeParse(await c.req.json().catch(() => null));
-      if (!body.success) throw new ApiError(400, 'INVALID_REQUEST', 'Expected an empty JSON object');
+      const body = (action === 'release' ? taskReleaseSchema : z.object({}).strict()).safeParse(
+        await c.req.json().catch(() => null),
+      );
+      if (!body.success)
+        throw new ApiError(
+          400,
+          'INVALID_REQUEST',
+          action === 'release'
+            ? 'Expected an optional reason of up to 500 characters'
+            : 'Expected an empty JSON object',
+        );
+      const reason = 'reason' in body.data ? body.data.reason : undefined;
       const task = await db.transaction(async (tx) => {
+        // Chat writes lock the session before tasks, so a release does too.
+        if (action === 'release') await tx.select().from(chats).where(eq(chats.clanId, clanId)).for('update');
         const [row] = await tx.select().from(tasks).where(filter).for('update');
         if (!row) throw missingTask();
         const leaderReset = action === 'release' && !actor.agentId && membership.role === 'leader';
@@ -391,6 +402,7 @@ export function createTaskRoutes(db: WorkspaceDb) {
         const [updated] = await tx.update(tasks).set(update).where(eq(tasks.id, row.id)).returning();
         const type = { claim: 'task.claimed', release: 'task.released', complete: 'task.completed' }[action];
         await appendEvent(tx, { clanId, actorId: actor.id, agentId: actor.agentId ?? null, type, resourceId: row.id });
+        if (action === 'release' && row.assignedAgentId) await requeueChatTask(tx, actor, clanId, row.id, reason);
         return taskView(updated!);
       });
       return c.json(task);
