@@ -57,6 +57,24 @@ export function saveAgentsOff(off: Runtime[]): Promise<void> {
   return writePrivateJson(choicesPath(), { off: runtimes.filter((runtime) => off.includes(runtime)) });
 }
 
+// A separate atomic preference for each person, clan, and server on this machine.
+const backupHostingPath = (server: string, clanId: string, userId: string) => {
+  const key = JSON.stringify([new URL(server).origin, clanId, userId]);
+  return join(configDirectory(), 'backup-hosting', `${createHash('sha256').update(key).digest('hex')}.json`);
+};
+
+export async function readBackupHosting(server: string, clanId: string, userId: string): Promise<boolean> {
+  try {
+    return JSON.parse(await readFile(backupHostingPath(server, clanId, userId), 'utf8')) === true;
+  } catch {
+    return false;
+  }
+}
+
+export function saveBackupHosting(server: string, clanId: string, userId: string, enabled: boolean): Promise<void> {
+  return writePrivateJson(backupHostingPath(server, clanId, userId), enabled);
+}
+
 export type AgentProfile = {
   agentId: string;
   clanId: string;
@@ -125,6 +143,7 @@ export function agentCommand(
     instructions?: string | undefined;
     // Codex only: continue this earlier session, so the agent remembers it.
     resume?: string | undefined;
+    leaseId?: string | undefined;
   },
 ): AgentCommand {
   const commands = options.role === 'worker' ? (options.commands ?? 'sandboxed') : 'off';
@@ -132,6 +151,7 @@ export function agentCommand(
   const npmCache = join(configDirectory(), 'npm-cache');
   // The parent chat already watches the project, even while no agent is running.
   const args = [resolve(process.argv[1]!), 'mcp', '--profile', profilePath, '--path', options.project, '--no-sync'];
+  if (options.role === 'orchestrator' && options.leaseId) args.push('--lease', options.leaseId);
   const model = options.model ? (runtime === 'codex' ? ['-m', options.model] : ['--model', options.model]) : [];
   const runtimeArgs =
     runtime === 'codex'

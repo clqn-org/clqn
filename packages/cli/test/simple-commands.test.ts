@@ -15,6 +15,7 @@ const run = promisify(execFile);
 const cli = fileURLToPath(new URL('../src/index.ts', import.meta.url));
 const clanId = '84367b51-14c7-43de-84a1-faf0207eadb3';
 const userId = 'd724b185-7509-4bc1-adf6-eb7978f96a1a';
+const otherMemberId = '0bb76703-1534-4f38-bfe4-ef38bfea3875';
 const agentId = '9608d1b9-bcaf-4f20-adab-10305cf5474f';
 const taskId = 'feeb7372-1243-423f-9f3c-9ed8d5a24b57';
 const createdAt = '2026-11-14T12:00:00.000Z';
@@ -30,6 +31,7 @@ async function fixture(t: TestContext) {
   const agentToken = `clqn_${'a'.repeat(43)}`;
   const agentActor = { ...user, agentId, clanId };
   let registered: { id: string; name: string; role: string; alias?: string } | undefined;
+  let backups: string[] = [];
   const requests: {
     method: string | undefined;
     path: string | undefined;
@@ -56,6 +58,18 @@ async function fixture(t: TestContext) {
       response.end(JSON.stringify({ agent: registered, token: agentToken }));
     } else if (request.url === `/v1/clans/${clanId}/agents`) {
       response.end(JSON.stringify({ agents: registered ? [registered] : [] }));
+    } else if (request.url === `/v1/clans/${clanId}/members`) {
+      response.end(
+        JSON.stringify({
+          members: [
+            { userId, email: user.email, role: 'member', createdAt },
+            { userId: otherMemberId, email: 'second@example.com', role: 'member', createdAt },
+          ],
+        }),
+      );
+    } else if (request.url === `/v1/clans/${clanId}/chat/host/backups`) {
+      if (request.method === 'POST') backups = body.userIds;
+      response.end(JSON.stringify({ userIds: backups }));
     } else {
       response.writeHead(404);
       response.end(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Unknown route' } }));
@@ -208,4 +222,25 @@ test('main help hides mcp while explicit mcp help remains available', async (t) 
   assert.match((await f.call(['mcp', '--help'])).stdout, /Start the local stdio MCP server/);
   assert.doesNotMatch((await f.call(['agent', '--help'])).stdout, /^\s+(status|connect|run)(?:\s|$)/m);
   assert.equal(f.requests.length, 0);
+});
+
+test('host lists, replaces, and clears multiple nominated backups', async (t) => {
+  const f = await fixture(t);
+  const nominated = await f.call(['host', f.user.email.toUpperCase(), otherMemberId, '--json']);
+  assert.deepEqual(JSON.parse(nominated.stdout), { userIds: [userId, otherMemberId] });
+  const listed = await f.call(['host']);
+  assert.equal(listed.stdout.trim(), `${f.user.email}\nsecond@example.com`);
+  const cleared = await f.call(['host', 'off', '--json']);
+  assert.deepEqual(JSON.parse(cleared.stdout), { userIds: [] });
+  const path = `/v1/clans/${clanId}/chat/host/backups`;
+  assert.deepEqual(
+    f.requests.filter((entry) => entry.path === path).map(({ method, body }) => [method, body]),
+    [
+      ['POST', { userIds: [userId, otherMemberId] }],
+      ['GET', undefined],
+      ['POST', { userIds: [] }],
+    ],
+  );
+  await assert.rejects(f.call(['host', 'off', f.user.email]), /Use off by itself/);
+  await assert.rejects(f.call(['host', f.user.email, 'outside@example.com']), /Member not found/);
 });
