@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { ChatMessage } from '@clqn/shared';
+import type { ChatMessage, ChatState } from '@clqn/shared';
 import { chatFrame, messageLines, painter, threaded } from '../src/chat-view.js';
 
 const message: ChatMessage = {
@@ -113,4 +113,70 @@ test('peach-accented transcript lines keep the agents divider aligned', () => {
     .map((line) => line.indexOf(' │ '));
   assert.ok(columns.length > 2);
   assert.equal(new Set(columns).size, 1);
+});
+
+test('this member’s running agents show a clickable Stop with their run time, and stopping asks first', () => {
+  const run = (taskId: string, title: string) => ({
+    messageId: taskId.replace(/.$/, 'f'),
+    taskId,
+    title,
+    worker: 'Codex',
+    estimatedTokens: 500,
+    status: 'running' as const,
+    tokens: null,
+  });
+  const mine = run('00000000-0000-4000-8000-0000000000a1', 'Mine');
+  const theirs = run('00000000-0000-4000-8000-0000000000b1', 'Theirs');
+  const state: ChatState = {
+    messages: [],
+    before: null,
+    session: { host: 'lead@example.com', clan: 'Test' },
+    settings: { approval: 'manual', tokenLimit: null, agentLimit: null, allowedModels: null, commands: 'sandboxed' },
+    approvals: [],
+    questions: [],
+    runs: [mine, theirs],
+    queued: 0,
+    running: 2,
+    usage: { tokens: 0, reserved: 0, agents: 1 },
+  };
+  const view = {
+    columns: 120,
+    rows: 24,
+    color: false,
+    clan: 'Test',
+    userId: 'me',
+    state,
+    messages: [],
+    draft: '',
+    caret: 0,
+    scroll: 0,
+    hasOlder: false,
+    approval: 0,
+    approvalFocused: false,
+    stoppable: new Map([[mine.taskId, 0]]),
+    now: 12 * 60_000,
+  };
+  const frame = chatFrame(view);
+  assert.equal(frame.stops?.length, 1);
+  const [stop] = frame.stops!;
+  assert.equal(stop?.taskId, mine.taskId);
+  const line = frame.lines[stop!.row]!;
+  assert.equal(line.slice(stop!.column, stop!.column + stop!.width), '■ Stop');
+  assert.match(line, /Codex · Running · 12m/);
+  assert.equal(frame.lines.filter((text) => text.includes('■ Stop')).length, 1, 'only this member’s agent');
+  assert.match(frame.lines.at(-1)!, /Ctrl\+X Stop agent/);
+
+  const confirm = chatFrame({ ...view, stopping: mine.taskId });
+  assert.ok(
+    confirm.lines.some((text) => text.includes('■ Stop Mine? Its work stays for a follow-up · Y Stop  N Keep')),
+  );
+  assert.match(confirm.lines.at(-1)!, /Y Stop {2}N Keep running/);
+  assert.equal(confirm.cursor, undefined);
+  // A task that can no longer be stopped asks nothing.
+  assert.equal(
+    chatFrame({ ...view, stopping: theirs.taskId })
+      .lines.join('\n')
+      .includes('Theirs?'),
+    false,
+  );
 });

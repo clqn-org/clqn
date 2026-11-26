@@ -390,7 +390,12 @@ export function createTaskRoutes(db: WorkspaceDb) {
         if (row.repository.prNumber && row.repository.prNumber !== body.data.prNumber) throw conflict();
       }
       const sameHead = row.repository.headSha === body.data.headSha;
-      if (sameHead && (body.data.prNumber === undefined || row.repository.prNumber === body.data.prNumber))
+      // A continued task is pending again even when its worker made no new commit; this report ends that.
+      if (
+        sameHead &&
+        row.repository.state !== 'pending' &&
+        (body.data.prNumber === undefined || row.repository.prNumber === body.data.prNumber)
+      )
         return taskView(row);
       if (row.repository.headSha !== body.data.expectedHeadSha)
         throw new ApiError(409, 'REVISION_CONFLICT', 'Repository head changed; read the task before reporting again');

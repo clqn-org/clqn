@@ -41,6 +41,19 @@ test('mouse reports require a complete SGR button and coordinates', () => {
   assert.deepEqual(scrolls, [3, -3]);
 });
 
+test('a left button press reports its column and row as a click', () => {
+  const clicks: number[][] = [];
+  const read = mouseReportReader(
+    () => assert.fail('clicks do not scroll'),
+    (column, row) => clicks.push([column, row]),
+  );
+  for (const report of ['0;10;5M', '0;10;5m', '2;3;4M']) {
+    assert.equal(read(undefined, '\x1b[<'), true);
+    for (const character of report) assert.equal(read(character, character), true);
+  }
+  assert.deepEqual(clicks, [[10, 5]]);
+});
+
 test('unexpected keys and idle time clear incomplete mouse reports', (t) => {
   t.mock.timers.enable({ apis: ['Date'] });
   const read = mouseReportReader(() => assert.fail('truncated reports cannot scroll'));
