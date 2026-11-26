@@ -271,7 +271,8 @@ test('a skipped repository prompt stays skipped unless the clone gets linked', a
   });
 });
 
-test('joining a clan accepts the chosen invitation and refreshes a stale GitHub sign-in', async (t) => {
+// Current servers ask for a fresh sign-in when accepting; older ones already did when listing.
+async function joinWithStaleSignIn(t: TestContext, olderServer: boolean) {
   const stale = `clqn_${'s'.repeat(43)}`;
   const token = `clqn_${'f'.repeat(43)}`;
   const user = { id: randomUUID(), email: 'verified@example.com' };
@@ -281,6 +282,7 @@ test('joining a clan accepts the chosen invitation and refreshes a stale GitHub 
     { clanId: clan.id, clanName: clan.name, expiresAt: new Date(Date.now() + 60_000).toISOString() },
   ];
   const accepts: (string | undefined)[] = [];
+  const lists: (string | undefined)[] = [];
   const saved: unknown[] = [];
   const f = await fixture(t, (request, body, response) => {
     if (request.url === `/v1/clans/${clan.id}/chat/settings`) {
@@ -291,8 +293,13 @@ test('joining a clan accepts the chosen invitation and refreshes a stale GitHub 
     else if (request.url === '/auth/github/poll') response.end(JSON.stringify({ status: 'complete', user, token }));
     else if (request.url === '/v1/me') response.end(JSON.stringify(user));
     else if (request.url === '/v1/clans') response.end(JSON.stringify({ clans: [] }));
-    else if (request.url === '/v1/invitations') response.end(JSON.stringify({ invitations }));
-    else if (request.url === '/v1/invitations/accept') {
+    else if (request.url === '/v1/invitations') {
+      lists.push(request.headers.authorization);
+      if (olderServer && request.headers.authorization === `Bearer ${stale}`) {
+        response.writeHead(403);
+        response.end(JSON.stringify({ error: { code: 'INVITATION_LOGIN_REQUIRED', message: 'Sign in again' } }));
+      } else response.end(JSON.stringify({ invitations }));
+    } else if (request.url === '/v1/invitations/accept') {
       assert.deepEqual(body, { clanId: clan.id });
       accepts.push(request.headers.authorization);
       if (request.headers.authorization === `Bearer ${stale}`) {
@@ -318,10 +325,22 @@ test('joining a clan accepts the chosen invitation and refreshes a stale GitHub 
     'Agent count (blank for none): ',
     'Allowed models, comma-separated (blank for any): ',
   ]);
-  assert.deepEqual(accepts, [`Bearer ${stale}`, `Bearer ${token}`]);
+  if (olderServer) {
+    assert.deepEqual(lists, [`Bearer ${stale}`, `Bearer ${token}`]);
+    assert.deepEqual(accepts, [`Bearer ${token}`]);
+  } else {
+    assert.deepEqual(lists, [`Bearer ${stale}`]);
+    assert.deepEqual(accepts, [`Bearer ${stale}`, `Bearer ${token}`]);
+  }
   assert.match(prompts.printed.join('\n'), /1\. First\n {2}2\. Second/);
   assert.equal((await readConfig(f.url)).token, token);
-});
+}
+
+test('joining a clan accepts the chosen invitation and refreshes a stale GitHub sign-in', (t) =>
+  joinWithStaleSignIn(t, false));
+
+test('joining a clan through an older server refreshes a stale sign-in before listing', (t) =>
+  joinWithStaleSignIn(t, true));
 
 test('sign-in for an invitation rejects a different GitHub account without saving it', async (t) => {
   const token = `clqn_${'d'.repeat(43)}`;
