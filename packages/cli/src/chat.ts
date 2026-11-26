@@ -9,6 +9,7 @@ import {
   type ChatSettings,
   type ChatState,
   type ClqnClient,
+  createInvitationSchema,
   type SendChat,
 } from '@clqn/shared';
 import type { AgentChoices } from './agent-runner.js';
@@ -16,6 +17,7 @@ import type { Runtime } from './agent-session.js';
 import { characters, chatFrame, messageLines, plain, threaded, transcriptColumns } from './chat-view.js';
 import { metricsFrame } from './metrics-view.js';
 import { chatMerger, chatPullRequests, pullRequestKey, pullRequestsFrame } from './pull-requests.js';
+import { mouseReportReader } from './terminal.js';
 
 const ctrlShortcuts: Record<string, string> = { s: 'f2', p: 'f3', q: 'f4', g: 'f5', l: 'f6' };
 const help = (error: unknown) => (error instanceof Error ? error.message : 'Request failed');
@@ -34,13 +36,16 @@ const models = (text: string) => {
 
 type Info = Awaited<ReturnType<ClqnClient['chatInfo']>>;
 type Setup = Omit<NonNullable<Parameters<typeof chatFrame>[0]['settings']>, 'action'>;
-const setupFor = (settings: ChatSettings): Setup => ({
+// Leaders get an Invite row before the session action, which shifts the last two rows down.
+const setupFor = (settings: ChatSettings, leader: boolean): Setup => ({
   value: settings,
   tokenText: settings.tokenLimit?.toString() ?? '',
   agentText: settings.agentLimit?.toString() ?? '',
   modelText: settings.allowedModels?.join(', ') ?? '',
-  field: 6,
+  ...(leader ? { inviteText: '' } : {}),
+  field: leader ? 7 : 6,
 });
+const settingsRows = (setup: Setup) => (setup.inviteText === undefined ? 8 : 9);
 
 // Background agents that follow the polled chat state and report a short status line.
 export interface ChatAgents {
@@ -74,7 +79,7 @@ export async function runChat(
   const actor = await api.whoami();
   if (actor.agentId) throw new Error('Sign in with a personal credential to open the chat');
   let info: Info = await api.chatInfo(clanId);
-  let setup: Setup | undefined = setupFor(info.settings);
+  let setup: Setup | undefined = setupFor(info.settings, info.canStart);
   let saved: AgentChoices | undefined;
   void loadChoices();
   let result: 'quit' | 'sign-out' = 'quit';
@@ -105,6 +110,11 @@ export async function runChat(
   const outbox: SendChat[] = [];
   const controller = new AbortController();
   const merger = chatMerger(api, clanId, controller.signal);
+  const readMouse = mouseReportReader((lines) => {
+    if (!state || setup || metrics || reviews) return;
+    scrollBy(lines);
+    draw();
+  });
 
   function rows() {
     return stdout.rows || 24;
@@ -374,6 +384,30 @@ export async function runChat(
     }
   }
 
+  // Invites go to the open clan; the API still checks that the user leads it.
+  async function invite() {
+    if (busy || setup?.inviteText === undefined) return;
+    const parsed = createInvitationSchema.safeParse({ email: setup.inviteText });
+    if (!parsed.success) {
+      notice = 'Enter a valid email address to invite';
+      return;
+    }
+    busy = true;
+    notice = undefined;
+    draw();
+    try {
+      const { email } = await api.createInvitation(clanId, parsed.data.email);
+      notice = `Invited ${email}. They run clqn and choose Join a clan.`;
+      setup.inviteText = '';
+      replaceField = true;
+    } catch (error) {
+      notice = help(error);
+    } finally {
+      busy = false;
+      draw();
+    }
+  }
+
   function edit(text: string) {
     const insert = plain(text).slice(0, Math.max(0, 4000 - draft.length));
     draft = draft.slice(0, caret) + insert + draft.slice(caret);
@@ -387,7 +421,8 @@ export async function runChat(
       else setup = undefined;
     } else if (key.name === 'tab' || key.name === 'up' || key.name === 'down') {
       const change = key.name === 'up' || key.shift ? -1 : 1;
-      setup.field = (setup.field + 8 + change) % 8;
+      const count = settingsRows(setup);
+      setup.field = (setup.field + count + change) % count;
       replaceField = true;
     } else if (setup.field === 0 && ['left', 'right', 'space', 'return'].includes(key.name ?? '')) {
       setup.value = { ...setup.value, approval: setup.value.approval === 'manual' ? 'automatic' : 'manual' };
@@ -397,9 +432,18 @@ export async function runChat(
       setup.value = { ...setup.value, commands: levels[next % 3]! };
     } else if (setup.field === 5 && ['left', 'right', 'space', 'return'].includes(key.name ?? '')) {
       if (setup.agents?.installed.length) setup.agents = nextChoice(setup.agents, key.name === 'left' ? -1 : 1);
+    } else if (setup.inviteText !== undefined && setup.field === 6) {
+      if (key.name === 'return') void invite();
+      else if (key.name === 'backspace') {
+        setup.inviteText = setup.inviteText.slice(0, -1);
+        replaceField = false;
+      } else if (text && /^[^\s\x00-\x1f\x7f-\x9f]+$/.test(text) && !key.ctrl && !key.meta) {
+        setup.inviteText = ((replaceField ? '' : setup.inviteText) + text).slice(0, 254);
+        replaceField = false;
+      }
     } else if (key.name === 'return') {
-      if (setup.field === 6) void save();
-      else if (setup.field === 7) {
+      if (setup.field === settingsRows(setup) - 2) void save();
+      else if (setup.field === settingsRows(setup) - 1) {
         result = 'sign-out';
         stop();
       } else {
@@ -419,9 +463,18 @@ export async function runChat(
     }
   }
 
+  // Positive lines scroll back through history, loading older messages near the top.
+  function scrollBy(lines: number) {
+    const span = Math.max(2, transcriptColumns(columns()));
+    const total = messages().reduce((sum, message) => sum + messageLines(message, span, actor.id).length, 0);
+    const max = Math.max(0, total - 2);
+    scroll = Math.max(0, Math.min(max, scroll + lines));
+    if (lines > 0 && scroll >= Math.max(0, max - Math.max(lines, rows() - 13))) void olderPage();
+  }
+
   function composerKey(text: string, key: Key) {
     if (key.name === 'f2' && state) {
-      setup = { ...setupFor(state.settings), agents: saved };
+      setup = { ...setupFor(state.settings, info.canStart), agents: saved };
       void loadChoices();
       approvalFocused = false;
     } else if (key.name === 'f5') {
@@ -449,14 +502,9 @@ export async function runChat(
     } else if (key.name === 'escape') {
       reply = undefined;
     } else if (['pageup', 'pagedown', 'up', 'down'].includes(key.name ?? '')) {
-      // Terminals send the mouse wheel as ↑/↓ in full-screen apps, so those scroll a line at a time.
-      const increment = key.name === 'up' || key.name === 'down' ? 1 : Math.max(1, rows() - 13);
-      const back = key.name === 'pageup' || key.name === 'up';
-      const span = Math.max(2, transcriptColumns(columns()));
-      const total = messages().reduce((sum, message) => sum + messageLines(message, span, actor.id).length, 0);
-      const max = Math.max(0, total - 2);
-      scroll = Math.max(0, Math.min(max, scroll + (back ? increment : -increment)));
-      if (back && scroll >= Math.max(0, max - Math.max(increment, rows() - 13))) void olderPage();
+      const page = Math.max(1, rows() - 13);
+      const increment = key.name === 'up' || key.name === 'down' ? 1 : page;
+      scrollBy(key.name === 'pageup' || key.name === 'up' ? increment : -increment);
     } else if (key.name === 'end' && scroll) {
       scroll = 0;
     } else if (
@@ -513,6 +561,11 @@ export async function runChat(
 
   function keypress(text: string | undefined, key: Key = {}) {
     if (closed) return;
+    if (key.ctrl && (key.name === 'c' || key.name === 'd')) {
+      stop();
+      return;
+    }
+    if (readMouse(text, key.sequence)) return;
     if (key.name === 'paste-start') {
       paste = '';
       return;
@@ -520,15 +573,15 @@ export async function runChat(
     if (paste !== undefined) {
       if (key.name === 'paste-end') {
         if (state && !setup && !metrics && !reviews && !approvalFocused) edit(paste);
+        else if (setup?.inviteText !== undefined && setup.field === 6) {
+          setup.inviteText = ((replaceField ? '' : setup.inviteText) + plain(paste).trim()).slice(0, 254);
+          replaceField = false;
+        }
         paste = undefined;
         draw();
       } else if (paste.length < 4000) {
         paste += text ?? (key.name === 'return' ? ' ' : '');
       }
-      return;
-    }
-    if (key.ctrl && (key.name === 'c' || key.name === 'd')) {
-      stop();
       return;
     }
     notice = undefined;
@@ -572,7 +625,7 @@ export async function runChat(
       process.off('SIGTERM', stop);
       stdin.setRawMode(wasRaw);
       stdin.pause();
-      stdout.write('\x1b[0m\x1b[?25h\x1b[?2004l\x1b[?1007l\x1b[?1049l');
+      stdout.write('\x1b[0m\x1b[?25h\x1b[?2004l\x1b[?1006l\x1b[?1000l\x1b[?1049l');
       resolve(result);
     };
     // Show the orchestrator's answer as soon as its turn ends instead of at the next poll.
@@ -584,8 +637,9 @@ export async function runChat(
     stdout.on('resize', draw);
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
-    // ?1007h asks xterm-style terminals to send the mouse wheel as ↑/↓ on this screen.
-    stdout.write('\x1b[?1049h\x1b[?2004h\x1b[?1007h\x1b[2J');
+    // ?1000h and ?1006h report mouse buttons, including the wheel, so the wheel scrolls in every terminal.
+    // Text selection then needs Option-drag (iTerm2, Terminal) or Shift-drag (most others).
+    stdout.write('\x1b[?1049h\x1b[?2004h\x1b[?1000h\x1b[?1006h\x1b[2J');
     stdin.resume();
     draw();
   });

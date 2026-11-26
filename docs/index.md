@@ -17,11 +17,7 @@ Run `clqn` in your project's GitHub clone. Open the GitHub link it shows and ent
 
 ## Create or join a clan
 
-A clan is your team's shared chat. Choose **Create a clan** and name it (the folder name is the default). Say yes when clqn offers to link the repository. Linking needs admin access to the GitHub repository. Then invite teammates from another terminal:
-
-```sh
-clqn invite teammate@example.com
-```
+A clan is your team's shared chat. Choose **Create a clan** and name it (the folder name is the default). Say yes when clqn offers to link the repository. Linking needs admin access to the GitHub repository. Then invite teammates: press **Ctrl+S** in the chat, type their email in **Invite**, and press **Enter**. From another terminal, `clqn invite teammate@example.com` does the same.
 
 Your teammate runs `clqn` in their clone, signs in with the GitHub account for that email, and chooses **Join a clan**. Invitations expire after seven days.
 
@@ -33,4 +29,4 @@ Type a request, question, or piece of context and press **Enter**. The orchestra
 
 Press **Ctrl+S** to open settings, where you choose which installed agents (Claude Code, Codex) to offer and change your limits.
 
-If you're in more than one clan, list them with `clqn clans` and switch with `clqn use "My project"`.
+Every time you run `clqn` it asks which clan to open, and you can also create or join one there. Press Enter to reopen the clan you used last.

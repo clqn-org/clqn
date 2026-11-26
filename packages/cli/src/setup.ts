@@ -184,18 +184,37 @@ interface ChooseClan {
   print: Print;
   // False when an environment token is in use, which a new GitHub sign-in would not replace.
   canSignIn: boolean;
+  // The last clan used; Enter picks it.
+  current?: string | undefined;
 }
 
 // Offer the user's clans, creating a clan, or accepting a pending invitation.
-export async function chooseClan({ server, connect, ask, print, canSignIn }: ChooseClan): Promise<Clan> {
+export async function chooseClan({ server, connect, ask, print, canSignIn, current }: ChooseClan): Promise<Clan> {
   const text = (value: string) => terminalText(value, false);
   for (;;) {
-    const api = await connect();
+    let api = await connect();
+    // Older servers ask for a fresh GitHub sign-in for invitations sent after this one; sign in, then retry.
+    const reverify = async (error: unknown, message: string) => {
+      if (!(error instanceof ApiError) || error.code !== 'INVITATION_LOGIN_REQUIRED' || !canSignIn) throw error;
+      const user = await api.whoami();
+      print(message);
+      await signIn(server, user.id);
+      api = await connect();
+    };
     const { clans } = await api.listClans();
-    const choices = [...clans.map((clan) => text(clan.name)), 'Create a clan', 'Join a clan'];
+    const last = clans.find((clan) => clan.id === current);
+    const choices = [
+      ...clans.map((clan) => text(clan.name) + (clan === last ? ' (last used)' : '')),
+      'Create a clan',
+      'Join a clan',
+    ];
     print(`\nChoose a clan\n${choices.map((choice, index) => `  ${index + 1}. ${choice}`).join('\n')}`);
-    const choice = await pick(ask, choices.length, 'Enter a number: ');
-    if (choice === undefined) continue;
+    const question = last ? `Enter a number (Enter for ${text(last.name)}): ` : 'Enter a number: ';
+    const choice = await pick(ask, choices.length, question);
+    if (choice === undefined) {
+      if (last) return last;
+      continue;
+    }
     if (choice < clans.length) return clans[choice]!;
     if (choice === clans.length) {
       const fallback = basename(process.cwd()).trim().slice(0, 100) || 'My project';
@@ -209,27 +228,25 @@ export async function chooseClan({ server, connect, ask, print, canSignIn }: Cho
       await chooseLimits(api, clan.id, ask, print);
       return clan;
     }
-    try {
-      const { invitations } = await api.listInvitations();
-      if (!invitations.length) {
-        const { email } = await api.whoami();
-        print(text(`No pending invitations. Ask a clan leader to invite ${email}.`));
-        continue;
-      }
-      print(
-        `\nPending invitations\n${invitations.map((entry, i) => `  ${i + 1}. ${text(entry.clanName)}`).join('\n')}`,
-      );
-      const index = await pick(ask, invitations.length, 'Enter a number (Enter to go back): ');
-      if (index === undefined) continue;
-      const clan = await api.acceptInvitation(invitations[index]!.clanId);
-      await chooseLimits(api, clan.id, ask, print);
-      return clan;
-    } catch (error) {
-      if (!(error instanceof ApiError) || error.code !== 'INVITATION_LOGIN_REQUIRED' || !canSignIn) throw error;
-      const user = await api.whoami();
-      print('Verify your GitHub email to see your invitations.');
-      await signIn(server, user.id);
+    const { invitations } = await api.listInvitations().catch(async (error: unknown) => {
+      await reverify(error, 'Verify your GitHub email to see your invitations.');
+      return api.listInvitations();
+    });
+    if (!invitations.length) {
+      const { email } = await api.whoami();
+      print(text(`No pending invitations. Ask a clan leader to invite ${email}.`));
+      continue;
     }
+    print(`\nPending invitations\n${invitations.map((entry, i) => `  ${i + 1}. ${text(entry.clanName)}`).join('\n')}`);
+    const index = await pick(ask, invitations.length, 'Enter a number (Enter to go back): ');
+    if (index === undefined) continue;
+    const { clanId } = invitations[index]!;
+    const clan = await api.acceptInvitation(clanId).catch(async (error: unknown) => {
+      await reverify(error, 'Verify your GitHub email to accept this invitation.');
+      return api.acceptInvitation(clanId);
+    });
+    await chooseLimits(api, clan.id, ask, print);
+    return clan;
   }
 }
 

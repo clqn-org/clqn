@@ -133,4 +133,42 @@ test('chat screen offers Ctrl+G metrics, drops the token graph, and settings fit
   }).lines.join('\n');
   assert.match(any, /› Models {11}Any/);
   assert.match(settings.at(-1)!, /Enter a whole number or none/);
+
+  // Leaders get an Invite row above the session action, with its own hint.
+  const leader = chatFrame({
+    ...base,
+    settings: {
+      value: state.settings,
+      tokenText: '',
+      agentText: '',
+      modelText: '',
+      inviteText: 'pal@example.com',
+      field: 6,
+      action: 'Save settings',
+    },
+  }).lines.join('\n');
+  assert.match(leader, /› Invite {11}pal@example\.com\n\s+Save settings\n\s+Sign out/);
+  assert.match(leader, /press Enter to invite them/);
+  assert.doesNotMatch(any, /Invite/);
+
+  // At the smallest size, every row and the notice still fit; the title and hints make room.
+  for (const rows of [12, 14]) {
+    const compact = chatFrame({
+      ...base,
+      rows,
+      notice: 'main up to date',
+      settings: {
+        value: state.settings,
+        tokenText: '',
+        agentText: '',
+        modelText: '',
+        inviteText: '',
+        field: 8,
+        action: 'Save settings',
+      },
+    }).lines;
+    assert.ok(compact.length <= rows);
+    assert.match(compact.join('\n'), /› Sign out\n/);
+    assert.match(compact.at(-1)!, /main up to date/);
+  }
 });

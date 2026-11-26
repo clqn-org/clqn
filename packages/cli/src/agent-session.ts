@@ -10,14 +10,21 @@ export type Runtime = (typeof runtimes)[number];
 
 export const runtimeNames: Record<Runtime, string> = { claude: 'Claude Code', codex: 'Codex' };
 
-async function installed(runtime: Runtime) {
-  const directories = (process.env.PATH ?? '').split(delimiter).filter(Boolean);
+// On Windows, spawning `claude` without a shell also runs claude.com or claude.exe, and the native Claude Code
+// installer adds only claude.exe to PATH.
+const programNames = (runtime: Runtime, platform: NodeJS.Platform) =>
+  platform === 'win32' ? [runtime, `${runtime}.com`, `${runtime}.exe`] : [runtime];
+
+async function installed(runtime: Runtime, path: string, platform: NodeJS.Platform) {
+  const directories = path.split(delimiter).filter(Boolean);
   return Promise.any(
-    directories.map(async (directory) => {
-      const path = resolve(directory, runtime);
-      await access(path, constants.X_OK);
-      if (!(await stat(path)).isFile()) throw new Error();
-    }),
+    directories.flatMap((directory) =>
+      programNames(runtime, platform).map(async (name) => {
+        const file = resolve(directory, name);
+        await access(file, constants.X_OK);
+        if (!(await stat(file)).isFile()) throw new Error();
+      }),
+    ),
   ).then(
     () => true,
     () => false,
@@ -25,8 +32,11 @@ async function installed(runtime: Runtime) {
 }
 
 // The agent CLIs on PATH, in the order the orchestrator prefers them.
-export async function installedRuntimes(): Promise<Runtime[]> {
-  const found = await Promise.all(runtimes.map(installed));
+export async function installedRuntimes(
+  path = process.env.PATH ?? '',
+  platform = process.platform,
+): Promise<Runtime[]> {
+  const found = await Promise.all(runtimes.map((runtime) => installed(runtime, path, platform)));
   return runtimes.filter((_, index) => found[index]);
 }
 
