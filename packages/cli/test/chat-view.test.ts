@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ChatMessage } from '@clqn/shared';
-import { messageLines, painter, threaded } from '../src/chat-view.js';
+import { chatFrame, messageLines, painter, threaded } from '../src/chat-view.js';
 
 const message: ChatMessage = {
   id: '00000000-0000-4000-8000-000000000001',
@@ -51,4 +51,30 @@ test('answers sit right below the message they answer', () => {
     order.map(({ sequence }) => sequence),
     [1, 4, 5, 2, 3, 6, 7],
   );
+});
+
+test('scrolling past the start keeps the oldest transcript page full', () => {
+  const log = Array.from({ length: 40 }, (_, index) => `Log line ${index + 1}`);
+  const view = {
+    color: false,
+    clan: 'Test',
+    userId: 'me',
+    messages: [{ ...message, text: log.join('\n') }],
+    draft: '',
+    caret: 0,
+    hasOlder: false,
+    approval: 0,
+    approvalFocused: false,
+  };
+  for (const layout of [
+    { columns: 80, rows: 24, expected: 14 },
+    { columns: 60, rows: 14, expected: 3, notice: 'Chat disconnected' },
+  ]) {
+    const top = chatFrame({ ...view, ...layout, scroll: 100 });
+    const visible = top.lines.flatMap((line) => line.match(/Log line \d+/) ?? []);
+    assert.deepEqual(visible, log.slice(0, layout.expected));
+    assert.deepEqual(chatFrame({ ...view, ...layout, scroll: 103 }), top);
+  }
+  const short = { ...view, columns: 80, rows: 24, messages: [{ ...message, text: log.slice(0, 15).join('\n') }] };
+  assert.deepEqual(chatFrame({ ...short, scroll: 3 }), chatFrame({ ...short, scroll: 0 }));
 });

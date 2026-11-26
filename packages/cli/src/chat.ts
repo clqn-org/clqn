@@ -18,6 +18,7 @@ import {
   backupHostingField,
   characters,
   chatFrame,
+  type Frame,
   messageLines,
   plain,
   settingsFields,
@@ -99,6 +100,7 @@ export async function runChat(
   let draft = '';
   let caret = 0;
   let scroll = 0;
+  let maxScroll = 0;
   const older: ChatMessage[] = [];
   let recent: ChatMessage[] = [];
   let historyCursor: number | null = null;
@@ -156,7 +158,7 @@ export async function runChat(
     ]
       .filter(Boolean)
       .join(' · ');
-    let frame = chatFrame({
+    const chat = chatFrame({
       columns: columns(),
       rows: rows(),
       color: !('NO_COLOR' in process.env),
@@ -195,6 +197,11 @@ export async function runChat(
         (failed ? 'Message unsent · Ctrl+R Retry' : outbox.length ? 'Sending…' : undefined) ??
         (background || undefined),
     });
+    if (chat.history) {
+      scroll = chat.history.offset;
+      maxScroll = chat.history.max;
+    }
+    let frame: Frame = chat;
     if (metrics)
       frame = metricsFrame({
         columns: columns(),
@@ -506,11 +513,8 @@ export async function runChat(
 
   // Positive lines scroll back through history, loading older messages near the top.
   function scrollBy(lines: number) {
-    const span = Math.max(2, transcriptColumns(columns()));
-    const total = messages().reduce((sum, message) => sum + messageLines(message, span, actor.id).length, 0);
-    const max = Math.max(0, total - 2);
-    scroll = Math.max(0, Math.min(max, scroll + lines));
-    if (lines > 0 && scroll >= Math.max(0, max - Math.max(lines, rows() - 13))) void olderPage();
+    scroll = Math.max(0, Math.min(maxScroll, scroll + lines));
+    if (lines > 0 && scroll >= Math.max(0, maxScroll - Math.max(lines, rows() - 13))) void olderPage();
   }
 
   function composerKey(text: string, key: Key) {

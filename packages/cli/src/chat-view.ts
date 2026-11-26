@@ -67,6 +67,9 @@ export interface Frame {
   lines: string[];
   cursor?: { row: number; column: number };
 }
+interface ChatFrame extends Frame {
+  history?: { offset: number; max: number };
+}
 interface SettingsView {
   value: ChatSettings;
   tokenText: string;
@@ -244,7 +247,7 @@ function settingsLines(settings: SettingsView, columns: number, paint: Paint, ro
   ];
 }
 
-export function chatFrame(view: View): Frame {
+export function chatFrame(view: View): ChatFrame {
   const columns = Math.max(1, view.columns);
   const rows = Math.max(1, view.rows);
   const paint = painter(view.color);
@@ -325,10 +328,15 @@ export function chatFrame(view: View): Frame {
       : '',
     notice,
   ].filter(Boolean);
-  const older = view.scroll > 0 && rows >= 15;
-  const transcriptRows = rows - 8 - attention.length - Number(older) - Number(!right);
-  const height = Math.max(1, transcriptRows);
-  const end = Math.max(0, transcript.length - view.scroll);
+  const transcriptRows = rows - 8 - attention.length - Number(!right);
+  const liveHeight = Math.max(1, transcriptRows);
+  const historyHeight = Math.max(1, transcriptRows - Number(rows >= 15));
+  // Leave a full page at the top, accounting for the history hint shown while scrolled back.
+  const max = view.messages.length && transcript.length > liveHeight ? transcript.length - historyHeight : 0;
+  const offset = Math.max(0, Math.min(view.scroll, max));
+  const older = offset > 0 && rows >= 15;
+  const height = offset > 0 ? historyHeight : liveHeight;
+  const end = transcript.length - offset;
   const visible = transcript.slice(Math.max(0, end - height), end);
   for (let i = 0; i < height; i++) {
     const line = visible[i] ?? '';
@@ -381,5 +389,8 @@ export function chatFrame(view: View): Frame {
     'Ctrl+C Quit',
   ].filter(Boolean);
   lines.push(paint(clip(actions.join('  ·  '), content), 'muted'));
-  return finish(view.approvalFocused ? undefined : { row: composerRow, column: composer.column });
+  return {
+    ...finish(view.approvalFocused ? undefined : { row: composerRow, column: composer.column }),
+    history: { offset, max },
+  };
 }
