@@ -305,7 +305,8 @@ test('joining a clan accepts the chosen invitation and refreshes a stale GitHub 
   const connect = async () => new ClqnClient(f.url, (await readConfig(f.url)).token);
   // Custom limits: invalid answers are asked again; blank models allow any.
   const custom = ['2', '1.5', '5000', '', ' a, b ,c '];
-  const prompts = scripted(['2', '2', '2', '2', ...custom]);
+  // After the fresh sign-in, the chosen invitation is accepted without picking it again.
+  const prompts = scripted(['2', '2', ...custom]);
   assert.deepEqual(await chooseClan({ server: f.url, connect, canSignIn: true, ...prompts }), clan);
   assert.deepEqual(saved, [
     { approval: 'manual', tokenLimit: 5000, agentLimit: null, allowedModels: ['a', 'b', 'c'], commands: 'sandboxed' },
