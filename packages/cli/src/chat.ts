@@ -17,6 +17,7 @@ import type { Runtime } from './agent-session.js';
 import { characters, chatFrame, messageLines, plain, threaded, transcriptColumns } from './chat-view.js';
 import { metricsFrame } from './metrics-view.js';
 import { chatMerger, chatPullRequests, pullRequestKey, pullRequestsFrame } from './pull-requests.js';
+import { mouseReportReader } from './terminal.js';
 
 const ctrlShortcuts: Record<string, string> = { s: 'f2', p: 'f3', q: 'f4', g: 'f5', l: 'f6' };
 const help = (error: unknown) => (error instanceof Error ? error.message : 'Request failed');
@@ -104,13 +105,16 @@ export async function runChat(
   let failed = false;
   let closed = false;
   let paste: string | undefined;
-  // Node splits a mouse report like ESC[<64;10;5M into keystrokes, so they are collected here.
-  let mouse: string | undefined;
   let metrics: { window: ChatMetricsWindow; data?: ChatMetrics; at: number } | undefined;
   let reviews: { selected?: string } | undefined;
   const outbox: SendChat[] = [];
   const controller = new AbortController();
   const merger = chatMerger(api, clanId, controller.signal);
+  const readMouse = mouseReportReader((lines) => {
+    if (!state || setup || metrics || reviews) return;
+    scrollBy(lines);
+    draw();
+  });
 
   function rows() {
     return stdout.rows || 24;
@@ -544,28 +548,11 @@ export async function runChat(
 
   function keypress(text: string | undefined, key: Key = {}) {
     if (closed) return;
-    if (key.sequence === '\x1b[<') {
-      mouse = '';
+    if (key.ctrl && (key.name === 'c' || key.name === 'd')) {
+      stop();
       return;
     }
-    if (mouse !== undefined) {
-      if (text && /^[0-9;]$/.test(text) && mouse.length < 32) {
-        mouse += text;
-        return;
-      }
-      const report = mouse;
-      mouse = undefined;
-      // Anything but a report's end, such as Ctrl+C after a cut-off report, is handled as a normal key.
-      if (text === 'M' || text === 'm') {
-        // Wheel up is button 64 and down is 65; other mouse events are ignored.
-        const button = Number(report.split(';')[0]);
-        if ((button === 64 || button === 65) && state && !setup && !metrics && !reviews) {
-          scrollBy(button === 64 ? 3 : -3);
-          draw();
-        }
-        return;
-      }
-    }
+    if (readMouse(text, key.sequence)) return;
     if (key.name === 'paste-start') {
       paste = '';
       return;
@@ -582,10 +569,6 @@ export async function runChat(
       } else if (paste.length < 4000) {
         paste += text ?? (key.name === 'return' ? ' ' : '');
       }
-      return;
-    }
-    if (key.ctrl && (key.name === 'c' || key.name === 'd')) {
-      stop();
       return;
     }
     notice = undefined;
