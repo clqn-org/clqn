@@ -218,7 +218,8 @@ export function createChatRoutes(db: WorkspaceDb) {
         const picked = await pickNext(tx, clanId);
         const history = await chatHistory(tx, clanId, undefined, 20);
         const held = await chatQueue(tx, clanId, 'clarification');
-        return { ...history, ...picked, held };
+        const { runs } = await chatActivity(tx, clanId, actor.id);
+        return { ...history, ...picked, held, runs };
       }),
     );
   });

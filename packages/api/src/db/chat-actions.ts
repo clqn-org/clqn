@@ -147,6 +147,29 @@ async function markDecided(db: WorkspaceDb, id: string) {
     .where(eq(chatMessages.id, id));
 }
 
+// An earlier chat task that can run again on its branch: stopped or released, or waiting on its pull request.
+async function continuableTask(db: WorkspaceDb, clanId: string, taskId: string, workerId: string, lock = false) {
+  const query = db
+    .select({ task: tasks, message: chatMessages })
+    .from(tasks)
+    .innerJoin(chatMessages, eq(chatMessages.taskId, tasks.id))
+    .where(and(eq(tasks.clanId, clanId), eq(tasks.id, taskId)));
+  const [row] = await (lock ? query.for('update', { of: tasks }) : query);
+  if (!row) throw missing('Chat task');
+  const { task, message } = row;
+  // The worktree, and any work not yet pushed, is on the machine of the worker that ran it.
+  if (message.workerId !== workerId) throw conflict('Continue this task with the worker that ran it');
+  if (task.status === 'completed' || task.repository?.state === 'merged')
+    throw conflict('That task is finished; delegate new work instead');
+  const released = task.status === 'open' && !task.assignedAgentId;
+  const inReview =
+    task.status === 'claimed' &&
+    task.ownerAgentId === workerId &&
+    (task.repository?.state === 'pushed' || task.repository?.state === 'open');
+  if (!released && !inReview) throw conflict('That task is still queued or running; stop it before continuing');
+  return row;
+}
+
 async function assignChatTask(
   db: WorkspaceDb,
   actor: Actor,
@@ -155,14 +178,63 @@ async function assignChatTask(
   workerId: string,
   proposal: ChatProposal,
 ) {
-  const [task] = await db
-    .insert(tasks)
-    .values({ clanId, description: proposal.description, assignedAgentId: workerId })
-    .returning({ id: tasks.id });
-  await db.update(chatMessages).set({ taskId: task!.id, status: 'handled' }).where(eq(chatMessages.id, messageId));
-  for (const type of ['task.created', 'task.assigned']) {
-    await appendEvent(db, { clanId, actorId: actor.id, agentId: actor.agentId ?? null, type, resourceId: task!.id });
+  let taskId: string;
+  if (proposal.taskId) {
+    // Move the task to this message, so each task keeps one current delegation and its usage carries over.
+    const { task, message } = await continuableTask(db, clanId, proposal.taskId, workerId, true);
+    taskId = task.id;
+    const tokens = message.tokens ?? 0;
+    await db.update(chatMessages).set({ taskId: null, tokens: null }).where(eq(chatMessages.id, message.id));
+    await db
+      .update(chatMessages)
+      .set({
+        taskId,
+        status: 'handled',
+        tokens: message.tokens,
+        proposal: { ...proposal, estimatedTokens: proposal.estimatedTokens + tokens },
+      })
+      .where(eq(chatMessages.id, messageId));
+    let repository = task.repository;
+    if (repository) {
+      // Pending until the worker reports its new head. A new head needs a new merge approval.
+      const { mergeApproval: _approval, ...rest } = repository;
+      repository = { ...rest, state: 'pending' };
+    }
+    await db
+      .update(tasks)
+      .set({
+        // The worker gets the follow-up's self-contained description, in the worktree holding the earlier work.
+        description: proposal.description,
+        status: 'open',
+        ownerId: null,
+        ownerAgentId: null,
+        assignedAgentId: workerId,
+        repository,
+        updatedAt: sql`now()`,
+      })
+      .where(eq(tasks.id, taskId));
+  } else {
+    const [task] = await db
+      .insert(tasks)
+      .values({ clanId, description: proposal.description, assignedAgentId: workerId })
+      .returning({ id: tasks.id });
+    taskId = task!.id;
+    await db.update(chatMessages).set({ taskId, status: 'handled' }).where(eq(chatMessages.id, messageId));
+    await appendEvent(db, {
+      clanId,
+      actorId: actor.id,
+      agentId: actor.agentId ?? null,
+      type: 'task.created',
+      resourceId: taskId,
+    });
   }
+  await appendEvent(db, {
+    clanId,
+    actorId: actor.id,
+    agentId: actor.agentId ?? null,
+    type: 'task.assigned',
+    resourceId: taskId,
+  });
 }
 
 export async function decideChat(db: WorkspaceDb, actor: Actor, clanId: string, id: string, body: ChatDecisionRequest) {
@@ -186,11 +258,13 @@ export async function decideChat(db: WorkspaceDb, actor: Actor, clanId: string, 
         'MODEL_NOT_ALLOWED',
         `The worker's owner allows only these models: ${models.join(', ')}. Choose one of them or another worker.`,
       );
+    if (body.taskId) await continuableTask(db, clanId, body.taskId, worker.id);
     const proposal: ChatProposal = {
       title: body.title,
       description: body.description,
       estimatedTokens: body.estimatedTokens,
       model,
+      ...(body.taskId ? { taskId: body.taskId } : {}),
     };
     await db
       .update(chatMessages)

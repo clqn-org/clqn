@@ -66,6 +66,9 @@ export const chatDecisionSchema = z.discriminatedUnion('action', [
       estimatedTokens: tokenCount.min(1),
       // Must be one of the worker owner's allowed models. Defaults to their first allowed model, or none if any is allowed.
       model: modelIdSchema.optional(),
+      // Continue an earlier delegation's task on its branch: retry a stopped run or follow up on its pull request.
+      // The task's previous worker must run it, since its worktree is on that worker's machine.
+      taskId: z.uuid().optional(),
     })
     .strict(),
 ]);
@@ -162,6 +165,8 @@ export const chatInboxSchema = chatHistorySchema.extend({
   next: chatMessageSchema.nullable(),
   pickId: z.uuid().nullish(),
   held: z.array(chatMessageSchema),
+  // Recent delegations, so a follow-up can continue one by its taskId. Older servers omit it.
+  runs: z.array(chatRunSchema).optional(),
 });
 
 // 24h uses hourly buckets; 7d uses 6-hour buckets. The last bucket holds the current hour.
