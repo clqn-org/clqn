@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { type ChildProcess, execFile, type spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { devNull, tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -744,7 +744,7 @@ switch (process.argv[3]) {
       return { repository };
     },
     reportTaskRepository: async (_clan: string, _task: string, report: RepositoryReport) => {
-      assert.equal(report.expectedHeadSha, null);
+      assert.equal(report.expectedHeadSha, repository?.headSha ?? null);
       assert.equal(report.prUrl, url);
       assert.equal(report.headSha, await git(remote, 'rev-parse', `refs/heads/${branch}`));
       if (++reportCount === 1) throw new Error('Temporary request failure');
@@ -802,6 +802,112 @@ switch (process.argv[3]) {
   assert.equal(await git(project, 'rev-parse', 'HEAD'), baseSha);
   assert.equal(await readFile(join(project, 'notes'), 'utf8'), 'Uncommitted personal work');
   assert.equal(await readFile(marker, 'utf8'), 'created\n');
+
+  // A follow-up continues in the same worktree and pushes a new commit to the same pull request.
+  const firstHead = repository!.headSha;
+  repository = { ...repository!, state: 'pending' };
+  const followUp: ChatRun = { ...run, messageId: randomUUID(), title: 'Address review', tokens: 30, repository };
+  resumed.update(chatState({ runs: [followUp] }));
+  await until(() => f.spawned.length === 2);
+  assert.equal(await realpath(f.spawned[1]!.cwd), await realpath(cwd));
+  assert.equal(await readFile(join(cwd, 'fix.txt'), 'utf8'), 'Worker change');
+  await writeFile(join(cwd, 'review.txt'), 'Review change');
+  f.spawned[1]!.child.finish(0, '{"type":"item.completed","item":{"type":"agent_message","text":"Addressed."}}');
+  await until(() => repository?.state === 'open' && repository.headSha !== firstHead);
+  assert.equal(reportCount, 3);
+  assert.deepEqual(transitions, ['claim', 'claim']);
+  assert.equal(await git(remote, 'show', `${branch}:review.txt`), 'Review change');
+  assert.equal(await git(remote, 'show', `${branch}:fix.txt`), 'Worker change');
+  assert.equal(await readFile(marker, 'utf8'), 'created\n', 'the existing pull request is reused');
+});
+
+test('a member stops a running worker, hands its task back, and a follow-up continues with its usage', async (t) => {
+  const f = await fixture(t);
+  const workerId = randomUUID();
+  await saveAgentProfile({ agentId: workerId, clanId, server, token: token('w'), runtime: 'codex' });
+  const transitions: string[] = [];
+  const reports: ChatUsage[] = [];
+  const api = {
+    whoami: async () => ({ id: userId, email: 'member@example.com' }),
+    listAgents: async () => ({ agents: [agent(workerId, 'worker')] }),
+    members: async () => ({ members: [{ userId, email: 'member@example.com', role: 'member' }] }),
+  } as unknown as ClqnClient;
+  const workerApi = {
+    transitionTask: async (_clan: string, taskId: string, action: string) => {
+      transitions.push(`${action} ${taskId}`);
+      return {};
+    },
+    task: async (_clan: string, taskId: string) => ({ id: taskId, description: 'Build it', repository: null }),
+    reportChatUsage: async (_clan: string, _task: string, usage: ChatUsage) => {
+      reports.push(usage);
+      return { ok: true };
+    },
+  } as unknown as ClqnClient;
+  const runner = startAgentRunner({
+    api,
+    server,
+    clanId,
+    project: f.directory,
+    spawn: f.spawn,
+    runtimes: async () => ['codex'],
+    now: f.now,
+    agentClient: () => workerApi,
+    workspace: async () => f.directory,
+  });
+  t.after(() => runner.stop());
+  const taskId = randomUUID();
+  const stale = randomUUID();
+  const run: ChatRun = {
+    messageId: randomUUID(),
+    title: 'Long task',
+    worker: 'Codex',
+    workerId,
+    estimatedTokens: 500,
+    taskId,
+    status: 'queued',
+    tokens: null,
+  };
+  // Another task left running by a chat that closed on this machine.
+  const orphan: ChatRun = { ...run, messageId: randomUUID(), title: 'Orphan', taskId: stale, status: 'running' };
+  f.advance(1000);
+  runner.update(chatState({ runs: [run, orphan] }));
+  await until(() => f.spawned.length === 1);
+  assert.deepEqual(
+    [...runner.stoppable()],
+    [
+      [taskId, 1000],
+      [stale, undefined],
+    ],
+  );
+
+  assert.equal(await runner.stopRun(taskId), 'Stopping Long task…');
+  assert.ok(f.spawned[0]!.child.killed);
+  await until(() => transitions.length === 2);
+  assert.deepEqual(transitions, [`claim ${taskId}`, `release ${taskId}`]);
+  assert.equal(reports.length, 0, 'a stopped run posts no partial result');
+  assert.equal(runner.status(), 'Long task stopped · ask the orchestrator to continue it');
+
+  assert.equal(await runner.stopRun(stale), 'Stopped Orphan · ask the orchestrator to continue it');
+  assert.deepEqual(transitions.slice(2), [`release ${stale}`]);
+
+  // The same message does not start twice, but a follow-up for the same task does, adding to its usage.
+  runner.update(chatState({ runs: [{ ...run, status: 'released' }] }));
+  assert.equal(f.spawned.length, 1);
+  const followUp: ChatRun = { ...run, messageId: randomUUID(), tokens: 30 };
+  runner.update(chatState({ runs: [followUp] }));
+  await until(() => f.spawned.length === 2);
+  f.spawned[1]!.child.finish(
+    0,
+    [
+      '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":0,"output_tokens":20}}',
+      '{"type":"item.completed","item":{"type":"agent_message","text":"Done now."}}',
+    ].join('\n'),
+  );
+  await until(() => transitions.length === 5);
+  assert.deepEqual(transitions.slice(3), [`claim ${taskId}`, `complete ${taskId}`]);
+  assert.equal(reports[0]?.tokens, 100);
+  assert.equal(reports[0]?.result?.text, 'Done now.');
+  assert.equal(await runner.stopRun(taskId), 'Long task is no longer running');
 });
 
 test('a member without Claude Code or Codex sees why agents are off', async (t) => {

@@ -21,6 +21,7 @@ import {
   type Frame,
   messageLines,
   plain,
+  type StopTarget,
   settingsFields,
   threaded,
   transcriptColumns,
@@ -68,6 +69,9 @@ export interface ChatAgents {
   choose(off: Runtime[]): Promise<void>;
   backupHosting(): boolean | undefined;
   setBackupHosting(enabled: boolean): Promise<void>;
+  // Running tasks this member can stop, with when this machine started each.
+  stoppable?(): Map<string, number | undefined>;
+  stopRun?(taskId: string): Promise<string>;
 }
 
 // Step through every on/off combination of the installed agents, all on first.
@@ -120,14 +124,49 @@ export async function runChat(
   let paste: string | undefined;
   let metrics: { window: ChatMetricsWindow; data?: ChatMetrics; at: number } | undefined;
   let reviews: { selected?: string } | undefined;
+  // The running task whose stop waits for y/n, and where the sidebar's Stop labels were last drawn.
+  let stopping: string | undefined;
+  let stopTargets: StopTarget[] = [];
   const outbox: SendChat[] = [];
   const controller = new AbortController();
   const merger = chatMerger(api, clanId, controller.signal);
-  const readMouse = mouseReportReader((lines) => {
-    if (!state || setup || metrics || reviews) return;
-    scrollBy(lines);
-    draw();
-  });
+  const readMouse = mouseReportReader(
+    (lines) => {
+      if (!state || setup || metrics || reviews) return;
+      scrollBy(lines);
+      draw();
+    },
+    (column, row) => {
+      if (!state || setup || metrics || reviews) return;
+      const target = stopTargets.find(
+        (stop) => stop.row === row - 1 && column - 1 >= stop.column && column - 1 < stop.column + stop.width,
+      );
+      if (!target) return;
+      stopping = target.taskId;
+      approvalFocused = false;
+      draw();
+    },
+  );
+
+  // This member's running tasks that can be stopped, in sidebar order.
+  function stoppableTasks() {
+    const stoppable = agents?.stoppable?.();
+    return (state?.runs ?? [])
+      .filter((run) => run.status === 'running' && stoppable?.has(run.taskId))
+      .map(({ taskId }) => taskId);
+  }
+
+  async function halt(taskId: string) {
+    if (!agents?.stopRun) return;
+    try {
+      notice = await agents.stopRun(taskId);
+    } catch (error) {
+      notice = help(error);
+    } finally {
+      void refresh();
+      draw();
+    }
+  }
 
   function rows() {
     return stdout.rows || 24;
@@ -151,6 +190,8 @@ export async function runChat(
     const orchestration = state?.orchestration;
     const host = orchestration ? (orchestration.activeHost ?? undefined) : session?.host;
     const pullRequests = chatPullRequests(state);
+    const stoppable = agents?.stoppable?.();
+    if (stopping && !stoppableTasks().includes(stopping)) stopping = undefined;
     const background = [
       agents?.status(),
       orchestration && !host && state?.queued ? 'Orchestrator offline · messages queued' : undefined,
@@ -191,6 +232,9 @@ export async function runChat(
       approvalFocused,
       hasPullRequests: pullRequests.length > 0,
       reply,
+      stoppable,
+      stopping,
+      now: Date.now(),
       notice:
         notice ??
         connection ??
@@ -201,6 +245,7 @@ export async function runChat(
       scroll = chat.history.offset;
       maxScroll = chat.history.max;
     }
+    stopTargets = chat.stops ?? [];
     let frame: Frame = chat;
     if (metrics)
       frame = metricsFrame({
@@ -538,6 +583,19 @@ export async function runChat(
       const index = state.questions.findIndex(({ id }) => id === reply?.id);
       reply = state.questions[(index + 1) % state.questions.length];
       approvalFocused = false;
+    } else if (key.ctrl && key.name === 'x') {
+      const tasks = stoppableTasks();
+      if (!tasks.length) notice = 'None of your agents are running';
+      else {
+        // Each press moves to the next running agent.
+        stopping = tasks[(tasks.indexOf(stopping ?? '') + 1) % tasks.length];
+        approvalFocused = false;
+      }
+    } else if (stopping) {
+      if (!key.ctrl && !key.meta && /^[yn]$/i.test(text)) {
+        if (text.toLowerCase() === 'y') void halt(stopping);
+        stopping = undefined;
+      } else if (key.name === 'escape') stopping = undefined;
     } else if (approvalFocused) {
       const count = state?.approvals.length ?? 0;
       if (key.name === 'escape' || key.name === 'tab') approvalFocused = false;

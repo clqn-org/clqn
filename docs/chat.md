@@ -36,6 +36,12 @@ To approve automatically, set **Spawn approval** to **Automatic** in settings. Y
 
 The **Agents** panel on the right lists each task with its worker, status, and tokens. A tilde (`~40k`) marks an estimate until the worker reports real usage.
 
+## Stop and continue agents
+
+Your running agents show how long they've run and a **■ Stop** button in the Agents panel. Click it, or press **Ctrl+X** (again to pick another agent), then **Y** to stop or **N** to keep it running. clqn stops the agent and hands its task back. The task's worktree and branch stay as they are, including unfinished changes.
+
+To pick the work up again, ask in chat, for example "continue the login fix" or "address the review on the login PR". The orchestrator continues the same task with the same worker, which reopens its worktree and branch and pushes to the same pull request. A continuation needs your approval like any other delegation, and its tokens add to the task's earlier usage.
+
 ## Review pull requests
 
 When a worker finishes code changes, clqn commits them on the task's own branch, pushes, opens a pull request, and posts the link in chat. Press **Ctrl+L** to see pull requests. The clan leader reviews the PR on GitHub, then presses **Y** to approve the merge or **N** to decline. clqn merges once the GitHub checks pass. See the [repository workflow](repositories.md).
@@ -50,6 +56,7 @@ On macOS, use the **Ctrl** keys: function keys usually control brightness and vo
 | Ctrl+F | Force-send your message |
 | Ctrl+P (F3, Tab) | Focus spawn approvals. **↑ ↓** to choose, **Y** approve, **N** decline, **Esc** back |
 | Ctrl+Q (F4) | Reply to the orchestrator's question. Press again to pick another question |
+| Ctrl+X, or click ■ Stop | Stop one of your running agents. Press again to pick another, **Y** stop, **N** keep |
 | Ctrl+L (F6) | Pull requests. The leader presses **Y** to approve a merge or **N** to decline |
 | Ctrl+S (F2) | Settings |
 | Ctrl+G (F5) | Metrics. **T** or **Tab** switches between 24 hours and 7 days |
