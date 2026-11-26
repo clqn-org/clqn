@@ -124,6 +124,12 @@ test('choosing a clan opens an existing one, creates one, or reports no invitati
   assert.match(pickExisting.printed[0]!, /1\. Existing\n {2}2\. Create a clan\n {2}3\. Join a clan/);
   assert.equal(pickExisting.questions.length, 2);
 
+  // Returning users get the same choices, and Enter reopens their last clan.
+  const returning = scripted(['']);
+  assert.deepEqual(await chooseClan({ connect, current: existing.id, ...returning }), existing);
+  assert.match(returning.printed[0]!, /1\. Existing \(last used\)\n {2}2\. Create a clan\n {2}3\. Join a clan/);
+  assert.deepEqual(returning.questions, ['Enter a number (Enter for Existing): ']);
+
   assert.deepEqual(saved, []);
 
   // The leader of a new clan is a member too, and Enter picks full access.
@@ -262,7 +268,8 @@ test('a skipped repository prompt stays skipped unless the clone gets linked', a
   });
 });
 
-test('joining a clan accepts the chosen invitation and refreshes a stale GitHub sign-in', async (t) => {
+// Older servers asked for a fresh sign-in when listing or accepting invitations sent after the last one.
+async function joinWithStaleSignIn(t: TestContext, refuseListing: boolean) {
   const stale = `clqn_${'s'.repeat(43)}`;
   const token = `clqn_${'f'.repeat(43)}`;
   const user = { id: randomUUID(), email: 'verified@example.com' };
@@ -272,6 +279,7 @@ test('joining a clan accepts the chosen invitation and refreshes a stale GitHub 
     { clanId: clan.id, clanName: clan.name, expiresAt: new Date(Date.now() + 60_000).toISOString() },
   ];
   const accepts: (string | undefined)[] = [];
+  const lists: (string | undefined)[] = [];
   const saved: unknown[] = [];
   const f = await fixture(t, (request, body, response) => {
     if (request.url === `/v1/clans/${clan.id}/chat/settings`) {
@@ -282,8 +290,13 @@ test('joining a clan accepts the chosen invitation and refreshes a stale GitHub 
     else if (request.url === '/auth/github/poll') response.end(JSON.stringify({ status: 'complete', user, token }));
     else if (request.url === '/v1/me') response.end(JSON.stringify(user));
     else if (request.url === '/v1/clans') response.end(JSON.stringify({ clans: [] }));
-    else if (request.url === '/v1/invitations') response.end(JSON.stringify({ invitations }));
-    else if (request.url === '/v1/invitations/accept') {
+    else if (request.url === '/v1/invitations') {
+      lists.push(request.headers.authorization);
+      if (refuseListing && request.headers.authorization === `Bearer ${stale}`) {
+        response.writeHead(403);
+        response.end(JSON.stringify({ error: { code: 'INVITATION_LOGIN_REQUIRED', message: 'Sign in again' } }));
+      } else response.end(JSON.stringify({ invitations }));
+    } else if (request.url === '/v1/invitations/accept') {
       assert.deepEqual(body, { clanId: clan.id });
       accepts.push(request.headers.authorization);
       if (request.headers.authorization === `Bearer ${stale}`) {
@@ -296,8 +309,12 @@ test('joining a clan accepts the chosen invitation and refreshes a stale GitHub 
   const connect = async () => new ClqnClient(f.url, (await readConfig(f.url)).token);
   // Custom limits: invalid answers are asked again; blank models allow any.
   const custom = ['2', '1.5', '5000', '', ' a, b ,c '];
-  const prompts = scripted(['2', '2', '2', '2', ...custom]);
-  assert.deepEqual(await chooseClan({ connect, reauthenticate: (id) => signIn(f.url, id), ...prompts }), clan);
+  // After the fresh sign-in, the chosen invitation is accepted without picking it again.
+  const prompts = scripted(['2', '2', ...custom]);
+  const reauthenticate = async (id: string) => {
+    await signIn(f.url, id);
+  };
+  assert.deepEqual(await chooseClan({ connect, reauthenticate, ...prompts }), clan);
   assert.deepEqual(saved, [
     { approval: 'manual', tokenLimit: 5000, agentLimit: null, allowedModels: ['a', 'b', 'c'], commands: 'sandboxed' },
   ]);
@@ -308,10 +325,21 @@ test('joining a clan accepts the chosen invitation and refreshes a stale GitHub 
     'Agent count (blank for none): ',
     'Allowed models, comma-separated (blank for any): ',
   ]);
-  assert.deepEqual(accepts, [`Bearer ${stale}`, `Bearer ${token}`]);
+  if (refuseListing) {
+    assert.deepEqual(lists, [`Bearer ${stale}`, `Bearer ${token}`]);
+    assert.deepEqual(accepts, [`Bearer ${token}`]);
+  } else {
+    assert.deepEqual(lists, [`Bearer ${stale}`]);
+    assert.deepEqual(accepts, [`Bearer ${stale}`, `Bearer ${token}`]);
+  }
   assert.match(prompts.printed.join('\n'), /1\. First\n {2}2\. Second/);
   assert.equal((await readConfig(f.url)).token, token);
-});
+}
+
+test('joining a clan through an older server signs in again and retries accepting', (t) =>
+  joinWithStaleSignIn(t, false));
+
+test('joining a clan through an older server signs in again and retries listing', (t) => joinWithStaleSignIn(t, true));
 
 test('sign-in for an invitation rejects a different GitHub account without saving it', async (t) => {
   const token = `clqn_${'d'.repeat(43)}`;

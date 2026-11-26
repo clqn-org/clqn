@@ -51,7 +51,7 @@ Sign in with GitHub, choose **Create a clan**, and say yes to linking the reposi
 
 ## Invite teammates
 
-From another terminal:
+In the chat, press **Ctrl+S**, type their email in **Invite**, and press **Enter**. Or, from another terminal:
 
 ```sh
 clqn invite teammate@example.com

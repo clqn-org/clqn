@@ -418,31 +418,30 @@ async function openChat() {
       console.error(terminalText(`Signed in as ${user.email}`, process.stderr.isTTY));
     }
   }
-  let clanId = process.env.CLQN_CLAN_ID ?? (await savedClan(apiUrl(), await client()));
+  let clanId = process.env.CLQN_CLAN_ID;
   let prompt: ReturnType<typeof terminalPrompt> | undefined;
   const ask = (question: string) => {
     prompt ??= terminalPrompt();
     return prompt.ask(question);
+  };
+  const reauthenticate = async (userId: string) => {
+    prompt?.close();
+    prompt = undefined;
+    await signIn(apiUrl(), userId);
   };
   const print = (text: string) => console.log(text);
   const project = process.cwd();
   let api: ClqnClient;
   let repository: Awaited<ReturnType<typeof setupChatRepository>>;
   try {
+    // Returning users see the same picker as new ones, with Enter reopening their last clan.
     if (!clanId) {
       const clan = await chooseClan({
         connect: client,
         ask,
         print,
-        ...(environmentToken
-          ? {}
-          : {
-              reauthenticate: (userId: string) => {
-                prompt?.close();
-                prompt = undefined;
-                return signIn(apiUrl(), userId);
-              },
-            }),
+        ...(environmentToken ? {} : { reauthenticate }),
+        current: await savedClan(apiUrl(), await client()),
       });
       clanId = clan.id;
       await selectClan(apiUrl(), clanId);
