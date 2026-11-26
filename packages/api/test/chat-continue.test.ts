@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import test from 'node:test';
-import { chatInboxSchema, chatStateSchema, defaultChatSettings, taskSchema } from '@clqn/shared';
+import {
+  chatInboxSchema,
+  chatStateSchema,
+  defaultChatSettings,
+  linkedRepositorySetupSchema,
+  taskSchema,
+} from '@clqn/shared';
 import { createApp } from '../src/app.js';
 import { database, skip } from './postgres.js';
 
@@ -22,7 +28,7 @@ test('PostgreSQL: a follow-up continues a stopped or published chat task with it
   const state = async (token = member.token) =>
     chatStateSchema.parse(await (await request(token, '/chat/state')).json());
   const slug = 'example/continue';
-  assert.equal((await request(leader.token, '/repositories', { slug })).status, 200);
+  const link = linkedRepositorySetupSchema.parse(await (await request(leader.token, '/repositories', { slug })).json());
   assert.equal((await request(leader.token, '/chat/join', defaultChatSettings)).status, 200);
   assert.equal((await request(member.token, '/chat/join', defaultChatSettings)).status, 200);
 
@@ -113,10 +119,52 @@ test('PostgreSQL: a follow-up continues a stopped or published chat task with it
   assert.equal((await request(worker.token, `${task}/claim`, {})).status, 200);
   assert.equal((await state()).running, 1);
 
+  // GitHub confirming a merge of the old head does not complete the run that is still working.
+  const raw = JSON.stringify({
+    action: 'closed',
+    number: prNumber,
+    pull_request: {
+      merged: true,
+      merge_commit_sha: 'd'.repeat(40),
+      head: { sha: head, ref: repository.branch, repo: { full_name: slug } },
+      base: { ref: 'main' },
+    },
+    repository: { full_name: slug },
+  });
+  const merged = await app.request(link.webhook.path, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-github-event': 'pull_request',
+      'x-github-delivery': randomUUID(),
+      'x-hub-signature-256': `sha256=${createHmac('sha256', link.webhook.secret).update(raw).digest('hex')}`,
+    },
+    body: raw,
+  });
+  assert.deepEqual(await merged.json(), { accepted: true, integrated: 0 });
+  assert.equal(taskSchema.parse(await (await request(member.token, task)).json()).status, 'claimed');
+
   // Reporting the head ends the pending state, even when the worker made no new commit.
   assert.equal((await report(head, head)).status, 200);
   const reviewed = taskSchema.parse(await (await request(member.token, task)).json());
   assert.equal(reviewed.repository?.state, 'open');
   assert.equal((await state()).running, 0);
   assert.equal((await state()).usage.agents, 0);
+
+  // A task released after binding but before its first push counts against limits when continued.
+  assert.equal((await request(member.token, '/chat/join', { ...defaultChatSettings, agentLimit: 1 })).status, 200);
+  const unpushed = (await run(await approved('Second feature')))!.taskId;
+  assert.equal((await request(worker.token, `/tasks/${unpushed}/claim`, {})).status, 200);
+  const unpushedBranch = { ...repository, branch: `clqn/task-${unpushed}` };
+  assert.equal((await request(worker.token, `/tasks/${unpushed}/chat-repository`, unpushedBranch)).status, 200);
+  assert.equal((await request(worker.token, `/tasks/${unpushed}/release`, {})).status, 200);
+  await approved('Finish the second feature', { taskId: unpushed });
+  const resumed = taskSchema.parse(await (await request(member.token, `/tasks/${unpushed}`)).json());
+  assert.equal(resumed.repository, null);
+  assert.equal((await state()).usage.agents, 1);
+  const blocked = await delegate('One too many', { workerId: other.agent.id });
+  assert.deepEqual(await blocked.response.json(), { status: 'approval', blocker: null });
+  const limited = await request(member.token, `/chat/messages/${blocked.id}/approval`, { approve: true });
+  assert.equal(limited.status, 409);
+  assert.match(await limited.text(), /agent limit/);
 });

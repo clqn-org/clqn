@@ -176,7 +176,8 @@ async function confirmMerge(
         sql`${tasks.repository}->>'slug' = ${link.slug}`,
         sql`${tasks.repository}->>'prNumber' = ${String(payload.number)}`,
         sql`${tasks.repository}->>'headSha' = ${head.sha}`,
-        sql`${tasks.repository}->>'state' <> 'merged'`,
+        // A continued task is pending while its worker runs; a late merge of its old head must not complete it.
+        sql`${tasks.repository}->>'state' in ('pushed', 'open')`,
       ),
     )
     .for('update', { of: tasks });
