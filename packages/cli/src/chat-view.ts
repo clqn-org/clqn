@@ -184,8 +184,8 @@ function agentsText(agents: SettingsView['agents']) {
     .join(' · ');
 }
 
-// On short terminals the blank lines around the rows are dropped so every row still fits.
-function settingsLines(settings: SettingsView, columns: number, paint: Paint, compact: boolean) {
+// Every setting row and the notice always fit; the hint, title, key help, and blank lines fill what room is left.
+function settingsLines(settings: SettingsView, columns: number, paint: Paint, room: number, notice: string) {
   const labels = [
     `Spawn approval   ${settings.value.approval === 'manual' ? 'Manual' : 'Automatic'}`,
     `Token limit      ${settings.tokenText || '∞'}`,
@@ -201,16 +201,24 @@ function settingsLines(settings: SettingsView, columns: number, paint: Paint, co
     settings.inviteText !== undefined && settings.field === 6
       ? 'Type a teammate’s email and press Enter to invite them to this clan.'
       : 'Enter a whole number or none for unlimited; models comma-separated, blank for any.';
+  let spare = room - labels.length - (notice ? 1 : 0);
+  const fits = (lines: number) => {
+    if (spare < lines) return false;
+    spare -= lines;
+    return true;
+  };
+  const [showHint, showTitle, showKeys, showGap, showTop] = [fits(1), fits(1), fits(2), fits(1), fits(1)];
   return [
-    paint('Session settings', 'bold'),
-    ...(compact ? [] : ['']),
+    ...(showTop ? [''] : []),
+    ...(showTitle ? [paint('Session settings', 'bold')] : []),
+    ...(showGap ? [''] : []),
     ...labels.map((label, index) => {
       const line = clip(`${index === settings.field ? '›' : ' '} ${label}`, columns);
       return index === settings.field ? paint(line, 'accent') : line;
     }),
-    // Short terminals drop the key hints so every row still fits.
-    ...(compact ? [] : ['', paint(clip('↑↓ Move  ←→ Change  Enter Select  Esc Back', columns), 'muted')]),
-    paint(clip(hint, columns), 'muted'),
+    ...(showKeys ? ['', paint(clip('↑↓ Move  ←→ Change  Enter Select  Esc Back', columns), 'muted')] : []),
+    ...(showHint ? [paint(clip(hint, columns), 'muted')] : []),
+    ...(notice ? [notice] : []),
   ];
 }
 
@@ -236,8 +244,7 @@ export function chatFrame(view: View): Frame {
   });
   const notice = view.notice ? paint(clip(plain(view.notice), content), 'warning') : '';
   if (view.settings) {
-    lines.push(...(rows > 14 ? [''] : []), ...settingsLines(view.settings, content, paint, rows <= 13));
-    if (notice) lines.splice(rows - 1, 0, notice);
+    lines.push(...settingsLines(view.settings, content, paint, rows - lines.length, notice));
     return finish();
   }
 
