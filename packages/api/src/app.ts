@@ -23,6 +23,7 @@ export function createApp(
     githubWebhookSecret?: string | undefined;
     githubClientId?: string | undefined;
     requestsPerMinute?: number;
+    cloudOrchestrator?: boolean;
   } = {},
 ) {
   if (options.githubWebhookSecret !== undefined && options.githubWebhookSecret.trim().length < 32) {
@@ -81,7 +82,7 @@ export function createApp(
     app.route('/v1', createAgentRoutes(store));
   }
   if (db) {
-    app.route('/v1/clans/:clanId/chat', createChatRoutes(db));
+    app.route('/v1/clans/:clanId/chat', createChatRoutes(db, options.cloudOrchestrator));
     app.route('/v1/clans/:clanId/repositories', createRepositoryRoutes(db, options.githubWebhookSecret));
     app.route('/v1/clans/:clanId/context', createContextRoutes(db));
     app.route('/v1/clans/:clanId/tasks', createTaskRoutes(db));

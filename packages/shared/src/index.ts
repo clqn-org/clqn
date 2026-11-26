@@ -34,6 +34,7 @@ import {
   chatSettingsSchema,
   chatStateSchema,
   chatUsageSchema,
+  chatWorkerPresenceSchema,
   type SendChat,
   sendChatSchema,
 } from './chat.js';
@@ -240,6 +241,14 @@ export class ClqnClient {
   }
   chatState(clanId: string, signal?: AbortSignal) {
     return this.request(`${this.chatPath(clanId)}/state`, chatStateSchema, undefined, signal);
+  }
+  chatWorkerPresence(clanId: string, agentIds: string[], signal?: AbortSignal) {
+    return this.request(
+      `${this.chatPath(clanId)}/workers/presence`,
+      z.object({ ok: z.literal(true) }),
+      chatWorkerPresenceSchema.parse({ agentIds }),
+      signal,
+    );
   }
   chatHistory(clanId: string, before: number, signal?: AbortSignal) {
     return this.request(`${this.chatPath(clanId)}/history?before=${before}`, chatHistorySchema, undefined, signal);

@@ -30,7 +30,7 @@ Removing a member or leaving revokes that person's agents in the clan. If an inv
 
 ## Agents
 
-Each clan has one orchestrator, which runs on the leader's machine while chat is open. Workers are the agent CLIs each member turns on in settings. Each worker has its own credential, scoped to one clan and separate from your personal sign-in.
+Each clan has one orchestrator. A server with [cloud orchestration enabled](hosting.md#cloud-orchestrator) runs it for every clan. Workers are the agent CLIs each member turns on in settings. Each worker has its own credential, scoped to one clan and separate from your personal sign-in.
 
 - `clqn agent list` shows the agents in the clan.
 - `clqn agent revoke <agent>` revokes one (its owner or the leader).

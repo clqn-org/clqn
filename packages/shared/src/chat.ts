@@ -111,13 +111,20 @@ export const chatMergeRequestSchema = z.object({
   repository: taskRepositorySchema,
 });
 export type ChatMergeRequest = z.infer<typeof chatMergeRequestSchema>;
-export const chatSessionSchema = z.object({ host: z.string(), clan: z.string() });
+export const chatSessionSchema = z.object({
+  host: z.string(),
+  clan: z.string(),
+  cloudOrchestrator: z.boolean().optional(),
+});
 export const chatInfoSchema = z.object({
   session: chatSessionSchema.nullable(),
   clan: z.string(),
   canStart: z.boolean(),
+  cloudOrchestrator: z.boolean().optional(),
   settings: chatSettingsSchema,
 });
+export const chatWorkerPresenceLimit = 25;
+export const chatWorkerPresenceSchema = z.object({ agentIds: z.array(z.uuid()).max(chatWorkerPresenceLimit) }).strict();
 export const chatHistorySchema = z.object({
   messages: z.array(chatMessageSchema),
   before: z.number().int().positive().nullable(),

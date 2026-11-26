@@ -6,6 +6,7 @@ import {
   chatMetricsWindowSchema,
   chatSettingsSchema,
   chatUsageSchema,
+  chatWorkerPresenceSchema,
   sendChatSchema,
 } from '@clqn/shared';
 import { sql } from 'drizzle-orm';
@@ -34,6 +35,7 @@ import {
   messageView,
   pickNext,
 } from '../db/chat-read.js';
+import { cloudLeader, recordWorkerPresence } from '../db/cloud-chat.js';
 import { requireClan, requirePersonal, type WorkspaceDb } from '../lib/access.js';
 
 async function parse<T>(c: Context, schema: z.ZodType<T>) {
@@ -77,7 +79,7 @@ async function saveSettings(
   return saved!.settings;
 }
 
-export function createChatRoutes(db: WorkspaceDb) {
+export function createChatRoutes(db: WorkspaceDb, cloudOrchestrator = false) {
   const app = new Hono<{ Variables: { user: Actor } }>();
   app.use(
     '*',
@@ -91,7 +93,7 @@ export function createChatRoutes(db: WorkspaceDb) {
     const clanId = c.req.param('clanId')!;
     requirePersonal(actor);
     const membership = await requireClan(db, actor, clanId);
-    return c.json(await chatInfo(db, clanId, actor.id, membership.role === 'leader'));
+    return c.json(await chatInfo(db, clanId, actor.id, membership.role === 'leader', cloudOrchestrator));
   });
   // Members save their own limits when joining the clan, before a session may exist. Only the member can edit them.
   app.post('/settings', async (c) => {
@@ -114,8 +116,9 @@ export function createChatRoutes(db: WorkspaceDb) {
     return c.json(
       await db.transaction(async (tx) => {
         const membership = await requireClan(tx, actor, clanId, 'share');
-        if (membership.role === 'leader')
-          await tx.insert(chats).values({ clanId, hostId: actor.id }).onConflictDoNothing();
+        const hostId =
+          membership.role === 'leader' ? actor.id : cloudOrchestrator ? (await cloudLeader(tx, clanId))?.id : undefined;
+        if (hostId) await tx.insert(chats).values({ clanId, hostId }).onConflictDoNothing();
         await requireChat(tx, clanId, true);
         return saveSettings(tx, clanId, actor.id, settings);
       }),
@@ -128,7 +131,7 @@ export function createChatRoutes(db: WorkspaceDb) {
     const membership = await requireClan(db, actor, clanId);
     const member = await requireChatMember(db, clanId, actor.id);
     const [identity, history, activity, usage, mergeQueue] = await Promise.all([
-      chatIdentity(db, clanId),
+      chatIdentity(db, clanId, cloudOrchestrator),
       chatHistory(db, clanId),
       chatActivity(db, clanId, actor.id),
       chatUsage(db, clanId, actor.id),
@@ -136,7 +139,7 @@ export function createChatRoutes(db: WorkspaceDb) {
     ]);
     const safeNumber = (value: bigint) => Math.min(Number(value), Number.MAX_SAFE_INTEGER);
     return c.json({
-      session: { clan: identity.clan, host: identity.host! },
+      session: { clan: identity.clan, host: identity.host!, cloudOrchestrator: identity.cloudOrchestrator },
       settings: member.settings,
       ...history,
       ...activity,
@@ -176,8 +179,21 @@ export function createChatRoutes(db: WorkspaceDb) {
     });
     return c.json(messageView(message), 201);
   });
+  app.post('/workers/presence', async (c) => {
+    const actor = c.get('user');
+    const clanId = c.req.param('clanId')!;
+    requirePersonal(actor);
+    const { agentIds } = await parse(c, chatWorkerPresenceSchema);
+    await db.transaction(async (tx) => {
+      await requireClan(tx, actor, clanId, 'share');
+      await requireChatMember(tx, clanId, actor.id);
+      await recordWorkerPresence(tx, clanId, actor.id, agentIds);
+    });
+    return c.json({ ok: true });
+  });
   // The orchestrator takes one message at a time; taking it marks it as processing for every member.
   app.post('/inbox', async (c) => {
+    if (cloudOrchestrator) throw new ApiError(403, 'FORBIDDEN', 'The hosted orchestrator handles this clan’s chat');
     const actor = c.get('user');
     const clanId = c.req.param('clanId')!;
     await requireOrchestrator(db, actor, clanId);
@@ -190,6 +206,7 @@ export function createChatRoutes(db: WorkspaceDb) {
     return c.json({ ...history, next, held });
   });
   app.post('/messages/:id/decision', async (c) => {
+    if (cloudOrchestrator) throw new ApiError(403, 'FORBIDDEN', 'The hosted orchestrator handles this clan’s chat');
     const actor = c.get('user');
     const clanId = c.req.param('clanId')!;
     const id = uuid(c.req.param('id'));

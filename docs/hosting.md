@@ -55,6 +55,23 @@ Public endpoints: `POST /auth/github/start` and `POST /auth/github/poll`; send t
 
 Run the API as one Cloud Run service with managed Cloud SQL PostgreSQL. The following sections cover this setup.
 
+## Cloud orchestrator
+
+Configure the API once with a server-side `OPENAI_API_KEY`. Ordinary `clqn` then uses cloud orchestration for every clan on this server. The key belongs to your OpenAI API project, which pays for the orchestration calls. Self-hosting lets a team use its own project. Local workers use each member's existing agent CLI and settings. A server without a key uses leader-hosted orchestration for local development and existing self-hosted installs.
+
+Store the key in Secret Manager and grant the Cloud Run runtime service account access to it. After migrating and deploying an image with cloud orchestration support, update the service:
+
+```sh
+gcloud run services update clqn-api \
+  --project "$CLQN_PROJECT" --region "$CLQN_REGION" \
+  --update-secrets OPENAI_API_KEY=clqn-openai-api-key:1 \
+  --min 1 --no-cpu-throttling
+```
+
+The minimum instance and instance-based billing let the API process queued messages between incoming HTTP requests. Docker Compose reads the same key from its private `.env`. Keeping that API running provides the same behavior for clients.
+
+The API sends the current request, recent clan chat, and information about available workers to OpenAI. It requests `store: false` for Responses API calls. Set `CLQN_CLOUD_MODEL` on the API to override `gpt-5.4-mini` with another model that supports structured outputs. `CLQN_CLOUD_CALLS_PER_HOUR` caps model call attempts across API replicas sharing the database and defaults to 120. Queued messages can resume when the hourly budget resets.
+
 ## Build and run the container
 
 ```sh
@@ -167,8 +184,8 @@ No client secret is needed. Keep database and webhook settings intact. Unset `GI
 
 Before relying on a deployment, test on separate machines with real Codex and Claude Code applications:
 
-1. Run `clqn` as the leader, create a clan, invite a teammate, and start the chat. Run `clqn` as the teammate and join with the invited GitHub account.
-2. Confirm that installed agents appear in settings. Send a request in chat, approve the delegation, and confirm the worker's result appears in the transcript.
+1. Run `clqn` as the leader, create a clan, invite a teammate, and exit. With cloud orchestration enabled, run `clqn` as the teammate and join with the invited GitHub account.
+2. Confirm that installed agents appear in settings. With only the teammate online, send a request, approve their worker's delegation, and confirm the result appears in chat.
 3. Link the repository and verify live webhook delivery, clean default-branch sync, and the fallback after a missed delivery.
 4. Confirm that agent access to another clan and personal-only operations fails. Revoke a test token and confirm its next request fails.
 

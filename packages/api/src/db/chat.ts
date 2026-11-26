@@ -5,9 +5,11 @@ import {
   bigserial,
   foreignKey,
   index,
+  integer,
   jsonb,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -23,6 +25,25 @@ export const chats = pgTable('chats', {
   hostId: uuid('host_id')
     .notNull()
     .references(() => users.id),
+  cloudLeaseId: uuid('cloud_lease_id'),
+  cloudMessageId: uuid('cloud_message_id'),
+  cloudLeaseExpiresAt: timestamp('cloud_lease_expires_at', { withTimezone: true }),
+  cloudLastAttemptAt: timestamp('cloud_last_attempt_at', { withTimezone: true }),
+  cloudRetryAt: timestamp('cloud_retry_at', { withTimezone: true }),
+  cloudAttempts: smallint('cloud_attempts').notNull().default(0),
+});
+
+export const cloudChatQuota = pgTable('cloud_chat_quota', {
+  id: smallint('id').primaryKey(),
+  hour: timestamp('hour', { withTimezone: true }).notNull(),
+  calls: integer('calls').notNull(),
+});
+
+export const cloudWorkerPresence = pgTable('cloud_worker_presence', {
+  agentId: uuid('agent_id')
+    .primaryKey()
+    .references(() => agents.id, { onDelete: 'cascade' }),
+  seenAt: timestamp('seen_at', { withTimezone: true }).notNull(),
 });
 
 export const chatMembers = pgTable(

@@ -1,18 +1,18 @@
 # Chat and keys
 
-Run `clqn` in your project clone. Everyone in the clan sees the same chat, and it's saved between sessions. The chat runs on the leader's machine: the leader's `clqn` starts the orchestrator, so keep it open while the team works.
+Run `clqn` in your project clone. Everyone in the clan sees the same chat, and it's saved between sessions. With cloud orchestration enabled, any clan member can open chat and start working even if everyone else is offline. [Set up cloud orchestration](hosting.md#cloud-orchestrator) for a self-hosted API.
 
 ## Send a message
 
 Type a task, question, or piece of project context and press **Enter**. Messages wait in a queue. The orchestrator handles one at a time, oldest first, and shows the one it's working on as **Processing**. Its answer appears right below your message.
 
-The orchestrator remembers the conversation for 20 messages, then starts a fresh session.
+The cloud orchestrator uses recent messages as context for each turn.
 
 If the orchestrator needs more detail, a question appears above the composer. Press **Ctrl+Q**, type your answer, and press **Enter**.
 
 ## Approve agents
 
-When the orchestrator wants to start an agent on your machine, you see a **Spawn** line with the task, model, and estimated tokens. Press **Ctrl+P** to focus it, use **↑ ↓** to choose if there are several, then press **Y** to approve or **N** to decline.
+When the orchestrator wants to start an agent on your machine, you see a **Spawn** line with the task, model, and estimated tokens. Press **Ctrl+P** to focus it, use **↑ ↓** to choose if there are several, then press **Y** to approve or **N** to decline. Keep chat open on the machine running the worker and enable an installed agent CLI in settings.
 
 To approve automatically, set **Spawn approval** to **Automatic** in settings. Your [limits](policies.md) apply either way.
 

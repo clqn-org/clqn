@@ -35,14 +35,15 @@ export function messageView(row: typeof chatMessages.$inferSelect): ChatMessage 
   };
 }
 
-export async function chatIdentity(db: WorkspaceDb, clanId: string) {
+export async function chatIdentity(db: WorkspaceDb, clanId: string, cloudOrchestrator = false) {
   const [identity] = await db
     .select({ host: users.email, clan: clans.name })
     .from(clans)
     .leftJoin(chats, eq(chats.clanId, clans.id))
     .leftJoin(users, eq(users.id, chats.hostId))
     .where(eq(clans.id, clanId));
-  return identity!;
+  const { clan, host } = identity!;
+  return { clan, host: cloudOrchestrator && host ? 'Cloud orchestrator' : host, cloudOrchestrator };
 }
 
 export async function chatInfo(
@@ -50,14 +51,21 @@ export async function chatInfo(
   clanId: string,
   userId: string,
   canStart: boolean,
+  cloudOrchestrator = false,
   defaults: ChatSettings = defaultChatSettings,
 ) {
   const [identity, [member]] = await Promise.all([
-    chatIdentity(db, clanId),
+    chatIdentity(db, clanId, cloudOrchestrator),
     db.select().from(chatMembers).where(memberScope(clanId, userId)),
   ]);
   const { clan, host } = identity;
-  return { clan, session: host === null ? null : { clan, host }, canStart, settings: member?.settings ?? defaults };
+  return {
+    clan,
+    session: host === null ? null : { clan, host, cloudOrchestrator },
+    canStart,
+    cloudOrchestrator,
+    settings: member?.settings ?? defaults,
+  };
 }
 
 export async function chatHistory(db: WorkspaceDb, clanId: string, before?: number, size = 60) {
