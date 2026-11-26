@@ -1,3 +1,9 @@
+import { clip } from './text.js';
+
+export function terminalSizeNotice(columns: number, rows: number) {
+  return columns < 28 || rows < 12 ? clip('Enlarge terminal · Ctrl+C to quit', Math.max(1, columns)) : undefined;
+}
+
 // Keep escape sequences in API text from reaching the terminal, and make URLs clickable in a TTY.
 // The full URL remains visible for copying.
 export function terminalText(text: string, tty: boolean): string {
@@ -11,7 +17,8 @@ export function terminalText(text: string, tty: boolean): string {
 }
 
 // Readline emits the SGR mouse prefix separately from the button and coordinates.
-export function mouseReportReader(scroll: (lines: number) => void) {
+// `click` gets the 1-based column and row of a left-button press.
+export function mouseReportReader(scroll: (lines: number) => void, click?: (column: number, row: number) => void) {
   let pending: { report: string; at: number } | undefined;
   return (text: string | undefined, sequence: string | undefined): boolean => {
     if (sequence === '\x1b[<') {
@@ -27,12 +34,13 @@ export function mouseReportReader(scroll: (lines: number) => void) {
       pending = { report, at: Date.now() };
       return true;
     }
-    const match = /^(\d+);[1-9]\d*;[1-9]\d*([Mm])$/.exec(report);
+    const match = /^(\d+);([1-9]\d*);([1-9]\d*)([Mm])$/.exec(report);
     if (!match) return false;
-    if (match[2] === 'M') {
+    if (match[4] === 'M') {
       const button = Number(match[1]);
       if (button === 64) scroll(3);
       if (button === 65) scroll(-3);
+      if (button === 0) click?.(Number(match[2]), Number(match[3]));
     }
     return true;
   };

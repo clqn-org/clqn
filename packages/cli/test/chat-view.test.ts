@@ -78,3 +78,39 @@ test('scrolling past the start keeps the oldest transcript page full', () => {
   const short = { ...view, columns: 80, rows: 24, messages: [{ ...message, text: log.slice(0, 15).join('\n') }] };
   assert.deepEqual(chatFrame({ ...short, scroll: 3 }), chatFrame({ ...short, scroll: 0 }));
 });
+
+test('peach-accented transcript lines keep the agents divider aligned', () => {
+  const answer: ChatMessage = { ...message, id: '00000000-0000-4000-8000-000000000003', role: 'orchestrator' };
+  const { lines } = chatFrame({
+    columns: 100,
+    rows: 24,
+    color: true,
+    clan: 'Test',
+    userId: 'me',
+    state: {
+      session: { clan: 'Test', host: 'ana@example.com' },
+      settings: { approval: 'manual', tokenLimit: null, agentLimit: null, allowedModels: null, commands: 'sandboxed' },
+      messages: [message, answer],
+      before: null,
+      approvals: [],
+      questions: [],
+      runs: [],
+      queued: 0,
+      running: 0,
+      usage: { tokens: 0, reserved: 0, agents: 0 },
+    },
+    messages: [message, answer],
+    draft: '',
+    caret: 0,
+    scroll: 0,
+    hasOlder: false,
+    approval: 0,
+    approvalFocused: false,
+  });
+  const columns = lines
+    .map((line) => line.replace(/\x1b\[[\d;]*m/g, ''))
+    .filter((line) => line.includes(' │ '))
+    .map((line) => line.indexOf(' │ '));
+  assert.ok(columns.length > 2);
+  assert.equal(new Set(columns).size, 1);
+});

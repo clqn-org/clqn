@@ -51,7 +51,7 @@ Sign in with GitHub, choose **Create a clan**, and say yes to linking the reposi
 
 ## Invite teammates
 
-In the chat, press **Ctrl+S**, type their email in **Invite**, and press **Enter**. Or, from another terminal:
+Press <kbd>Ctrl</kbd>+<kbd>S</kbd> to open settings and type teammate email in **Invite**. Or, from another terminal:
 
 ```sh
 clqn invite teammate@example.com
@@ -61,7 +61,7 @@ Teammates run `clqn` in their own clone, sign in with the invited GitHub account
 
 ## Work
 
-<img src="docs/assets/demo.gif" width="1052" alt="A clqn chat: a member asks for rate limiting, the orchestrator splits it into two tasks, the member approves one, two workers run, and the result arrives as a pull request the leader approves">
+<img src="docs/assets/demo.gif" width="1052" alt="Starting clqn: create a clan and start the session. In the chat, a member asks for rate limiting, the orchestrator splits it into two tasks, the member approves one, two workers run, and the result arrives as a pull request the leader approves">
 
 Everyone freely prompts the orchestrator. When the orchestrator wants to start an agent on your machine, approve or decline with <kbd>Y</kbd>/<kbd>N</kbd>. Results and pull requests appear in the chat. As leader, press <kbd>Ctrl</kbd>+<kbd>L</kbd> to review a pull request and <kbd>Y</kbd> to approve the merge; clqn merges it once GitHub checks pass.
 

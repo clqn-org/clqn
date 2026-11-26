@@ -89,6 +89,8 @@ export const githubPollSchema = z.discriminatedUnion('status', [
   z.object({ status: z.enum(['expired', 'denied', 'account_conflict']) }),
 ]);
 export const VERSION = '0.4.0';
+// The day VERSION was released, shown on the CLI's landing page.
+export const RELEASE_DATE = '2026-11-25';
 export const healthSchema = z.object({
   status: z.literal('ok'),
   service: z.literal('clqn-api'),

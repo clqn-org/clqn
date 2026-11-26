@@ -128,7 +128,7 @@ test('choosing a clan opens an existing one, creates one, or reports no invitati
   const returning = scripted(['']);
   assert.deepEqual(await chooseClan({ connect, current: existing.id, ...returning }), existing);
   assert.match(returning.printed[0]!, /1\. Existing \(last used\)\n {2}2\. Create a clan\n {2}3\. Join a clan/);
-  assert.deepEqual(returning.questions, ['Enter a number (Enter for Existing): ']);
+  assert.deepEqual(returning.questions, ['Enter a number: ']);
 
   assert.deepEqual(saved, []);
 
@@ -137,7 +137,7 @@ test('choosing a clan opens an existing one, creates one, or reports no invitati
   const create = scripted(['2', '1', '', '']);
   assert.deepEqual(await chooseClan({ connect, ...create }), created);
   assert.match(create.printed.join('\n'), /No pending invitations\. Ask a clan leader to invite me@example\.com\./);
-  assert.match(create.questions.at(-2)!, /^Clan name \(/);
+  assert.match(create.questions.at(-2)!, /^Clan name: $/);
   assert.match(create.printed.join('\n'), /1\. Full access \(no limits\)\n {2}2\. Custom/);
   assert.deepEqual(saved, [
     { approval: 'manual', tokenLimit: null, agentLimit: null, allowedModels: null, commands: 'sandboxed' },
