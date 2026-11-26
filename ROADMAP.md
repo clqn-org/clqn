@@ -6,7 +6,7 @@ Type `clqn`, and a chat opens in your terminal. You talk to one orchestrator age
 
 1. **Type `clqn`.** That's the only command. The first time, it signs you in with GitHub.
 2. **Make or join a clan.** Pick "Create a clan" or "Join a clan" (your invites are listed). Then the full-screen chat opens, and everything happens there.
-3. **Message the orchestrator.** Everyone in the clan talks to the same orchestrator, which runs on the leader's machine. Messages wait in a queue and get handled in order.
+3. **Message the orchestrator.** One host handles the shared queue in order. The leader normally hosts, and multiple nominated members can opt in to cover when a host goes offline.
 4. **The orchestrator splits up the work.** It turns requests into tasks and picks who should do each one. You never manage tasks yourself.
 5. **You say yes or no.** When the orchestrator wants to start an agent on your machine, you get asked. Type `y` or `n`. It never goes over your limits.
 6. **Watch it happen.** A sidebar shows who's working, task progress, and tokens used over time.
@@ -27,7 +27,7 @@ Each member sets their own:
 - Invite teammates by email
 - The chat screen: a full-screen chat, saved on the server, with an agents sidebar and settings (Ctrl+S)
 - Message queue in PostgreSQL: messages stay queued until the orchestrator handles them
-- One orchestrator per clan (the leader's). It starts in the background when the leader opens `clqn` and works the queue. Through MCP it replies, asks clarifying questions (answer with Ctrl+Q), and proposes work
+- One active orchestrator per clan, hosted by the leader or an opted-in backup. Through MCP it replies, asks clarifying questions (answer with Ctrl+Q), and proposes work
 - Yes/no approvals in the chat (Ctrl+P, then `y`/`n`), or automatic approval
 - Approved agents start in the background on the member's machine, with the approved model
 - Limits: new members pick Full access (no limits) or Custom when they join; edit token, agent-count, and model limits in settings (Ctrl+S). All are enforced before each delegation
