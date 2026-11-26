@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   bigserial,
+  check,
   foreignKey,
   index,
   jsonb,
@@ -16,14 +17,44 @@ import {
 import { agents, clans, memberships, users } from './schema.js';
 import { tasks } from './tasks.js';
 
-export const chats = pgTable('chats', {
-  clanId: uuid('clan_id')
-    .primaryKey()
-    .references(() => clans.id, { onDelete: 'cascade' }),
-  hostId: uuid('host_id')
-    .notNull()
-    .references(() => users.id),
-});
+export const chats = pgTable(
+  'chats',
+  {
+    clanId: uuid('clan_id')
+      .primaryKey()
+      .references(() => clans.id, { onDelete: 'cascade' }),
+    hostId: uuid('host_id')
+      .notNull()
+      .references(() => users.id),
+    leaseAgentId: uuid('lease_agent_id').references(() => agents.id),
+    leaseId: uuid('lease_id'),
+    leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      'chats_host_lease_fields',
+      sql`(${table.leaseAgentId} is null and ${table.leaseId} is null and ${table.leaseExpiresAt} is null)
+        or (${table.leaseAgentId} is not null and ${table.leaseId} is not null)`,
+    ),
+  ],
+);
+
+export const chatBackups = pgTable(
+  'chat_backups',
+  {
+    clanId: uuid('clan_id')
+      .notNull()
+      .references(() => chats.clanId, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.clanId, table.userId],
+      foreignColumns: [memberships.clanId, memberships.userId],
+    }).onDelete('cascade'),
+    primaryKey({ columns: [table.clanId, table.userId] }),
+  ],
+);
 
 export const chatMembers = pgTable(
   'chat_members',
