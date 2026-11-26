@@ -18,7 +18,14 @@ import type {
   TaskRepository,
 } from '@clqn/shared';
 import { startAgentRunner } from '../src/agent-runner.js';
-import { agentCommand, agentOutput, agentProfilePath, readAgentsOff, saveAgentProfile } from '../src/agent-session.js';
+import {
+  agentCommand,
+  agentOutput,
+  agentProfilePath,
+  installedRuntimes,
+  readAgentsOff,
+  saveAgentProfile,
+} from '../src/agent-session.js';
 
 const server = 'http://127.0.0.1:9';
 const clanId = randomUUID();
@@ -565,6 +572,21 @@ test('a member without Claude Code or Codex sees why agents are off', async (t) 
     'Agents off · Install Claude Code or Codex to run agents. Make sure claude or codex is on PATH.',
   );
   assert.equal(f.spawned.length, 0);
+});
+
+test('agent CLIs are found on PATH, as .exe or .com programs on Windows', async (t) => {
+  const programs = await mkdtemp(join(tmpdir(), 'clqn-path-'));
+  const folders = await mkdtemp(join(tmpdir(), 'clqn-path-'));
+  t.after(() => Promise.all([rm(programs, { recursive: true }), rm(folders, { recursive: true })]));
+  await writeFile(join(programs, 'claude.exe'), '', { mode: 0o755 });
+  assert.deepEqual(await installedRuntimes(programs, 'win32'), ['claude']);
+  assert.deepEqual(await installedRuntimes(programs, 'linux'), []);
+  await writeFile(join(programs, 'codex'), '', { mode: 0o755 });
+  assert.deepEqual(await installedRuntimes(programs, 'win32'), ['codex', 'claude']);
+  assert.deepEqual(await installedRuntimes(programs, 'linux'), ['codex']);
+  await mkdir(join(folders, 'claude.com'));
+  assert.deepEqual(await installedRuntimes(`${folders}${delimiter}${programs}`, 'win32'), ['codex', 'claude']);
+  assert.deepEqual(await installedRuntimes(folders, 'win32'), []);
 });
 
 test('runtime output yields total tokens, the final message, and why a run failed', () => {
