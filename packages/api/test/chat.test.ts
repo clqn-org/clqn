@@ -3,12 +3,14 @@ import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import {
   type ChatState,
+  chatAttachmentFileSchema,
   chatInboxSchema,
   chatMetricsSchema,
   chatStateSchema,
   defaultChatSettings,
   type SendChat,
 } from '@clqn/shared';
+import { sql } from 'drizzle-orm';
 import { createApp } from '../src/app.js';
 import { database, skip } from './postgres.js';
 
@@ -284,4 +286,73 @@ test('PostgreSQL: shared chat, held work, owner approvals, and competing delegat
     [anyModel.id, 'vendor/new-model'],
     [defaultModel.id, null],
   ]);
+});
+
+test('PostgreSQL: attachments reach clan members and the delegated worker only', { skip }, async (t) => {
+  const { connection, user } = await database(t);
+  const [host, outsider] = await Promise.all([user(), user()]);
+  const clan = await connection.store.createClan(host.user.id, 'Attachments');
+  const coordinator = await connection.store.registerAgent(host.user, clan.id, 'Coordinator', 'orchestrator');
+  const worker = await connection.store.registerAgent(host.user, clan.id, 'Worker');
+  const app = createApp(connection.store, connection.db);
+  const chat = (token: string, suffix: string, body?: object) =>
+    app.request(`/v1/clans/${clan.id}/chat${suffix}`, {
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }),
+    });
+  const state = async () => chatStateSchema.parse(await (await chat(host.token, '/state')).json());
+  const png = { name: 'screen.png', type: 'image/png', data: Buffer.from('png bytes').toString('base64') };
+  const pdf = { name: 'spec.pdf', type: 'application/pdf', data: Buffer.from('pdf bytes').toString('base64') };
+  assert.equal((await chat(host.token, '/join', defaultChatSettings)).status, 200);
+
+  const tooMany = { id: randomUUID(), text: 'Five files', attachments: [png, png, png, png, png] };
+  assert.equal((await chat(host.token, '/messages', tooMany)).status, 400);
+  const wrongType = { id: randomUUID(), text: 'A zip', attachments: [{ ...png, type: 'application/zip' }] };
+  assert.equal((await chat(host.token, '/messages', wrongType)).status, 400);
+  // The body limit leaves room for four files of the maximum size, but not much more.
+  const huge = 'A'.repeat(32 * 1024 * 1024);
+  assert.equal((await chat(host.token, '/messages', { id: randomUUID(), text: huge })).status, 413);
+
+  const question = { id: randomUUID(), text: 'Build this screen [Image #1]', attachments: [png] };
+  assert.equal((await chat(host.token, '/messages', question)).status, 201);
+  // A retry keeps the first copy instead of storing the files twice.
+  assert.equal((await chat(host.token, '/messages', question)).status, 201);
+  const [image] = (await state()).messages.find(({ id }) => id === question.id)!.attachments!;
+  assert.deepEqual({ ...image, id: undefined }, { id: undefined, name: 'screen.png', type: 'image/png', size: 9 });
+  const count = await connection.db.execute(
+    sql`select count(*)::int as count from chat_attachments where message_id = ${question.id}`,
+  );
+  assert.equal(count[0]!.count, 1);
+
+  const download = async (token: string, id: string) => chat(token, `/attachments/${id}`);
+  assert.equal((await download(outsider.token, image!.id)).status, 404);
+  assert.equal((await download(host.token, randomUUID())).status, 404);
+  const file = chatAttachmentFileSchema.parse(await (await download(coordinator.token, image!.id)).json());
+  assert.equal(Buffer.from(file.data, 'base64').toString(), 'png bytes');
+
+  // A delegated answer to a clarification carries both messages' files to the worker.
+  const inbox = chatInboxSchema.parse(await (await chat(coordinator.token, '/inbox', {})).json());
+  assert.equal(inbox.next?.attachments?.[0]?.id, image!.id);
+  const clarify = { action: 'clarify', text: 'Which framework?', hold: question.id, pickId: inbox.pickId };
+  assert.equal((await chat(coordinator.token, `/messages/${question.id}/decision`, clarify)).status, 200);
+  const answer = { id: randomUUID(), text: 'React, per [PDF #1: spec.pdf]', replyTo: question.id, attachments: [pdf] };
+  assert.equal((await chat(host.token, '/messages', answer)).status, 201);
+  const next = chatInboxSchema.parse(await (await chat(coordinator.token, '/inbox', {})).json());
+  const delegate = {
+    action: 'delegate',
+    title: 'Build the screen',
+    description: 'Build the screen in React',
+    workerId: worker.agent.id,
+    estimatedTokens: 100,
+    pickId: next.pickId,
+  };
+  assert.equal((await chat(coordinator.token, `/messages/${answer.id}/decision`, delegate)).status, 200);
+  assert.equal((await chat(host.token, `/messages/${answer.id}/approval`, { approve: true })).status, 200);
+  const [run] = (await state()).runs;
+  assert.deepEqual(
+    run?.attachments?.map(({ name }) => name),
+    ['screen.png', 'spec.pdf'],
+  );
+  const worked = chatAttachmentFileSchema.parse(await (await download(worker.token, run!.attachments![1]!.id)).json());
+  assert.equal(Buffer.from(worked.data, 'base64').toString(), 'pdf bytes');
 });

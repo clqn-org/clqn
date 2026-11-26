@@ -144,6 +144,8 @@ export function agentCommand(
     // Codex only: continue this earlier session, so the agent remembers it.
     resume?: string | undefined;
     leaseId?: string | undefined;
+    // Workers only: the folder of files attached to the task, and which of them are images.
+    attachments?: { dir: string; images: string[] } | undefined;
   },
 ): AgentCommand {
   const commands = options.role === 'worker' ? (options.commands ?? 'sandboxed') : 'off';
@@ -175,6 +177,8 @@ export function agentCommand(
           `mcp_servers.clqn={command=${JSON.stringify(command)},args=${JSON.stringify(args)},default_tools_approval_mode="approve"}`,
           '-c',
           `shell_environment_policy.set.CLQN_AGENT_PROFILE=${JSON.stringify(profilePath)}`,
+          // With =, each flag takes exactly one file, so the prompt's - is not read as an image.
+          ...(options.attachments?.images.map((image) => `--image=${image}`) ?? []),
           ...(options.resume ? [options.resume] : []),
           '-',
         ]
@@ -198,6 +202,8 @@ export function agentCommand(
           // worktree (git metadata included, hooks and config excluded) and the network is limited to the npm
           // registry. npm's cache moves out of ~/.npm, which the sandbox blocks, into a directory it may write.
           ...(commands === 'sandboxed' ? ['--settings', JSON.stringify(workerSandbox), '--add-dir', npmCache] : []),
+          // Lets the worker read attached files, which stay outside the worktree so they are never committed.
+          ...(options.attachments ? ['--add-dir', options.attachments.dir] : []),
           '--permission-mode',
           commands === 'unrestricted' ? 'bypassPermissions' : options.role === 'worker' ? 'acceptEdits' : 'default',
           '--allowedTools',

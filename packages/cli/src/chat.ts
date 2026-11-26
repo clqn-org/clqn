@@ -3,17 +3,20 @@ import { emitKeypressEvents, type Key } from 'node:readline';
 import {
   ApiError,
   allowedModelsSchema,
+  type ChatAttachmentInput,
   type ChatMessage,
   type ChatMetrics,
   type ChatMetricsWindow,
   type ChatSettings,
   type ChatState,
   type ClqnClient,
+  chatAttachmentLimit,
   createInvitationSchema,
   type SendChat,
 } from '@clqn/shared';
 import type { AgentChoices } from './agent-runner.js';
 import type { Runtime } from './agent-session.js';
+import { clipboardImage, droppedPaths, readAttachment } from './attachments.js';
 import {
   backupHostingField,
   characters,
@@ -99,6 +102,8 @@ export async function runChat(
   let state: ChatState | undefined;
   let draft = '';
   let caret = 0;
+  // Files in the draft. Each is sent only while its placeholder, such as [Image #1], is still in the text.
+  let attachments: { label: string; file: ChatAttachmentInput }[] = [];
   let scroll = 0;
   let maxScroll = 0;
   const older: ChatMessage[] = [];
@@ -454,6 +459,28 @@ export async function runChat(
     }
   }
 
+  async function attach(read: () => Promise<ChatAttachmentInput | undefined>) {
+    try {
+      const file = await read();
+      if (!file) {
+        notice = 'No image on the clipboard';
+        return;
+      }
+      const number = attachments.length + 1;
+      const label = file.type === 'application/pdf' ? `[PDF #${number}: ${file.name}]` : `[Image #${number}]`;
+      attachments.push({ label, file });
+      edit(`${label} `);
+    } catch (error) {
+      notice = help(error);
+    } finally {
+      draw();
+    }
+  }
+
+  async function attachPaths(paths: string[]) {
+    for (const path of paths) await attach(() => readAttachment(path));
+  }
+
   function edit(text: string) {
     const insert = plain(text).slice(0, Math.max(0, 4000 - draft.length));
     draft = draft.slice(0, caret) + insert + draft.slice(caret);
@@ -546,6 +573,8 @@ export async function runChat(
       else if (!key.ctrl && !key.meta && /^[yn]$/i.test(text)) void decide(text.toLowerCase() === 'y');
     } else if (key.ctrl && key.name === 'r' && failed) {
       void flush();
+    } else if (key.ctrl && key.name === 'v') {
+      void attach(() => clipboardImage());
     } else if (key.name === 'escape') {
       reply = undefined;
     } else if (['pageup', 'pagedown', 'up', 'down'].includes(key.name ?? '')) {
@@ -562,14 +591,21 @@ export async function runChat(
         notice = 'Outbox full · Ctrl+R Retry';
         return;
       }
+      const files = attachments.filter(({ label }) => draft.includes(label)).map(({ file }) => file);
+      if (files.length > chatAttachmentLimit.files) {
+        notice = `Attach up to ${chatAttachmentLimit.files} files per message`;
+        return;
+      }
       const force = key.name === 'f';
       outbox.push({
         id: randomUUID(),
         text: draft.trim(),
         ...(reply?.replyTo ? { replyTo: reply.replyTo } : {}),
         ...(force ? { force } : {}),
+        ...(files.length ? { attachments: files } : {}),
       });
       draft = '';
+      attachments = [];
       caret = scroll = 0;
       reply = undefined;
       if (force || !failed) void flush();
@@ -619,8 +655,11 @@ export async function runChat(
     }
     if (paste !== undefined) {
       if (key.name === 'paste-end') {
-        if (state && !setup && !metrics && !reviews && !approvalFocused) edit(paste);
-        else if (setup?.inviteText !== undefined && setup.field === 6) {
+        const paths = droppedPaths(paste);
+        if (state && !setup && !metrics && !reviews && !approvalFocused) {
+          if (paths) void attachPaths(paths);
+          else edit(paste);
+        } else if (setup?.inviteText !== undefined && setup.field === 6) {
           setup.inviteText = ((replaceField ? '' : setup.inviteText) + plain(paste).trim()).slice(0, 254);
           replaceField = false;
         }

@@ -26,6 +26,12 @@ Press **Ctrl+F** to force-send your draft. The orchestrator interrupts its curre
 
 The orchestrator remembers the conversation for 20 messages, then starts a fresh session.
 
+### Attach images and PDFs
+
+Drag an image or PDF onto the terminal, or paste its path, to attach it. Press **Ctrl+V** to attach an image from the clipboard (macOS, and Linux with `wl-paste` or `xclip`). Each file shows as a placeholder such as `[Image #1]` in your draft; delete the placeholder to remove it. A message can carry up to 4 PNG, JPEG, GIF, WebP, or PDF files of up to 5 MB each.
+
+Every clan member can open what you attach. The orchestrator sees attached images and the names of PDFs. A worker it delegates the message to gets every file, along with those of the message you were answering.
+
 If the orchestrator needs more detail, a question appears above the composer. Press **Ctrl+Q**, type your answer, and press **Enter**.
 
 ## Approve agents
@@ -54,6 +60,7 @@ On macOS, use the **Ctrl** keys: function keys usually control brightness and vo
 | Ctrl+S (F2) | Settings |
 | Ctrl+G (F5) | Metrics. **T** or **Tab** switches between 24 hours and 7 days |
 | Mouse wheel, ↑ ↓, Page Up, Page Down | Scroll chat history. **End** jumps back to the latest. To select text, hold **Option** (iTerm2, Terminal) or **Shift** (most others) while dragging |
+| Ctrl+V | Attach an image from the clipboard |
 | Ctrl+R | Retry a message that failed to send |
 | Ctrl+C | Quit |
 

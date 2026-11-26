@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  ApiError,
   type ChatMergeRequest,
   type ChatMessage,
   type ChatRun,
@@ -9,7 +10,7 @@ import {
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { WorkspaceDb } from '../lib/access.js';
-import { chatBackups, chatMembers, chatMessages, chats } from './chat.js';
+import { chatAttachments, chatBackups, chatMembers, chatMessages, chats } from './chat.js';
 import { liveChatLease } from './chat-host.js';
 import { agents, clans, linkedRepositories, users } from './schema.js';
 import { tasks } from './tasks.js';
@@ -36,6 +37,7 @@ export function messageView(row: typeof chatMessages.$inferSelect): ChatMessage 
     replyTo,
     ...(processing ? { processing } : {}),
     ...(row.force ? { force: true } : {}),
+    ...(row.attachments?.length ? { attachments: row.attachments } : {}),
   };
 }
 
@@ -267,6 +269,7 @@ export async function chatActivity(db: WorkspaceDb, clanId: string, userId: stri
     status: runStatus(row),
     tokens: row.tokens,
     ...(row.repository ? { repository: row.repository } : {}),
+    ...(row.proposal!.attachments?.length ? { attachments: row.proposal!.attachments } : {}),
   }));
   return {
     queued: queue!.total,
@@ -280,4 +283,14 @@ export async function chatActivity(db: WorkspaceDb, clanId: string, userId: stri
       model: proposal!.model ?? null,
     })),
   };
+}
+
+export async function chatAttachment(db: WorkspaceDb, clanId: string, id: string) {
+  const [file] = await db
+    .select()
+    .from(chatAttachments)
+    .where(and(eq(chatAttachments.clanId, clanId), eq(chatAttachments.id, id)));
+  if (!file) throw new ApiError(404, 'NOT_FOUND', 'Attachment not found');
+  const { name, type, size, data } = file;
+  return { id, name, type, size, data: data.toString('base64') };
 }

@@ -1,12 +1,14 @@
-import type { ChatMessage, ChatSettings } from '@clqn/shared';
+import type { ChatAttachment, ChatMessage, ChatSettings } from '@clqn/shared';
 import { sql } from 'drizzle-orm';
 import {
   bigint,
   bigserial,
   boolean,
   check,
+  customType,
   foreignKey,
   index,
+  integer,
   jsonb,
   pgTable,
   primaryKey,
@@ -77,7 +79,14 @@ export const chatMembers = pgTable(
 );
 
 // Proposals saved before model limits have no model; treat them as the worker's default (null).
-export type ChatProposal = { title: string; description: string; estimatedTokens: number; model?: string | null };
+export type ChatProposal = {
+  title: string;
+  description: string;
+  estimatedTokens: number;
+  model?: string | null;
+  // Files the worker gets: the delegated message's and those of the message it answered.
+  attachments?: ChatAttachment[];
+};
 
 export const chatMessages = pgTable(
   'chat_messages',
@@ -104,6 +113,7 @@ export const chatMessages = pgTable(
     // When the orchestrator last took this message from its inbox to handle it next.
     pickedAt: timestamp('picked_at', { withTimezone: true }),
     pickId: uuid('pick_id'),
+    attachments: jsonb('attachments').$type<ChatAttachment[]>(),
   },
   (table) => [
     index('chat_messages_history_idx').on(table.clanId, table.sequence),
@@ -123,4 +133,25 @@ export const chatTokenHours = pgTable(
     tokens: bigint('tokens', { mode: 'number' }).notNull(),
   },
   (table) => [primaryKey({ columns: [table.clanId, table.hour] })],
+);
+
+const bytea = customType<{ data: Buffer }>({ dataType: () => 'bytea' });
+
+// File contents stay out of chat_messages so history reads only their names.
+export const chatAttachments = pgTable(
+  'chat_attachments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    clanId: uuid('clan_id')
+      .notNull()
+      .references(() => chats.clanId, { onDelete: 'cascade' }),
+    messageId: uuid('message_id')
+      .notNull()
+      .references(() => chatMessages.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    type: text('type').$type<ChatAttachment['type']>().notNull(),
+    size: integer('size').notNull(),
+    data: bytea('data').notNull(),
+  },
+  (table) => [index('chat_attachments_message_idx').on(table.messageId)],
 );

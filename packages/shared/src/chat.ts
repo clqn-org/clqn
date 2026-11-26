@@ -45,8 +45,42 @@ const chatText = z
   .max(4000)
   .refine((text) => !text.includes('\0'));
 const tokenCount = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+// Images and PDFs a member attaches to a message, sent with it as base64.
+export const chatAttachmentTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf'] as const;
+export const chatAttachmentLimit = { files: 4, bytes: 5 * 1024 * 1024 };
+const attachmentName = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .refine((name) => !/[\x00-\x1f\x7f]/.test(name));
+export const chatAttachmentInputSchema = z
+  .object({
+    name: attachmentName,
+    type: z.enum(chatAttachmentTypes),
+    data: z
+      .base64()
+      .max(Math.ceil(chatAttachmentLimit.bytes / 3) * 4)
+      .min(1),
+  })
+  .strict();
+export type ChatAttachmentInput = z.infer<typeof chatAttachmentInputSchema>;
+export const chatAttachmentSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  type: z.enum(chatAttachmentTypes),
+  size: z.number().int().nonnegative(),
+});
+export type ChatAttachment = z.infer<typeof chatAttachmentSchema>;
+export const chatAttachmentFileSchema = chatAttachmentSchema.extend({ data: z.base64() });
 export const sendChatSchema = z
-  .object({ id: z.uuid(), text: chatText, replyTo: z.uuid().optional(), force: z.boolean().optional() })
+  .object({
+    id: z.uuid(),
+    text: chatText,
+    replyTo: z.uuid().optional(),
+    force: z.boolean().optional(),
+    attachments: z.array(chatAttachmentInputSchema).min(1).max(chatAttachmentLimit.files).optional(),
+  })
   .strict();
 export type SendChat = z.infer<typeof sendChatSchema>;
 export const chatDecisionSchema = z.discriminatedUnion('action', [
@@ -97,6 +131,7 @@ export const chatMessageSchema = z.object({
   // True while the orchestrator is handling this queued message. Older servers omit it.
   processing: z.boolean().optional(),
   force: z.boolean().optional(),
+  attachments: z.array(chatAttachmentSchema).optional(),
 });
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
 export const chatProposalSchema = z.object({
@@ -114,6 +149,8 @@ export const chatRunSchema = chatProposalSchema.extend({
   status: z.enum(['queued', 'running', 'done', 'released']),
   tokens: tokenCount.nullable(),
   repository: taskRepositorySchema.nullish(),
+  // Files from the delegated message and the message it answered, for the worker. Older servers omit it.
+  attachments: z.array(chatAttachmentSchema).optional(),
 });
 export type ChatRun = z.infer<typeof chatRunSchema>;
 export const chatMergeRequestSchema = z.object({

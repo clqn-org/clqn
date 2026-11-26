@@ -245,3 +245,46 @@ test('MCP attaches the session lease to chat requests without adding it to tool 
     [clanId, messageId, decision, leaseId],
   ]);
 });
+
+test('the orchestrator inbox shows images attached to the next message', async (t) => {
+  const clanId = randomUUID();
+  const image = { id: randomUUID(), name: 'screen.png', type: 'image/png' as const, size: 3 };
+  const pdf = { id: randomUUID(), name: 'spec.pdf', type: 'application/pdf' as const, size: 3 };
+  const next = {
+    id: randomUUID(),
+    sequence: 1,
+    authorId: randomUUID(),
+    author: 'member@example.com',
+    role: 'member' as const,
+    createdAt: new Date().toISOString(),
+    text: 'Build [Image #1] per [PDF #2: spec.pdf]',
+    status: 'queued' as const,
+    replyTo: null,
+    attachments: [image, pdf],
+  };
+  const downloads: string[] = [];
+  const server = createMcpServer(
+    stub({
+      chatInbox: async () => ({ messages: [], before: null, held: [], next, pickId: randomUUID() }),
+      chatAttachment: async (_clan, id) => {
+        downloads.push(id);
+        return { ...image, data: Buffer.from('png').toString('base64') };
+      },
+    }),
+    clanId,
+  );
+  const client = new Client({ name: 'attachments-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  t.after(async () => {
+    await client.close();
+    await server.close();
+  });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const inbox = await client.callTool({ name: 'clqn_chat_inbox', arguments: {} });
+  assert.deepEqual(downloads, [image.id]);
+  const content = inbox.content as { type: string; data?: string; mimeType?: string }[];
+  assert.equal(resultJson(inbox).next.attachments.length, 2);
+  assert.deepEqual(content[1], { type: 'image', data: Buffer.from('png').toString('base64'), mimeType: 'image/png' });
+  assert.equal(content.length, 2);
+});

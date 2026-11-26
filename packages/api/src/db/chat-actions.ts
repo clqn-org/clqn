@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { type Actor, ApiError, type ChatDecisionRequest, type ChatUsage, type SendChat } from '@clqn/shared';
 import { and, eq, isNotNull, lt, sql } from 'drizzle-orm';
 import { appendEvent, type WorkspaceDb } from '../lib/access.js';
-import { type ChatProposal, chatMembers, chatMessages, chats, chatTokenHours } from './chat.js';
+import { type ChatProposal, chatAttachments, chatMembers, chatMessages, chats, chatTokenHours } from './chat.js';
 import {
   chatTokenRetention,
   chatUsage,
@@ -67,14 +67,23 @@ export async function sendChat(db: WorkspaceDb, actor: Actor, clanId: string, bo
     const target = await getMessage(db, clanId, body.replyTo);
     if (target.role !== 'member') throw conflict('Choose a member message to reply to');
   }
+  const { attachments: files, ...fields } = body;
+  const uploads = (files ?? []).map(({ name, type, data }) => {
+    const bytes = Buffer.from(data, 'base64');
+    return { id: randomUUID(), name, type, size: bytes.length, data: bytes };
+  });
   const message = await addChatMessage(db, {
-    ...body,
+    ...fields,
     authorId: actor.id,
     author: actor.email,
     role: 'member',
     clanId,
     status: 'queued',
+    attachments: uploads.length ? uploads.map(({ data: _data, ...attachment }) => attachment) : null,
   });
+  // A retried send finds the message already saved with the first attempt's files, under other IDs.
+  if (uploads.length && message.attachments?.[0]?.id === uploads[0]!.id)
+    await db.insert(chatAttachments).values(uploads.map((upload) => ({ ...upload, clanId, messageId: message.id })));
   if (message.force && message.status === 'queued') {
     // Invalidate the current ordinary turn's decision before the host sees the forced message.
     await db
@@ -186,11 +195,13 @@ export async function decideChat(db: WorkspaceDb, actor: Actor, clanId: string, 
         'MODEL_NOT_ALLOWED',
         `The worker's owner allows only these models: ${models.join(', ')}. Choose one of them or another worker.`,
       );
+    const attachments = [...(held?.attachments ?? []), ...(message.attachments ?? [])];
     const proposal: ChatProposal = {
       title: body.title,
       description: body.description,
       estimatedTokens: body.estimatedTokens,
       model,
+      ...(attachments.length ? { attachments } : {}),
     };
     await db
       .update(chatMessages)

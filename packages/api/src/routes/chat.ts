@@ -2,6 +2,7 @@ import {
   type Actor,
   ApiError,
   chatApprovalSchema,
+  chatAttachmentLimit,
   chatBackupsInputSchema,
   chatDecisionRequestSchema,
   chatLeaseHeartbeatSchema,
@@ -20,6 +21,7 @@ import { listChatBackups, requireChatLease, setChatBackups, updateChatLease } fr
 import { chatMetrics } from '../db/chat-metrics.js';
 import {
   chatActivity,
+  chatAttachment,
   chatHistory,
   chatIdentity,
   chatInfo,
@@ -81,12 +83,16 @@ async function saveSettings(
 
 export function createChatRoutes(db: WorkspaceDb) {
   const app = new Hono<{ Variables: { user: Actor; tokenHash: string } }>();
-  app.use(
-    '*',
+  const limit = (maxSize: number) =>
     bodyLimit({
-      maxSize: 32 * 1024,
+      maxSize,
       onError: (c) => c.json({ error: { code: 'INVALID_REQUEST', message: 'Request body is too large' } }, 413),
-    }),
+    });
+  // Messages carry their attachments as base64, which is a third larger than the files.
+  const messageLimit = limit(32 * 1024 + Math.ceil((chatAttachmentLimit.files * chatAttachmentLimit.bytes * 4) / 3));
+  const smallLimit = limit(32 * 1024);
+  app.use('*', (c, next) =>
+    c.req.method === 'POST' && c.req.path.endsWith('/chat/messages') ? messageLimit(c, next) : smallLimit(c, next),
   );
   app.get('/', async (c) => {
     const actor = c.get('user');
@@ -184,6 +190,13 @@ export function createChatRoutes(db: WorkspaceDb) {
       return sendChat(tx, actor, clanId, body);
     });
     return c.json(messageView(message), 201);
+  });
+  app.get('/attachments/:id', async (c) => {
+    const actor = c.get('user');
+    const clanId = c.req.param('clanId')!;
+    const id = uuid(c.req.param('id'));
+    await requireClan(db, actor, clanId);
+    return c.json(await chatAttachment(db, clanId, id));
   });
   app.get('/host/backups', async (c) => {
     const actor = c.get('user');

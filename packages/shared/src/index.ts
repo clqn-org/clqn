@@ -24,6 +24,7 @@ import {
   type ChatMetricsWindow,
   type ChatSettings,
   type ChatUsage,
+  chatAttachmentFileSchema,
   chatBackupsInputSchema,
   chatBackupsSchema,
   chatDecisionRequestSchema,
@@ -181,10 +182,16 @@ export class ClqnClient {
       throw new Error('Authenticated requests require HTTPS except on loopback');
     }
   }
-  private async request<T>(path: string, schema: z.ZodType<T>, body?: unknown, signal?: AbortSignal): Promise<T> {
+  private async request<T>(
+    path: string,
+    schema: z.ZodType<T>,
+    body?: unknown,
+    signal?: AbortSignal,
+    timeout = 10_000,
+  ): Promise<T> {
     const response = await fetch(new URL(path, this.baseUrl), {
       method: body === undefined ? 'GET' : 'POST',
-      signal: signal ? AbortSignal.any([AbortSignal.timeout(10_000), signal]) : AbortSignal.timeout(10_000),
+      signal: signal ? AbortSignal.any([AbortSignal.timeout(timeout), signal]) : AbortSignal.timeout(timeout),
       redirect: 'error',
       headers: {
         accept: 'application/json',
@@ -249,8 +256,21 @@ export class ClqnClient {
   chatHistory(clanId: string, before: number, signal?: AbortSignal) {
     return this.request(`${this.chatPath(clanId)}/history?before=${before}`, chatHistorySchema, undefined, signal);
   }
+  // Attachments can take a while to upload on a slow connection.
   sendChat(clanId: string, message: SendChat, signal?: AbortSignal) {
-    return this.request(`${this.chatPath(clanId)}/messages`, chatMessageSchema, sendChatSchema.parse(message), signal);
+    const body = sendChatSchema.parse(message);
+    const timeout = body.attachments ? 120_000 : undefined;
+    return this.request(`${this.chatPath(clanId)}/messages`, chatMessageSchema, body, signal, timeout);
+  }
+  // Any member of the clan, or one of their agents, can download a message's attachment.
+  chatAttachment(clanId: string, id: string, signal?: AbortSignal) {
+    return this.request(
+      `${this.chatPath(clanId)}/attachments/${encodeURIComponent(id)}`,
+      chatAttachmentFileSchema,
+      undefined,
+      signal,
+      120_000,
+    );
   }
   chatBackups(clanId: string) {
     return this.request(`${this.chatPath(clanId)}/host/backups`, chatBackupsSchema);

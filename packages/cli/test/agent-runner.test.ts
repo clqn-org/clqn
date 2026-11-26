@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { type ChildProcess, execFile, type spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { devNull, tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -971,4 +972,81 @@ test('workers run commands as the member allows: off, sandboxed by default, or u
   assert.equal(codex('orchestrator')[codex('orchestrator').indexOf('--sandbox') + 1], 'read-only');
   assert.ok(codex('worker', 'unrestricted').includes('--dangerously-bypass-approvals-and-sandbox'));
   assert.ok(!codex('worker', 'unrestricted').includes('--sandbox'));
+});
+
+test('a worker gets the task’s attachments outside its worktree, and Codex gets the images directly', async (t) => {
+  const f = await fixture(t);
+  const workerId = randomUUID();
+  const taskId = randomUUID();
+  await saveAgentProfile({ agentId: workerId, clanId, server, token: token('w'), runtime: 'codex' });
+  const files: Record<string, { name: string; type: string; text: string }> = {
+    [randomUUID()]: { name: 'my screen.png', type: 'image/png', text: 'png' },
+    [randomUUID()]: { name: 'spec,v2.pdf', type: 'application/pdf', text: 'pdf' },
+  };
+  const api = {
+    whoami: async () => ({ id: userId, email: 'member@example.com' }),
+    listAgents: async () => ({ agents: [agent(workerId, 'worker')] }),
+    members: async () => ({ members: [{ userId, email: 'member@example.com', role: 'member' }] }),
+  } as unknown as ClqnClient;
+  const workerApi = {
+    transitionTask: async () => ({}),
+    task: async () => ({ id: taskId, description: 'Build the screen' }),
+    reportChatUsage: async () => ({ ok: true }),
+    chatAttachment: async (_clan: string, id: string) => ({
+      ...files[id]!,
+      id,
+      size: 3,
+      data: Buffer.from(files[id]!.text).toString('base64'),
+    }),
+  } as unknown as ClqnClient;
+  const runner = startAgentRunner({
+    api,
+    server,
+    clanId,
+    project: f.directory,
+    spawn: f.spawn,
+    runtimes: async () => ['codex'],
+    now: f.now,
+    agentClient: () => workerApi,
+    workspace: async () => join(f.directory, 'worktree'),
+  });
+  t.after(() => runner.stop());
+  runner.update(
+    chatState({
+      runs: [
+        {
+          messageId: randomUUID(),
+          title: 'Screen',
+          worker: 'Codex',
+          workerId,
+          estimatedTokens: 500,
+          taskId,
+          status: 'queued',
+          tokens: null,
+          attachments: Object.entries(files).map(([id, { name, type }]) => ({
+            id,
+            name,
+            type: type as 'image/png',
+            size: 3,
+          })),
+        },
+      ],
+    }),
+  );
+  await until(() => f.spawned.length === 1);
+  const worker = f.spawned[0]!;
+  const folder = join(f.directory, 'attachments', taskId);
+  const image = join(folder, '1-my_screen.png');
+  const pdf = join(folder, '2-spec_v2.pdf');
+  assert.deepEqual(
+    worker.args.filter((arg) => arg.startsWith('--image')),
+    [`--image=${image}`],
+  );
+  assert.equal(worker.args.at(-1), '-');
+  await until(() => worker.child.input.includes(pdf));
+  assert.ok(worker.child.input.includes(image));
+  assert.equal(await readFile(pdf, 'utf8'), 'pdf');
+  worker.child.finish(0, '');
+  await until(() => !existsSync(folder));
+  await runner.stop();
 });
