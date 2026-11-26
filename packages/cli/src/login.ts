@@ -3,7 +3,8 @@ import { ApiError, ClqnClient } from '@clqn/shared';
 import { hostedServer } from './config.js';
 import { showGithubLogin } from './login-prompt.js';
 
-export async function githubLogin(server: string) {
+// `show` displays the device code until sign-in ends; the default takes over the terminal.
+export async function githubLogin(server: string, show = showGithubLogin) {
   const api = new ClqnClient(server);
   const attempt = await api.startGithubLogin().catch((error: unknown) => {
     if (error instanceof TypeError || (error as Error).name === 'TimeoutError') {
@@ -18,7 +19,7 @@ export async function githubLogin(server: string) {
       );
     throw error;
   });
-  const stop = showGithubLogin(attempt.verificationUri, attempt.userCode);
+  const stop = show(attempt.verificationUri, attempt.userCode);
   try {
     return await waitForGithubLogin(api, attempt);
   } finally {

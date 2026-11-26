@@ -6,7 +6,7 @@ import { cells, characters, clip, type Paint, pad, painter, plain, take, width }
 
 export { characters, clip, type Paint, pad, painter, plain, width };
 
-function wrap(text: string, limit: number) {
+export function wrap(text: string, limit: number) {
   const lines: string[] = [];
   for (const paragraph of text.split(/\r?\n/)) {
     const chars = characters(plain(paragraph));
@@ -204,7 +204,7 @@ export const settingsFields = (hasInvite: boolean, hasBackup: boolean) => [
 ];
 
 // Every setting row and the notice always fit; the hint, title, key help, and blank lines fill what room is left.
-function settingsLines(settings: SettingsView, columns: number, paint: Paint, room: number, notice: string) {
+export function settingsLines(settings: SettingsView, columns: number, paint: Paint, room: number, notice: string) {
   const hasInvite = settings.inviteText !== undefined;
   const fields = settingsFields(hasInvite, settings.backupHosting !== undefined);
   const labels = [
@@ -224,13 +224,20 @@ function settingsLines(settings: SettingsView, columns: number, paint: Paint, ro
       : settings.field === backupHostingField
         ? 'Press Enter to allow or stop backup hosting on this device.'
         : 'Enter a whole number or none for unlimited; models comma-separated, blank for any.';
+  const hintLines = wrap(hint, columns).map((line) => paint(line, 'muted'));
   let spare = room - fields.length - (notice ? 1 : 0);
   const fits = (lines: number) => {
     if (spare < lines) return false;
     spare -= lines;
     return true;
   };
-  const [showHint, showTitle, showKeys, showGap, showTop] = [fits(1), fits(1), fits(2), fits(1), fits(1)];
+  const [showHint, showTitle, showKeys, showGap, showTop] = [
+    fits(hintLines.length),
+    fits(1),
+    fits(2),
+    fits(1),
+    fits(1),
+  ];
   return [
     ...(showTop ? [''] : []),
     ...(showTitle ? [paint('Session settings', 'bold')] : []),
@@ -242,7 +249,7 @@ function settingsLines(settings: SettingsView, columns: number, paint: Paint, ro
       return field === settings.field ? paint(line, 'accent') : line;
     }),
     ...(showKeys ? ['', paint(clip('↑↓ Move  ←→ Change  Enter Select  Esc Back', columns), 'muted')] : []),
-    ...(showHint ? [paint(clip(hint, columns), 'muted')] : []),
+    ...(showHint ? hintLines : []),
     ...(notice ? [notice] : []),
   ];
 }
