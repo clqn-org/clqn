@@ -22,6 +22,8 @@ Only one host processes the queue at a time. If a backup is already active, a re
 
 Type a task, question, or piece of project context and press **Enter**. Messages wait in a queue. The orchestrator handles one at a time, oldest first, and shows the one it's working on as **Processing**. Its answer appears right below your message.
 
+Press **Ctrl+F** to force-send your draft. The orchestrator interrupts its current turn and handles the new message next. An unfinished message returns to the queue. Force-sent messages are handled in the order they arrive.
+
 The orchestrator remembers the conversation for 20 messages, then starts a fresh session.
 
 If the orchestrator needs more detail, a question appears above the composer. Press **Ctrl+Q**, type your answer, and press **Enter**.
@@ -45,6 +47,7 @@ On macOS, use the **Ctrl** keys: function keys usually control brightness and vo
 | Key | Action |
 | --- | --- |
 | Enter | Send your message |
+| Ctrl+F | Force-send your message |
 | Ctrl+P (F3, Tab) | Focus spawn approvals. **↑ ↓** to choose, **Y** approve, **N** decline, **Esc** back |
 | Ctrl+Q (F4) | Reply to the orchestrator's question. Press again to pick another question |
 | Ctrl+L (F6) | Pull requests. The leader presses **Y** to approve a merge or **N** to decline |

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
@@ -15,6 +16,49 @@ import { createMcpServer } from '../src/index.js';
 // Tests stub only the client methods each tool uses.
 const stub = (methods: Partial<ClqnClient>) => methods as unknown as ClqnClient;
 const resultJson = (result: object) => JSON.parse((result as { content: [{ text: string }] }).content[0].text);
+
+test('MCP attaches the receipt for the selected chat message to its decision', async (t) => {
+  const clanId = randomUUID();
+  const messageId = randomUUID();
+  const pickId = randomUUID();
+  const next = {
+    id: messageId,
+    sequence: 1,
+    authorId: randomUUID(),
+    author: 'member@example.com',
+    role: 'member' as const,
+    createdAt: new Date().toISOString(),
+    text: 'Run this first',
+    status: 'queued' as const,
+    replyTo: null,
+  };
+  const calls: unknown[] = [];
+  const server = createMcpServer(
+    stub({
+      chatInbox: async () => ({ messages: [], before: null, held: [], next, pickId }),
+      decideChat: async (...args) => {
+        calls.push(args);
+        return { status: 'handled', blocker: null };
+      },
+    }),
+    clanId,
+  );
+  const client = new Client({ name: 'chat-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  t.after(async () => {
+    await client.close();
+    await server.close();
+  });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const inbox = await client.callTool({ name: 'clqn_chat_inbox', arguments: {} });
+  assert.equal(resultJson(inbox).pickId, undefined);
+  const decision = { action: 'reply', text: 'Done' };
+  const decide = (id: string) => client.callTool({ name: 'clqn_chat_decide', arguments: { messageId: id, decision } });
+  assert.equal((await decide(randomUUID())).isError, true);
+  assert.equal((await decide(messageId)).isError, undefined);
+  assert.deepEqual(calls, [[clanId, messageId, { ...decision, pickId }, undefined]]);
+});
 
 test('MCP discovers and calls the health tool through the protocol', async (t) => {
   const health = { status: 'ok' as const, service: 'clqn-api' as const, version: '0.1.0' };

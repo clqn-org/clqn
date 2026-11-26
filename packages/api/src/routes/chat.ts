@@ -3,7 +3,7 @@ import {
   ApiError,
   chatApprovalSchema,
   chatBackupsInputSchema,
-  chatDecisionSchema,
+  chatDecisionRequestSchema,
   chatLeaseHeartbeatSchema,
   chatMetricsWindowSchema,
   chatSettingsSchema,
@@ -26,6 +26,7 @@ import {
   chatMergeQueue,
   chatQueue,
   chatUsage,
+  forcePending,
   messageView,
   pickNext,
 } from '../db/chat-read.js';
@@ -128,12 +129,13 @@ export function createChatRoutes(db: WorkspaceDb) {
     requirePersonal(actor);
     const membership = await requireClan(db, actor, clanId);
     const member = await requireChatMember(db, clanId, actor.id);
-    const [identity, history, activity, usage, mergeQueue] = await Promise.all([
+    const [identity, history, activity, usage, mergeQueue, priority] = await Promise.all([
       chatIdentity(db, clanId, actor.id),
       chatHistory(db, clanId),
       chatActivity(db, clanId, actor.id),
       chatUsage(db, clanId, actor.id),
       membership.role === 'leader' ? chatMergeQueue(db, clanId) : undefined,
+      forcePending(db, clanId),
     ]);
     const safeNumber = (value: bigint) => Math.min(Number(value), Number.MAX_SAFE_INTEGER);
     return c.json({
@@ -146,6 +148,7 @@ export function createChatRoutes(db: WorkspaceDb) {
       settings: member.settings,
       ...history,
       ...activity,
+      forcePending: priority,
       ...(mergeQueue ? { mergeQueue } : {}),
       usage: { tokens: safeNumber(usage.tokens), reserved: safeNumber(usage.reserved), agents: usage.agents },
     });
@@ -212,10 +215,10 @@ export function createChatRoutes(db: WorkspaceDb) {
     return c.json(
       await db.transaction(async (tx) => {
         await requireChatLease(tx, actor, clanId, c.get('tokenHash'), leaseId);
-        const next = await pickNext(tx, clanId);
+        const picked = await pickNext(tx, clanId);
         const history = await chatHistory(tx, clanId, undefined, 20);
         const held = await chatQueue(tx, clanId, 'clarification');
-        return { ...history, next, held };
+        return { ...history, ...picked, held };
       }),
     );
   });
@@ -224,7 +227,7 @@ export function createChatRoutes(db: WorkspaceDb) {
     const clanId = c.req.param('clanId')!;
     const id = uuid(c.req.param('id'));
     const leaseId = leaseQuery(c);
-    const body = await parse(c, chatDecisionSchema);
+    const body = await parse(c, chatDecisionRequestSchema);
     return c.json(
       await db.transaction(async (tx) => {
         await requireChatLease(tx, actor, clanId, c.get('tokenHash'), leaseId);

@@ -371,6 +371,7 @@ export function chatFrame(view: View): Frame {
     );
   } else lines.push('');
   const actions = [
+    state?.forcePending !== undefined && !view.approvalFocused ? 'Ctrl+F Force send' : '',
     view.hasPullRequests ? 'Ctrl+L Pull requests' : '',
     'Ctrl+S Settings',
     pending ? (view.approvalFocused ? '↑↓ Choose  Y Approve  N Decline  Esc Back' : 'Ctrl+P Approvals') : '',

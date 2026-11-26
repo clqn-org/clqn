@@ -20,13 +20,13 @@ import {
 } from './agents.js';
 import { setAliasSchema } from './aliases.js';
 import {
-  type ChatDecision,
+  type ChatDecisionRequest,
   type ChatMetricsWindow,
   type ChatSettings,
   type ChatUsage,
   chatBackupsInputSchema,
   chatBackupsSchema,
-  chatDecisionSchema,
+  chatDecisionRequestSchema,
   chatHistorySchema,
   chatInboxSchema,
   chatInfoSchema,
@@ -283,12 +283,12 @@ export class ClqnClient {
     const query = leaseId ? `?lease=${encodeURIComponent(leaseId)}` : '';
     return this.request(`${this.chatPath(clanId)}/inbox${query}`, chatInboxSchema, {});
   }
-  decideChat(clanId: string, id: string, decision: ChatDecision, leaseId?: string) {
+  decideChat(clanId: string, id: string, decision: ChatDecisionRequest, leaseId?: string) {
     const query = leaseId ? `?lease=${encodeURIComponent(leaseId)}` : '';
     return this.request(
       `${this.chatPath(clanId)}/messages/${encodeURIComponent(id)}/decision${query}`,
       z.object({ status: chatMessageStatusSchema, blocker: z.string().nullable() }),
-      chatDecisionSchema.parse(decision),
+      chatDecisionRequestSchema.parse(decision),
     );
   }
   chatMetrics(clanId: string, window: ChatMetricsWindow, signal?: AbortSignal) {

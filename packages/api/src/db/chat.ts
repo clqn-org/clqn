@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   bigserial,
+  boolean,
   check,
   foreignKey,
   index,
@@ -92,6 +93,7 @@ export const chatMessages = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().default(sql`clock_timestamp()`),
     text: text('text').notNull(),
     status: text('status').$type<ChatMessage['status']>().notNull(),
+    force: boolean('force').notNull().default(false),
     replyTo: uuid('reply_to'),
     workerId: uuid('worker_id').references(() => agents.id),
     proposal: jsonb('proposal').$type<ChatProposal>(),
@@ -101,10 +103,11 @@ export const chatMessages = pgTable(
     decidedAt: timestamp('decided_at', { withTimezone: true }),
     // When the orchestrator last took this message from its inbox to handle it next.
     pickedAt: timestamp('picked_at', { withTimezone: true }),
+    pickId: uuid('pick_id'),
   },
   (table) => [
     index('chat_messages_history_idx').on(table.clanId, table.sequence),
-    index('chat_messages_queue_idx').on(table.clanId, table.status, table.sequence),
+    index('chat_messages_queue_idx').on(table.clanId, table.status, table.force.desc(), table.sequence),
     index('chat_messages_worker_idx').on(table.clanId, table.workerId).where(sql`${table.workerId} is not null`),
     uniqueIndex('chat_messages_task_idx').on(table.taskId).where(sql`${table.taskId} is not null`),
   ],

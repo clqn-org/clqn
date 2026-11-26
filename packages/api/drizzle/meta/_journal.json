@@ -141,6 +141,13 @@
       "when": 1795663861039,
       "tag": "0019_chat_host_leases",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1795664737105,
+      "tag": "0020_chat_force_send",
+      "breakpoints": true
     }
   ]
 }
