@@ -424,6 +424,11 @@ async function openChat() {
     prompt ??= terminalPrompt();
     return prompt.ask(question);
   };
+  const reauthenticate = async (userId: string) => {
+    prompt?.close();
+    prompt = undefined;
+    await signIn(apiUrl(), userId);
+  };
   const print = (text: string) => console.log(text);
   const project = process.cwd();
   let api: ClqnClient;
@@ -432,11 +437,10 @@ async function openChat() {
     // Returning users see the same picker as new ones, with Enter reopening their last clan.
     if (!clanId) {
       const clan = await chooseClan({
-        server: apiUrl(),
         connect: client,
         ask,
         print,
-        canSignIn: !environmentToken,
+        ...(environmentToken ? {} : { reauthenticate }),
         current: await savedClan(apiUrl(), await client()),
       });
       clanId = clan.id;
