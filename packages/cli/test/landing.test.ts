@@ -27,6 +27,7 @@ test('the landing page shows the wordmark, release, links, logo, and local conte
   const box = lines.filter((line) => line.startsWith('  │'));
   assert.ok(box.every((line) => width(line) === 108));
   assert.match(lines[1]!, /█/);
+  assert.doesNotMatch(frame.lines.join('\n'), /\x1b\[38;5;(?:95|137|173|211|216|223)m/);
   const title = lines.find((line) => line.includes('┌'))!;
   assert.ok(
     title.includes(`clqn v${VERSION} (${RELEASE_DATE.replaceAll('-', '.')}) · clqn.org · Documentation · GitHub · npm`),
@@ -41,6 +42,7 @@ test('the landing page shows the wordmark, release, links, logo, and local conte
     );
   // The prompt sits in the right pane and the cursor follows the answer.
   const row = lines.findIndex((line) => line.includes('Enter a number: 1'));
+  assert.ok(frame.lines[row]!.includes('\x1b[38;5;38mEnter a number: '));
   assert.ok(lines[row]!.indexOf('Enter a number') > 36);
   assert.deepEqual(frame.cursor, {
     row,
@@ -96,11 +98,12 @@ test('settings content replaces the log, and the first step hides Esc Back', () 
   );
 });
 
-test('the wordmark uses full blocks only, with its shadow only in color', () => {
+test('the wordmark uses full blocks and a teal-blue gradient with a blue shadow', () => {
   const plain = wordmarkLines(false);
   assert.equal(plain.length, 13);
   assert.ok(Math.max(...plain.map(width)) <= 68);
   assert.ok(plain.every((line) => /^[█ ]*$/.test(line)));
-  assert.ok(wordmarkLines(true).some((line) => line.includes('38;5;95m')));
-  assert.ok(wordmarkLines(true).every((line) => !line.includes('48;5;')));
+  const colored = wordmarkLines(true).join('\n');
+  for (const color of [24, 31, 38, 81]) assert.ok(colored.includes(`38;5;${color}m`));
+  assert.ok(!colored.includes('48;5;'));
 });

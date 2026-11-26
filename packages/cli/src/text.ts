@@ -20,12 +20,12 @@ export const clip = (text: string, limit: number) => (width(text) <= limit ? tex
 export const pad = (text: string, limit: number) => text + ' '.repeat(Math.max(0, limit - width(text)));
 
 export type Tone = 'accent' | 'muted' | 'active' | 'warning' | 'bold' | 'error';
-// Accent and warning use the landing page's peach and gold from the xterm 256-color palette.
+export const accentColor = 38; // Teal-blue in the xterm 256-color palette.
 const codes: Record<Tone, number | string> = {
-  accent: '38;5;216',
+  accent: `38;5;${accentColor}`,
   muted: 90,
   active: 92,
-  warning: '38;5;222',
+  warning: 93,
   bold: 1,
   error: 91,
 };
