@@ -1,7 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { ApiError, ClqnClient } from '@clqn/shared';
 import { hostedServer } from './config.js';
-import { terminalText } from './terminal.js';
+import { showGithubLogin } from './login-prompt.js';
 
 export async function githubLogin(server: string) {
   const api = new ClqnClient(server);
@@ -18,12 +18,15 @@ export async function githubLogin(server: string) {
       );
     throw error;
   });
-  console.error(
-    terminalText(
-      `Open GitHub to authorize clqn:\n${attempt.verificationUri}\n\nEnter this one-time GitHub code: ${attempt.userCode}`,
-      process.stderr.isTTY,
-    ),
-  );
+  const stop = showGithubLogin(attempt.verificationUri, attempt.userCode);
+  try {
+    return await waitForGithubLogin(api, attempt);
+  } finally {
+    stop();
+  }
+}
+
+async function waitForGithubLogin(api: ClqnClient, attempt: Awaited<ReturnType<ClqnClient['startGithubLogin']>>) {
   const deadline = Date.now() + attempt.expiresIn * 1000;
   let interval = attempt.interval;
   while (Date.now() + interval * 1000 < deadline) {

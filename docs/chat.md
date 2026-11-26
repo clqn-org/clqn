@@ -1,6 +1,22 @@
 # Chat and keys
 
-Run `clqn` in your project clone. Everyone in the clan sees the same chat, and it's saved between sessions. The chat runs on the leader's machine: the leader's `clqn` starts the orchestrator, so keep it open while the team works.
+Run `clqn` in your project clone. Everyone sees the same chat, and the server saves messages between sessions. The leader's `clqn` normally hosts the orchestrator.
+
+## Set up backup hosts
+
+The leader nominates one or more clan members by email or user ID.
+
+```sh
+clqn host alex@example.com sam@example.com
+```
+
+Run `clqn host` to see the list. Passing names replaces the list. Run `clqn host off` to clear it.
+
+Each nominated member opens ordinary `clqn` and enables **Backup hosting** in chat settings on the device they want to use. Keep chat open with a signed-in Codex or Claude Code runtime enabled. The current host runs the orchestrator using their existing agent CLI and account.
+
+When the active host exits normally, an opted-in backup with chat open can take over on its next check. After a disconnect, the last heartbeat expires within 45 seconds. The next host uses shared chat history and picks up unfinished requests.
+
+Only one host processes the queue at a time. If a backup is already active, a returning leader or another backup waits its turn. Messages stay queued when every eligible host is offline.
 
 ## Send a message
 

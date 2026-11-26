@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ChatMetrics, ChatState } from '@clqn/shared';
-import { chatFrame, width } from '../src/chat-view.js';
+import { backupHostingField, chatFrame, width } from '../src/chat-view.js';
 import { areaChart, metricsFrame } from '../src/metrics-view.js';
 
 const metrics: ChatMetrics = {
@@ -133,7 +133,6 @@ test('chat screen offers Ctrl+G metrics, drops the token graph, and settings fit
   }).lines.join('\n');
   assert.match(any, /› Models {11}Any/);
   assert.match(settings.at(-1)!, /Enter a whole number or none/);
-
   // Leaders get an Invite row above the session action, with its own hint.
   const leader = chatFrame({
     ...base,
@@ -171,4 +170,23 @@ test('chat screen offers Ctrl+G metrics, drops the token graph, and settings fit
     assert.match(compact.join('\n'), /› Sign out\n/);
     assert.match(compact.at(-1)!, /main up to date/);
   }
+  const backup = chatFrame({
+    ...base,
+    rows: 12,
+    settings: {
+      value: state.settings,
+      tokenText: '',
+      agentText: '',
+      modelText: '',
+      backupHosting: false,
+      field: backupHostingField,
+      action: 'Save settings',
+    },
+    notice: 'Could not save backup hosting',
+  }).lines;
+  assert.equal(backup.length, 12);
+  assert.match(backup.find((line) => line.includes('Backup hosting'))!, /› Backup hosting {3}Off/);
+  assert.ok(backup.some((line) => line.includes('Sign out')));
+  assert.match(backup.at(-1)!, /Could not save backup hosting/);
+  assert.doesNotMatch(leader, /Backup hosting/);
 });

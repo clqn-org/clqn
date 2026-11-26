@@ -2,7 +2,9 @@ import {
   type Actor,
   ApiError,
   chatApprovalSchema,
+  chatBackupsInputSchema,
   chatDecisionRequestSchema,
+  chatLeaseHeartbeatSchema,
   chatMetricsWindowSchema,
   chatSettingsSchema,
   chatUsageSchema,
@@ -13,15 +15,8 @@ import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
 import { chatMembers, chats } from '../db/chat.js';
-import {
-  approveChat,
-  decideChat,
-  reportChat,
-  requireChat,
-  requireChatMember,
-  requireOrchestrator,
-  sendChat,
-} from '../db/chat-actions.js';
+import { approveChat, decideChat, reportChat, requireChat, requireChatMember, sendChat } from '../db/chat-actions.js';
+import { listChatBackups, requireChatLease, setChatBackups, updateChatLease } from '../db/chat-host.js';
 import { chatMetrics } from '../db/chat-metrics.js';
 import {
   chatActivity,
@@ -45,6 +40,12 @@ async function parse<T>(c: Context, schema: z.ZodType<T>) {
 function uuid(value: string) {
   const parsed = z.uuid().safeParse(value);
   if (!parsed.success) throw new ApiError(404, 'NOT_FOUND', 'Invalid chat resource ID');
+  return parsed.data;
+}
+
+function leaseQuery(c: Context) {
+  const parsed = z.uuid().optional().safeParse(c.req.query('lease'));
+  if (!parsed.success) throw new ApiError(400, 'INVALID_REQUEST', 'Provide a valid orchestrator lease ID');
   return parsed.data;
 }
 
@@ -79,7 +80,7 @@ async function saveSettings(
 }
 
 export function createChatRoutes(db: WorkspaceDb) {
-  const app = new Hono<{ Variables: { user: Actor } }>();
+  const app = new Hono<{ Variables: { user: Actor; tokenHash: string } }>();
   app.use(
     '*',
     bodyLimit({
@@ -129,7 +130,7 @@ export function createChatRoutes(db: WorkspaceDb) {
     const membership = await requireClan(db, actor, clanId);
     const member = await requireChatMember(db, clanId, actor.id);
     const [identity, history, activity, usage, mergeQueue, priority] = await Promise.all([
-      chatIdentity(db, clanId),
+      chatIdentity(db, clanId, actor.id),
       chatHistory(db, clanId),
       chatActivity(db, clanId, actor.id),
       chatUsage(db, clanId, actor.id),
@@ -139,6 +140,11 @@ export function createChatRoutes(db: WorkspaceDb) {
     const safeNumber = (value: bigint) => Math.min(Number(value), Number.MAX_SAFE_INTEGER);
     return c.json({
       session: { clan: identity.clan, host: identity.host! },
+      orchestration: {
+        backup: identity.nominatedUserId === actor.id,
+        eligible: membership.role === 'leader' || identity.nominatedUserId === actor.id,
+        activeHost: identity.activeHost,
+      },
       settings: member.settings,
       ...history,
       ...activity,
@@ -179,30 +185,52 @@ export function createChatRoutes(db: WorkspaceDb) {
     });
     return c.json(messageView(message), 201);
   });
+  app.get('/host/backups', async (c) => {
+    const actor = c.get('user');
+    const clanId = c.req.param('clanId')!;
+    return c.json(await db.transaction((tx) => listChatBackups(tx, actor, clanId)));
+  });
+  app.post('/host/backups', async (c) => {
+    const actor = c.get('user');
+    const clanId = c.req.param('clanId')!;
+    const { userIds } = await parse(c, chatBackupsInputSchema);
+    return c.json(await db.transaction((tx) => setChatBackups(tx, actor, clanId, userIds)));
+  });
+  for (const action of ['heartbeat', 'release'] as const) {
+    app.post(`/host/${action}`, async (c) => {
+      const actor = c.get('user');
+      const clanId = c.req.param('clanId')!;
+      const tokenHash = c.get('tokenHash');
+      const { leaseId, renew } = await parse(c, chatLeaseHeartbeatSchema);
+      return c.json(
+        await db.transaction((tx) => updateChatLease(tx, actor, clanId, tokenHash, leaseId, action, renew === true)),
+      );
+    });
+  }
   // The orchestrator takes one message at a time; taking it marks it as processing for every member.
   app.post('/inbox', async (c) => {
     const actor = c.get('user');
     const clanId = c.req.param('clanId')!;
-    const picked = await db.transaction(async (tx) => {
-      await requireOrchestrator(tx, actor, clanId, 'share');
-      await requireChat(tx, clanId, true);
-      return pickNext(tx, clanId);
-    });
-    const [history, held] = await Promise.all([
-      chatHistory(db, clanId, undefined, 20),
-      chatQueue(db, clanId, 'clarification'),
-    ]);
-    return c.json({ ...history, ...picked, held });
+    const leaseId = leaseQuery(c);
+    return c.json(
+      await db.transaction(async (tx) => {
+        await requireChatLease(tx, actor, clanId, c.get('tokenHash'), leaseId);
+        const picked = await pickNext(tx, clanId);
+        const history = await chatHistory(tx, clanId, undefined, 20);
+        const held = await chatQueue(tx, clanId, 'clarification');
+        return { ...history, ...picked, held };
+      }),
+    );
   });
   app.post('/messages/:id/decision', async (c) => {
     const actor = c.get('user');
     const clanId = c.req.param('clanId')!;
     const id = uuid(c.req.param('id'));
+    const leaseId = leaseQuery(c);
     const body = await parse(c, chatDecisionRequestSchema);
     return c.json(
       await db.transaction(async (tx) => {
-        await requireOrchestrator(tx, actor, clanId, 'share');
-        await requireChat(tx, clanId, true);
+        await requireChatLease(tx, actor, clanId, c.get('tokenHash'), leaseId);
         return decideChat(tx, actor, clanId, id, body);
       }),
     );

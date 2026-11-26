@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { type Actor, ApiError, type ChatDecisionRequest, type ChatUsage, type SendChat } from '@clqn/shared';
 import { and, eq, isNotNull, lt, sql } from 'drizzle-orm';
-import { appendEvent, requireClan, type WorkspaceDb } from '../lib/access.js';
+import { appendEvent, type WorkspaceDb } from '../lib/access.js';
 import { type ChatProposal, chatMembers, chatMessages, chats, chatTokenHours } from './chat.js';
 import {
   chatTokenRetention,
@@ -34,18 +34,6 @@ export async function requireChatMember(db: WorkspaceDb, clanId: string, userId:
     .where(memberScope(clanId, userId));
   if (!member) throw new ApiError(403, 'FORBIDDEN', 'Join the chat first');
   return member;
-}
-
-export async function requireOrchestrator(db: WorkspaceDb, actor: Actor, clanId: string, lock?: 'share') {
-  const membership = await requireClan(db, actor, clanId, lock);
-  if (membership.role === 'leader' && actor.agentId) {
-    const [agent] = await db
-      .select({ id: agents.id })
-      .from(agents)
-      .where(and(eq(agents.id, actor.agentId), eq(agents.clanId, clanId), eq(agents.role, 'orchestrator')));
-    if (agent) return;
-  }
-  throw new ApiError(403, 'FORBIDDEN', 'The registered orchestrator is required');
 }
 
 async function getMessage(db: WorkspaceDb, clanId: string, id: string) {

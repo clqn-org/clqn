@@ -1,5 +1,5 @@
 {
-  "id": "173225d0-bb83-41aa-870d-b41643caa6a5",
+  "id": "45b21dc5-8d6c-4bee-ae65-3521b3766c2d",
   "prevId": "07b3773e-acde-494a-b7e6-ac58dcf0abb2",
   "version": "7",
   "dialect": "postgresql",
@@ -76,11 +76,17 @@
           "method": "btree",
           "with": {}
         },
-        "agents_one_orchestrator_per_clan": {
-          "name": "agents_one_orchestrator_per_clan",
+        "agents_one_orchestrator_per_owner": {
+          "name": "agents_one_orchestrator_per_owner",
           "columns": [
             {
               "expression": "clan_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "owner_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1199,6 +1205,68 @@
       },
       "isRLSEnabled": false
     },
+    "public.chat_backups": {
+      "name": "chat_backups",
+      "schema": "",
+      "columns": {
+        "clan_id": {
+          "name": "clan_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "chat_backups_clan_id_chats_clan_id_fk": {
+          "name": "chat_backups_clan_id_chats_clan_id_fk",
+          "tableFrom": "chat_backups",
+          "tableTo": "chats",
+          "columnsFrom": [
+            "clan_id"
+          ],
+          "columnsTo": [
+            "clan_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "chat_backups_clan_id_user_id_memberships_clan_id_user_id_fk": {
+          "name": "chat_backups_clan_id_user_id_memberships_clan_id_user_id_fk",
+          "tableFrom": "chat_backups",
+          "tableTo": "memberships",
+          "columnsFrom": [
+            "clan_id",
+            "user_id"
+          ],
+          "columnsTo": [
+            "clan_id",
+            "user_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "chat_backups_clan_id_user_id_pk": {
+          "name": "chat_backups_clan_id_user_id_pk",
+          "columns": [
+            "clan_id",
+            "user_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.chat_members": {
       "name": "chat_members",
       "schema": "",
@@ -1313,13 +1381,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "force": {
-          "name": "force",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "reply_to": {
           "name": "reply_to",
           "type": "uuid",
@@ -1361,12 +1422,6 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
-        },
-        "pick_id": {
-          "name": "pick_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -1404,12 +1459,6 @@
               "expression": "status",
               "isExpression": false,
               "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "force",
-              "isExpression": false,
-              "asc": false,
               "nulls": "last"
             },
             {
@@ -1578,6 +1627,24 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
+        },
+        "lease_agent_id": {
+          "name": "lease_agent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lease_id": {
+          "name": "lease_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lease_expires_at": {
+          "name": "lease_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
@@ -1607,12 +1674,30 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "chats_lease_agent_id_agents_id_fk": {
+          "name": "chats_lease_agent_id_agents_id_fk",
+          "tableFrom": "chats",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "lease_agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "chats_host_lease_fields": {
+          "name": "chats_host_lease_fields",
+          "value": "(\"chats\".\"lease_agent_id\" is null and \"chats\".\"lease_id\" is null and \"chats\".\"lease_expires_at\" is null)\n        or (\"chats\".\"lease_agent_id\" is not null and \"chats\".\"lease_id\" is not null)"
+        }
+      },
       "isRLSEnabled": false
     }
   },

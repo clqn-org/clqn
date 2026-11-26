@@ -7,8 +7,10 @@ import {
   defaultChatSettings,
 } from '@clqn/shared';
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type { WorkspaceDb } from '../lib/access.js';
-import { chatMembers, chatMessages, chats } from './chat.js';
+import { chatBackups, chatMembers, chatMessages, chats } from './chat.js';
+import { liveChatLease } from './chat-host.js';
 import { agents, clans, linkedRepositories, users } from './schema.js';
 import { tasks } from './tasks.js';
 
@@ -37,12 +39,16 @@ export function messageView(row: typeof chatMessages.$inferSelect): ChatMessage 
   };
 }
 
-export async function chatIdentity(db: WorkspaceDb, clanId: string) {
+export async function chatIdentity(db: WorkspaceDb, clanId: string, userId: string) {
+  const activeUser = alias(users, 'active_host');
   const [identity] = await db
-    .select({ host: users.email, clan: clans.name })
+    .select({ host: users.email, clan: clans.name, nominatedUserId: chatBackups.userId, activeHost: activeUser.email })
     .from(clans)
     .leftJoin(chats, eq(chats.clanId, clans.id))
+    .leftJoin(chatBackups, and(eq(chatBackups.clanId, chats.clanId), eq(chatBackups.userId, userId)))
     .leftJoin(users, eq(users.id, chats.hostId))
+    .leftJoin(agents, and(eq(agents.id, chats.leaseAgentId), liveChatLease))
+    .leftJoin(activeUser, eq(activeUser.id, agents.ownerId))
     .where(eq(clans.id, clanId));
   return identity!;
 }
@@ -55,7 +61,7 @@ export async function chatInfo(
   defaults: ChatSettings = defaultChatSettings,
 ) {
   const [identity, [member]] = await Promise.all([
-    chatIdentity(db, clanId),
+    chatIdentity(db, clanId, userId),
     db.select().from(chatMembers).where(memberScope(clanId, userId)),
   ]);
   const { clan, host } = identity;

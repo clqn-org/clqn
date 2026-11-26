@@ -24,10 +24,15 @@ import {
   type ChatMetricsWindow,
   type ChatSettings,
   type ChatUsage,
+  chatBackupsInputSchema,
+  chatBackupsSchema,
   chatDecisionRequestSchema,
   chatHistorySchema,
   chatInboxSchema,
   chatInfoSchema,
+  chatLeaseHeartbeatSchema,
+  chatLeaseInputSchema,
+  chatLeaseSchema,
   chatMessageSchema,
   chatMessageStatusSchema,
   chatMetricsSchema,
@@ -247,13 +252,41 @@ export class ClqnClient {
   sendChat(clanId: string, message: SendChat, signal?: AbortSignal) {
     return this.request(`${this.chatPath(clanId)}/messages`, chatMessageSchema, sendChatSchema.parse(message), signal);
   }
-  // Takes the next queued message for the orchestrator to handle.
-  chatInbox(clanId: string) {
-    return this.request(`${this.chatPath(clanId)}/inbox`, chatInboxSchema, {});
+  chatBackups(clanId: string) {
+    return this.request(`${this.chatPath(clanId)}/host/backups`, chatBackupsSchema);
   }
-  decideChat(clanId: string, id: string, decision: ChatDecisionRequest) {
+  setChatBackups(clanId: string, userIds: string[]) {
     return this.request(
-      `${this.chatPath(clanId)}/messages/${encodeURIComponent(id)}/decision`,
+      `${this.chatPath(clanId)}/host/backups`,
+      chatBackupsSchema,
+      chatBackupsInputSchema.parse({ userIds }),
+    );
+  }
+  heartbeatChatLease(clanId: string, leaseId: string, signal?: AbortSignal, renew = false) {
+    return this.request(
+      `${this.chatPath(clanId)}/host/heartbeat`,
+      chatLeaseSchema,
+      chatLeaseHeartbeatSchema.parse({ leaseId, renew }),
+      signal,
+    );
+  }
+  releaseChatLease(clanId: string, leaseId: string, signal?: AbortSignal) {
+    return this.request(
+      `${this.chatPath(clanId)}/host/release`,
+      chatLeaseSchema,
+      chatLeaseInputSchema.parse({ leaseId }),
+      signal,
+    );
+  }
+  // Takes the next queued message for the orchestrator to handle.
+  chatInbox(clanId: string, leaseId?: string) {
+    const query = leaseId ? `?lease=${encodeURIComponent(leaseId)}` : '';
+    return this.request(`${this.chatPath(clanId)}/inbox${query}`, chatInboxSchema, {});
+  }
+  decideChat(clanId: string, id: string, decision: ChatDecisionRequest, leaseId?: string) {
+    const query = leaseId ? `?lease=${encodeURIComponent(leaseId)}` : '';
+    return this.request(
+      `${this.chatPath(clanId)}/messages/${encodeURIComponent(id)}/decision${query}`,
       z.object({ status: chatMessageStatusSchema, blocker: z.string().nullable() }),
       chatDecisionRequestSchema.parse(decision),
     );

@@ -120,16 +120,13 @@ test('choosing a clan opens an existing one, creates one, or reports no invitati
   const connect = async () => new ClqnClient(f.url, token);
 
   const pickExisting = scripted(['9', '1']);
-  assert.deepEqual(await chooseClan({ server: f.url, connect, canSignIn: true, ...pickExisting }), existing);
+  assert.deepEqual(await chooseClan({ connect, ...pickExisting }), existing);
   assert.match(pickExisting.printed[0]!, /1\. Existing\n {2}2\. Create a clan\n {2}3\. Join a clan/);
   assert.equal(pickExisting.questions.length, 2);
 
   // Returning users get the same choices, and Enter reopens their last clan.
   const returning = scripted(['']);
-  assert.deepEqual(
-    await chooseClan({ server: f.url, connect, canSignIn: true, current: existing.id, ...returning }),
-    existing,
-  );
+  assert.deepEqual(await chooseClan({ connect, current: existing.id, ...returning }), existing);
   assert.match(returning.printed[0]!, /1\. Existing \(last used\)\n {2}2\. Create a clan\n {2}3\. Join a clan/);
   assert.deepEqual(returning.questions, ['Enter a number (Enter for Existing): ']);
 
@@ -138,7 +135,7 @@ test('choosing a clan opens an existing one, creates one, or reports no invitati
   // The leader of a new clan is a member too, and Enter picks full access.
   clans = [];
   const create = scripted(['2', '1', '', '']);
-  assert.deepEqual(await chooseClan({ server: f.url, connect, canSignIn: true, ...create }), created);
+  assert.deepEqual(await chooseClan({ connect, ...create }), created);
   assert.match(create.printed.join('\n'), /No pending invitations\. Ask a clan leader to invite me@example\.com\./);
   assert.match(create.questions.at(-2)!, /^Clan name \(/);
   assert.match(create.printed.join('\n'), /1\. Full access \(no limits\)\n {2}2\. Custom/);
@@ -314,7 +311,10 @@ async function joinWithStaleSignIn(t: TestContext, refuseListing: boolean) {
   const custom = ['2', '1.5', '5000', '', ' a, b ,c '];
   // After the fresh sign-in, the chosen invitation is accepted without picking it again.
   const prompts = scripted(['2', '2', ...custom]);
-  assert.deepEqual(await chooseClan({ server: f.url, connect, canSignIn: true, ...prompts }), clan);
+  const reauthenticate = async (id: string) => {
+    await signIn(f.url, id);
+  };
+  assert.deepEqual(await chooseClan({ connect, reauthenticate, ...prompts }), clan);
   assert.deepEqual(saved, [
     { approval: 'manual', tokenLimit: 5000, agentLimit: null, allowedModels: ['a', 'b', 'c'], commands: 'sandboxed' },
   ]);

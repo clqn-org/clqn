@@ -76,6 +76,7 @@ interface SettingsView {
   agents?: { installed: Runtime[]; off: Runtime[] } | undefined;
   // The email being typed in the leader-only Invite row; undefined hides the row.
   inviteText?: string | undefined;
+  backupHosting?: boolean | undefined;
   field: number;
   action: string;
 }
@@ -184,8 +185,25 @@ function agentsText(agents: SettingsView['agents']) {
     .join(' · ');
 }
 
+// The backup row can appear while settings are open. Give it a stable ID outside the other rows.
+export const backupHostingField = 9;
+export const settingsFields = (hasInvite: boolean, hasBackup: boolean) => [
+  0,
+  1,
+  2,
+  3,
+  4,
+  5,
+  ...(hasInvite ? [6] : []),
+  ...(hasBackup ? [backupHostingField] : []),
+  hasInvite ? 7 : 6,
+  hasInvite ? 8 : 7,
+];
+
 // Every setting row and the notice always fit; the hint, title, key help, and blank lines fill what room is left.
 function settingsLines(settings: SettingsView, columns: number, paint: Paint, room: number, notice: string) {
+  const hasInvite = settings.inviteText !== undefined;
+  const fields = settingsFields(hasInvite, settings.backupHosting !== undefined);
   const labels = [
     `Spawn approval   ${settings.value.approval === 'manual' ? 'Manual' : 'Automatic'}`,
     `Token limit      ${settings.tokenText || '∞'}`,
@@ -198,10 +216,12 @@ function settingsLines(settings: SettingsView, columns: number, paint: Paint, ro
     'Sign out',
   ];
   const hint =
-    settings.inviteText !== undefined && settings.field === 6
+    hasInvite && settings.field === 6
       ? 'Type a teammate’s email and press Enter to invite them to this clan.'
-      : 'Enter a whole number or none for unlimited; models comma-separated, blank for any.';
-  let spare = room - labels.length - (notice ? 1 : 0);
+      : settings.field === backupHostingField
+        ? 'Press Enter to allow or stop backup hosting on this device.'
+        : 'Enter a whole number or none for unlimited; models comma-separated, blank for any.';
+  let spare = room - fields.length - (notice ? 1 : 0);
   const fits = (lines: number) => {
     if (spare < lines) return false;
     spare -= lines;
@@ -212,9 +232,11 @@ function settingsLines(settings: SettingsView, columns: number, paint: Paint, ro
     ...(showTop ? [''] : []),
     ...(showTitle ? [paint('Session settings', 'bold')] : []),
     ...(showGap ? [''] : []),
-    ...labels.map((label, index) => {
-      const line = clip(`${index === settings.field ? '›' : ' '} ${label}`, columns);
-      return index === settings.field ? paint(line, 'accent') : line;
+    ...fields.map((field) => {
+      const label =
+        field === backupHostingField ? `Backup hosting   ${settings.backupHosting ? 'On' : 'Off'}` : labels[field]!;
+      const line = clip(`${field === settings.field ? '›' : ' '} ${label}`, columns);
+      return field === settings.field ? paint(line, 'accent') : line;
     }),
     ...(showKeys ? ['', paint(clip('↑↓ Move  ←→ Change  Enter Select  Esc Back', columns), 'muted')] : []),
     ...(showHint ? [paint(clip(hint, columns), 'muted')] : []),

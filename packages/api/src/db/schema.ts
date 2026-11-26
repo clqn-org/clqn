@@ -71,7 +71,9 @@ export const agents = pgTable(
   (table) => [
     check('agents_role_valid', sql`${table.role} IN ('worker', 'orchestrator')`),
     uniqueIndex('agents_clan_alias_idx').on(table.clanId, table.alias),
-    uniqueIndex('agents_one_orchestrator_per_clan').on(table.clanId).where(sql`${table.role} = 'orchestrator'`),
+    uniqueIndex('agents_one_orchestrator_per_owner')
+      .on(table.clanId, table.ownerId)
+      .where(sql`${table.role} = 'orchestrator'`),
   ],
 );
 

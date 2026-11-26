@@ -57,7 +57,7 @@ test('MCP attaches the receipt for the selected chat message to its decision', a
   const decide = (id: string) => client.callTool({ name: 'clqn_chat_decide', arguments: { messageId: id, decision } });
   assert.equal((await decide(randomUUID())).isError, true);
   assert.equal((await decide(messageId)).isError, undefined);
-  assert.deepEqual(calls, [[clanId, messageId, { ...decision, pickId }]]);
+  assert.deepEqual(calls, [[clanId, messageId, { ...decision, pickId }, undefined]]);
 });
 
 test('MCP discovers and calls the health tool through the protocol', async (t) => {
@@ -198,5 +198,50 @@ test('MCP forwards repository assignments and authenticated reports with the exa
     { name: 'listTasks', args: [clanId, { status: 'open', mine: true, limit: 5, after: taskId }] },
     { name: 'events', args: [clanId, 0, 50] },
     { name: 'events', args: [clanId, 12, 3] },
+  ]);
+});
+
+test('MCP attaches the session lease to chat requests without adding it to tool inputs', async (t) => {
+  const clanId = 'e6faf7c5-0b04-45de-8eba-c1fda2a17a89';
+  const leaseId = '88bedf00-3e13-4a42-ad1b-3018f675c7c5';
+  const messageId = 'f1796d17-12d5-4620-ad88-e285713350a1';
+  const decision = { action: 'reply', text: 'Queued work resumed' } as const;
+  const calls: unknown[][] = [];
+  const server = createMcpServer(
+    stub({
+      chatInbox: async (...args) => {
+        calls.push(args);
+        return { before: null, messages: [], next: null, held: [] };
+      },
+      decideChat: async (...args) => {
+        calls.push(args);
+        return { status: 'handled', blocker: null };
+      },
+    }),
+    clanId,
+    leaseId,
+  );
+  const client = new Client({ name: 'orchestrator-host-test', version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  t.after(async () => {
+    await client.close();
+    await server.close();
+  });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const { tools } = await client.listTools();
+  assert.ok(
+    tools
+      .filter(({ name }) => ['clqn_chat_inbox', 'clqn_chat_decide'].includes(name))
+      .every(({ inputSchema }) => !('leaseId' in (inputSchema.properties ?? {}))),
+  );
+  assert.equal((await client.callTool({ name: 'clqn_chat_inbox', arguments: {} })).isError, undefined);
+  assert.equal(
+    (await client.callTool({ name: 'clqn_chat_decide', arguments: { messageId, decision } })).isError,
+    undefined,
+  );
+  assert.deepEqual(calls, [
+    [clanId, leaseId],
+    [clanId, messageId, decision, leaseId],
   ]);
 });

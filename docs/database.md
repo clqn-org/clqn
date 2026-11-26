@@ -24,7 +24,7 @@ Commit schema changes with their migrations from `packages/api/drizzle`. Add new
 PostgreSQL stores identities, clan memberships, invitations, agents, chat messages and member settings, context revisions, tasks, repository links, and audit events.
 
 - Credentials and invitation codes are hashed; webhook signing keys stay outside the database. GitHub login attempts temporarily store device codes, never GitHub access tokens.
-- Unique constraints scope memberships, context revisions, task branches, and webhook deliveries. Each clan allows one orchestrator.
+- Unique constraints scope memberships, context revisions, task branches, and webhook deliveries. Each host has a separate orchestrator credential, and each clan has one active lease.
 - Transactions and locks protect invitation consumption, revision checks, assignment, claims, and ownership. State changes and audit events commit together.
 
 See [authentication](authentication.md) for credentials and permissions.

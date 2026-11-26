@@ -22,7 +22,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
-export function createMcpServer(client: ClqnClient, defaultClanId?: string) {
+export function createMcpServer(client: ClqnClient, defaultClanId?: string, leaseId?: string) {
   const server = new McpServer({ name: 'clqn', version: VERSION });
   const inboxPicks = new Map<string, { messageId: string; pickId: string } | null>();
   const clanInput = {
@@ -76,7 +76,7 @@ export function createMcpServer(client: ClqnClient, defaultClanId?: string) {
     false,
     async (input) => {
       const clanId = await clan(input);
-      const { pickId, ...inbox } = await client.chatInbox(clanId);
+      const { pickId, ...inbox } = await client.chatInbox(clanId, leaseId);
       if (pickId !== undefined)
         inboxPicks.set(clanId, pickId && inbox.next ? { messageId: inbox.next.id, pickId } : null);
       return inbox;
@@ -92,10 +92,10 @@ export function createMcpServer(client: ClqnClient, defaultClanId?: string) {
       const messageId = input.messageId as string;
       const decision = input.decision as ChatDecision;
       const pick = inboxPicks.get(clanId);
-      if (pick === undefined) return client.decideChat(clanId, messageId, decision);
+      if (pick === undefined) return client.decideChat(clanId, messageId, decision, leaseId);
       if (pick?.messageId !== messageId)
         throw new ApiError(409, 'CHAT_CONFLICT', 'Take the next message from the inbox before deciding');
-      return client.decideChat(clanId, messageId, { ...decision, pickId: pick.pickId });
+      return client.decideChat(clanId, messageId, { ...decision, pickId: pick.pickId }, leaseId);
     },
   );
   tool(
@@ -272,8 +272,13 @@ export function createMcpServer(client: ClqnClient, defaultClanId?: string) {
   return server;
 }
 
-export async function serveMcp(client: ClqnClient, clanId?: string, onClose?: () => void): Promise<McpServer> {
-  const server = createMcpServer(client, clanId);
+export async function serveMcp(
+  client: ClqnClient,
+  clanId?: string,
+  onClose?: () => void,
+  leaseId?: string,
+): Promise<McpServer> {
+  const server = createMcpServer(client, clanId, leaseId);
   const close = () => {
     void server.close();
   };

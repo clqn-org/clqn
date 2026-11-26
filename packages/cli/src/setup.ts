@@ -178,27 +178,25 @@ export async function chooseLimits(api: ClqnClient, clanId: string, ask: Ask, pr
 }
 
 interface ChooseClan {
-  server: string;
   connect: () => Promise<ClqnClient>;
   ask: Ask;
   print: Print;
-  // False when an environment token is in use, which a new GitHub sign-in would not replace.
-  canSignIn: boolean;
+  reauthenticate?: (userId: string) => Promise<void>;
   // The last clan used; Enter picks it.
   current?: string | undefined;
 }
 
 // Offer the user's clans, creating a clan, or accepting a pending invitation.
-export async function chooseClan({ server, connect, ask, print, canSignIn, current }: ChooseClan): Promise<Clan> {
+export async function chooseClan({ connect, ask, print, reauthenticate, current }: ChooseClan): Promise<Clan> {
   const text = (value: string) => terminalText(value, false);
   for (;;) {
     let api = await connect();
     // Older servers ask for a fresh GitHub sign-in for invitations sent after this one; sign in, then retry.
     const reverify = async (error: unknown, message: string) => {
-      if (!(error instanceof ApiError) || error.code !== 'INVITATION_LOGIN_REQUIRED' || !canSignIn) throw error;
+      if (!(error instanceof ApiError) || error.code !== 'INVITATION_LOGIN_REQUIRED' || !reauthenticate) throw error;
       const user = await api.whoami();
       print(message);
-      await signIn(server, user.id);
+      await reauthenticate(user.id);
       api = await connect();
     };
     const { clans } = await api.listClans();

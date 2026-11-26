@@ -14,7 +14,16 @@ import {
 } from '@clqn/shared';
 import type { AgentChoices } from './agent-runner.js';
 import type { Runtime } from './agent-session.js';
-import { characters, chatFrame, messageLines, plain, threaded, transcriptColumns } from './chat-view.js';
+import {
+  backupHostingField,
+  characters,
+  chatFrame,
+  messageLines,
+  plain,
+  settingsFields,
+  threaded,
+  transcriptColumns,
+} from './chat-view.js';
 import { metricsFrame } from './metrics-view.js';
 import { chatMerger, chatPullRequests, pullRequestKey, pullRequestsFrame } from './pull-requests.js';
 import { mouseReportReader } from './terminal.js';
@@ -56,6 +65,8 @@ export interface ChatAgents {
   // The agent CLIs installed on this machine and which the member turned off.
   choices(): Promise<AgentChoices>;
   choose(off: Runtime[]): Promise<void>;
+  backupHosting(): boolean | undefined;
+  setBackupHosting(enabled: boolean): Promise<void>;
 }
 
 // Step through every on/off combination of the installed agents, all on first.
@@ -128,17 +139,29 @@ export async function runChat(
     return threaded([...older, ...recent]);
   }
 
+  function backupHosting() {
+    return state?.orchestration?.backup && setup?.inviteText === undefined ? agents?.backupHosting() : undefined;
+  }
+
   function draw() {
     if (closed) return;
     const session = state?.session ?? info.session;
+    const orchestration = state?.orchestration;
+    const host = orchestration ? (orchestration.activeHost ?? undefined) : session?.host;
     const pullRequests = chatPullRequests(state);
-    const background = [agents?.status(), options?.repositoryStatus?.()].filter(Boolean).join(' · ');
+    const background = [
+      agents?.status(),
+      orchestration && !host && state?.queued ? 'Orchestrator offline · messages queued' : undefined,
+      options?.repositoryStatus?.(),
+    ]
+      .filter(Boolean)
+      .join(' · ');
     let frame = chatFrame({
       columns: columns(),
       rows: rows(),
       color: !('NO_COLOR' in process.env),
       clan: session?.clan ?? info.clan,
-      host: session?.host,
+      host,
       userId: actor.id,
       state,
       frame: tick,
@@ -146,6 +169,7 @@ export async function runChat(
       settings: setup
         ? {
             ...setup,
+            backupHosting: backupHosting(),
             action: busy
               ? 'Connecting…'
               : state
@@ -220,6 +244,7 @@ export async function runChat(
     approval = Math.max(index, 0);
     if (!next.approvals.length) approvalFocused = false;
     state = next;
+    if (setup?.field === backupHostingField && backupHosting() === undefined) setup.field = 6;
     agents?.update(next);
     merger.update(chatPullRequests(next));
   }
@@ -408,6 +433,20 @@ export async function runChat(
     }
   }
 
+  async function toggleBackupHosting() {
+    const current = backupHosting();
+    if (busy || current === undefined || !agents || columns() < 28 || rows() < 12) return;
+    busy = true;
+    try {
+      await agents.setBackupHosting(!current);
+    } catch (error) {
+      notice = help(error);
+    } finally {
+      busy = false;
+      draw();
+    }
+  }
+
   function edit(text: string) {
     const insert = plain(text).slice(0, Math.max(0, 4000 - draft.length));
     draft = draft.slice(0, caret) + insert + draft.slice(caret);
@@ -421,8 +460,9 @@ export async function runChat(
       else setup = undefined;
     } else if (key.name === 'tab' || key.name === 'up' || key.name === 'down') {
       const change = key.name === 'up' || key.shift ? -1 : 1;
-      const count = settingsRows(setup);
-      setup.field = (setup.field + count + change) % count;
+      const fields = settingsFields(setup.inviteText !== undefined, backupHosting() !== undefined);
+      const index = fields.indexOf(setup.field);
+      setup.field = fields[(index + fields.length + change) % fields.length]!;
       replaceField = true;
     } else if (setup.field === 0 && ['left', 'right', 'space', 'return'].includes(key.name ?? '')) {
       setup.value = { ...setup.value, approval: setup.value.approval === 'manual' ? 'automatic' : 'manual' };
@@ -442,7 +482,8 @@ export async function runChat(
         replaceField = false;
       }
     } else if (key.name === 'return') {
-      if (setup.field === settingsRows(setup) - 2) void save();
+      if (setup.field === backupHostingField) void toggleBackupHosting();
+      else if (setup.field === settingsRows(setup) - 2) void save();
       else if (setup.field === settingsRows(setup) - 1) {
         result = 'sign-out';
         stop();
@@ -474,7 +515,9 @@ export async function runChat(
 
   function composerKey(text: string, key: Key) {
     if (key.name === 'f2' && state) {
-      setup = { ...setupFor(state.settings, info.canStart), agents: saved };
+      const hosting = state.orchestration;
+      const leader = hosting ? hosting.eligible && !hosting.backup : info.canStart;
+      setup = { ...setupFor(state.settings, leader), agents: saved };
       void loadChoices();
       approvalFocused = false;
     } else if (key.name === 'f5') {
