@@ -1,7 +1,7 @@
-import { ApiError } from '@clqn/shared';
+import { type Actor, ApiError } from '@clqn/shared';
 import { Hono } from 'hono';
 import { requestId } from 'hono/request-id';
-import { type AuthenticatedActor, hashToken, type WorkspaceStore } from './db/store.js';
+import { hashToken, type WorkspaceStore } from './db/store.js';
 import type { WorkspaceDb } from './lib/access.js';
 import { requirePersonal } from './lib/access.js';
 import { createRateLimiter } from './lib/rate-limit.js';
@@ -28,7 +28,7 @@ export function createApp(
   if (options.githubWebhookSecret !== undefined && options.githubWebhookSecret.trim().length < 32) {
     throw new Error('GITHUB_WEBHOOK_SECRET must contain at least 32 non-padding characters');
   }
-  const app = new Hono<{ Variables: { user: AuthenticatedActor; tokenHash: string; requestId: string } }>();
+  const app = new Hono<{ Variables: { user: Actor; tokenHash: string; requestId: string } }>();
   const rateLimit = createRateLimiter(options.requestsPerMinute ?? 300);
   // Echoed as X-Request-Id and in 500 messages so a report can be matched to a log line.
   app.use(requestId({ limitLength: 64 }));

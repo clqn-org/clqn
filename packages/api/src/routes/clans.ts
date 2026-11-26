@@ -1,4 +1,5 @@
 import {
+  type Actor,
   ApiError,
   acceptInvitationSchema,
   createClanSchema,
@@ -9,11 +10,11 @@ import {
 import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
-import type { AuthenticatedActor, WorkspaceStore } from '../db/store.js';
+import type { WorkspaceStore } from '../db/store.js';
 import { pageResponse, parsePage } from '../lib/pagination.js';
 
 export function createClanRoutes(store: WorkspaceStore) {
-  const app = new Hono<{ Variables: { user: AuthenticatedActor } }>();
+  const app = new Hono<{ Variables: { user: Actor } }>();
   const smallBody = bodyLimit({
     maxSize: 4096,
     onError: (c) => c.json({ error: { code: 'INVALID_REQUEST', message: 'Request body is too large' } }, 413),
