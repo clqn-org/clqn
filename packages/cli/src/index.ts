@@ -470,7 +470,7 @@ async function openChat() {
         repositoryStatus = 'Main sync unavailable · retrying';
       },
     });
-  // The orchestrator (for the leader) and approved workers run in the background only while the chat is open.
+  // Approved workers run in the background while this member's chat is open.
   const agents = startAgentRunner({ api, server: apiUrl(), clanId, project });
   let result: Awaited<ReturnType<typeof runChat>>;
   try {

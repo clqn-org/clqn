@@ -118,6 +118,14 @@ export async function runChat(
     return threaded([...older, ...recent]);
   }
 
+  function usesCloud() {
+    return state?.session.cloudOrchestrator ?? info.cloudOrchestrator ?? info.session?.cloudOrchestrator ?? false;
+  }
+
+  function canJoin() {
+    return Boolean(state || info.session || info.canStart || usesCloud());
+  }
+
   function draw() {
     if (closed) return;
     const session = state?.session ?? info.session;
@@ -129,6 +137,7 @@ export async function runChat(
       color: !('NO_COLOR' in process.env),
       clan: session?.clan ?? info.clan,
       host: session?.host,
+      cloudOrchestrator: usesCloud(),
       userId: actor.id,
       state,
       frame: tick,
@@ -140,7 +149,7 @@ export async function runChat(
               ? 'Connecting…'
               : state
                 ? 'Save settings'
-                : session
+                : session || usesCloud()
                   ? 'Join session'
                   : info.canStart
                     ? 'Start session'
@@ -209,6 +218,9 @@ export async function runChat(
     const index = next.approvals.findIndex(({ messageId }) => messageId === selectedApproval);
     approval = Math.max(index, 0);
     if (!next.approvals.length) approvalFocused = false;
+    // Retain the mode when a request lands on an older API replica during a rollout.
+    if (next.session.cloudOrchestrator === undefined)
+      next = { ...next, session: { ...next.session, cloudOrchestrator: usesCloud() } };
     state = next;
     agents?.update(next);
     merger.update(chatPullRequests(next));
@@ -267,9 +279,9 @@ export async function runChat(
     notice = undefined;
     draw();
     try {
-      if (!info.session && !info.canStart) {
+      if (!canJoin()) {
         info = await api.chatInfo(clanId, controller.signal);
-        if (!info.session && !info.canStart) {
+        if (!canJoin()) {
           notice = 'Waiting for the clan leader to start this session';
           return;
         }

@@ -109,6 +109,70 @@ const agent = (id: string, role: 'worker' | 'orchestrator', ownerId = userId) =>
   active: true,
 });
 
+test('cloud chat announces enabled local workers and leaves orchestration on the server', async (t) => {
+  const f = await fixture(t);
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const registered: ReturnType<typeof agent>[] = [];
+  const presence: { agentIds: string[]; signal: AbortSignal }[] = [];
+  const api = {
+    whoami: async () => ({ id: userId, email: 'lead@example.com' }),
+    listAgents: async () => ({ agents: registered }),
+    members: async () => assert.fail('Cloud workers do not need to check who can run the orchestrator'),
+    registerAgent: async (_clan: string, _name: string, role: 'worker' | 'orchestrator') => {
+      assert.equal(role, 'worker');
+      const worker = agent(randomUUID(), role);
+      registered.push(worker);
+      return { agent: worker, token: token('w') };
+    },
+    revokeAgent: async (_clan: string, id: string) => {
+      registered.find((worker) => worker.id === id)!.active = false;
+    },
+    chatWorkerPresence: async (clan: string, agentIds: string[], signal: AbortSignal) => {
+      assert.equal(clan, clanId);
+      presence.push({ agentIds, signal });
+      if (presence.length === 1) throw new Error('Temporary failure');
+      return { ok: true };
+    },
+  } as unknown as ClqnClient;
+  const runner = startAgentRunner({
+    api,
+    server,
+    clanId,
+    project: f.directory,
+    spawn: f.spawn,
+    runtimes: async () => ['codex', 'claude'],
+    now: f.now,
+  });
+  t.after(() => runner.stop());
+  const state = chatState({ session: { host: 'lead@example.com', clan: 'Clan', cloudOrchestrator: true }, queued: 1 });
+  runner.update(state);
+  await until(() => /Worker availability disconnected/.test(runner.status() ?? ''));
+  assert.deepEqual(
+    presence[0]?.agentIds,
+    registered.map(({ id }) => id),
+  );
+
+  // The presence timer is independent of chat polling, including responses from older API replicas.
+  runner.update(chatState({ queued: 1 }));
+  t.mock.timers.tick(9999);
+  assert.equal(presence.length, 1);
+  t.mock.timers.tick(1);
+  await until(() => runner.status() === undefined);
+  assert.deepEqual(presence[1]?.agentIds, presence[0]?.agentIds);
+  assert.equal(f.spawned.length, 0);
+
+  await runner.choose(['claude']);
+  await until(() => presence.length === 3);
+  assert.deepEqual(presence[2]?.agentIds, [registered[0]!.id]);
+  assert.ok(presence[1]?.signal.aborted);
+
+  await runner.stop();
+  assert.ok(presence[2]?.signal.aborted);
+  t.mock.timers.tick(10_000);
+  assert.equal(presence.length, 3);
+  assert.equal(f.spawned.length, 0);
+});
+
 test('the leader’s chat connects an orchestrator and runs it only while messages are queued', async (t) => {
   const f = await fixture(t);
   const registered: { name: string; role: string; alias?: string | undefined }[] = [];

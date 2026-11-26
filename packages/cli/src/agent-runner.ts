@@ -11,6 +11,7 @@ import {
   type ChatUsage,
   ClqnClient,
   chatUsageSchema,
+  chatWorkerPresenceLimit,
   gitShaSchema,
   repositoryInputSchema,
   type WorkerCommands,
@@ -85,6 +86,7 @@ export interface AgentRunner {
 }
 
 const retryAfter = 60_000;
+const presenceInterval = 10_000;
 // A Claude Code orchestrator session restarts after this many turns, which bounds its context and clears old chat
 // text, and a turn that runs longer than this is stopped.
 const sessionTurns = 20;
@@ -139,13 +141,13 @@ function handle(email: string) {
 }
 
 // Connect a worker for each agent CLI the member has on, and turn off the ones they don't, so the orchestrator
-// only picks agents this machine will run. The leader also connects the orchestrator.
-async function prepare(options: AgentRunnerOptions) {
+// only picks agents this machine will run. A local chat still connects the leader's orchestrator.
+async function prepare(options: AgentRunnerOptions, cloud: boolean) {
   const { api, clanId, server } = options;
   const user = await api.whoami();
-  const [{ agents }, { members }, installed, off] = await Promise.all([
+  const [{ agents }, membership, installed, off] = await Promise.all([
     api.listAgents(clanId),
-    api.members(clanId),
+    cloud ? undefined : api.members(clanId),
     (options.runtimes ?? installedRuntimes)(),
     readAgentsOff(),
   ]);
@@ -180,7 +182,7 @@ async function prepare(options: AgentRunnerOptions) {
     }
   }
   let orchestrator: Connection | undefined;
-  if (members.find((member) => member.userId === user.id)?.role === 'leader') {
+  if (membership?.members.find((member) => member.userId === user.id)?.role === 'leader') {
     const existing = agents.find((agent) => agent.role === 'orchestrator');
     if (!existing || existing.ownerId === user.id) {
       const alias = agents.some((agent) => agent.alias === 'orchestrator') ? undefined : 'orchestrator';
@@ -277,6 +279,10 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
   let connections: Awaited<ReturnType<typeof prepare>> | undefined;
   let latest: ChatState | undefined;
   let generation = 0;
+  let cloud = false;
+  let presence: { controller: AbortController; timer: NodeJS.Timeout } | undefined;
+  let presenceProblem = false;
+  let localOrchestrator: ChildProcess | undefined;
   let preparing = false;
   let preparedAt = -Infinity;
   let problem: string | undefined;
@@ -291,6 +297,42 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
     for (const child of children) child.kill('SIGTERM');
   };
   process.once('exit', killAll);
+
+  function stopPresence() {
+    if (!presence) return;
+    clearInterval(presence.timer);
+    presence.controller.abort();
+    presence = undefined;
+    presenceProblem = false;
+  }
+
+  function announceWorkers(agentIds: string[]) {
+    if (!agentIds.length) return;
+    const controller = new AbortController();
+    let sending = false;
+    async function send() {
+      if (sending || controller.signal.aborted) return;
+      sending = true;
+      try {
+        for (let start = 0; start < agentIds.length; start += chatWorkerPresenceLimit) {
+          await options.api.chatWorkerPresence(
+            options.clanId,
+            agentIds.slice(start, start + chatWorkerPresenceLimit),
+            controller.signal,
+          );
+        }
+        if (!controller.signal.aborted) presenceProblem = false;
+      } catch {
+        if (!controller.signal.aborted) presenceProblem = true;
+      } finally {
+        sending = false;
+      }
+    }
+    const timer = setInterval(() => void send(), presenceInterval);
+    timer.unref();
+    presence = { controller, timer };
+    void send();
+  }
 
   async function openLog(name: string, role: string, cwd: string) {
     const logs = join(configDirectory(), 'logs');
@@ -311,6 +353,10 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
     orchestrator?: { instructions: string; resume?: string | undefined },
   ) {
     const log = await openLog(name, role, cwd);
+    if (stopped || (role === 'orchestrator' && cloud)) {
+      log.end();
+      throw new Error('The local agent was stopped');
+    }
     const command = agentCommand(connection.runtime, connection.path, {
       project: cwd,
       role,
@@ -323,6 +369,11 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
       // Output goes to a log, never to the terminal running the chat.
       const child = spawn(command.command, command.args, { cwd, env: command.env, stdio: ['pipe', 'pipe', 'pipe'] });
       children.add(child);
+      if (role === 'orchestrator') localOrchestrator = child;
+      const forget = () => {
+        children.delete(child);
+        if (localOrchestrator === child) localOrchestrator = undefined;
+      };
       child.stdout?.setEncoding('utf8');
       child.stdout?.on('data', (chunk: string) => {
         stdout = (stdout + chunk).slice(-outputLimit);
@@ -332,11 +383,11 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
       child.stdin?.on('error', () => undefined);
       child.stdin?.end(prompt);
       child.once('error', (error) => {
-        children.delete(child);
+        forget();
         done({ code: null, error });
       });
       child.once('close', (code) => {
-        children.delete(child);
+        forget();
         done({ code });
       });
     });
@@ -356,6 +407,10 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
   async function openSession(connection: Connection) {
     const cwd = options.project;
     const log = await openLog('orchestrator', 'orchestrator session', cwd);
+    if (stopped || cloud) {
+      log.end();
+      throw new Error('The local orchestrator was stopped');
+    }
     const command = agentCommand(connection.runtime, connection.path, {
       project: cwd,
       role: 'orchestrator',
@@ -364,6 +419,7 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
     });
     const child = spawn(command.command, command.args, { cwd, env: command.env, stdio: ['pipe', 'pipe', 'pipe'] });
     children.add(child);
+    localOrchestrator = child;
     const current: Session = { child, turns: 0 };
     let buffer = '';
     child.stdout?.setEncoding('utf8');
@@ -392,6 +448,7 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
       if (closed) return;
       closed = true;
       children.delete(child);
+      if (localOrchestrator === child) localOrchestrator = undefined;
       if (session === current) session = undefined;
       log.end(`\n--- exit ${error ? message(error) : 'session'}\n`);
       if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT')
@@ -456,12 +513,13 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
         let failed = true;
         try {
           const result = await turn(connection);
+          if (cloud || stopped) return;
           failed = !result.ok;
           if (failed && !problem?.startsWith('Install'))
             problem = `Orchestrator failed · ${result.error ?? `see ${join(configDirectory(), 'logs', 'orchestrator.log')}`}`;
           else if (problem?.startsWith('Orchestrator')) problem = undefined;
         } catch (error) {
-          problem = `Orchestrator · ${message(error)}`;
+          if (!cloud && !stopped) problem = `Orchestrator · ${message(error)}`;
         } finally {
           orchestrating = false;
           lastRun = { at: now(), failed, queue };
@@ -603,24 +661,41 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
   function update(state: ChatState) {
     if (stopped) return;
     latest = state;
+    const nextCloud = state.session.cloudOrchestrator ?? cloud;
+    if (cloud !== nextCloud) {
+      cloud = nextCloud;
+      generation++;
+      connections = undefined;
+      preparedAt = -Infinity;
+      stopPresence();
+      if (cloud) {
+        localOrchestrator?.kill('SIGTERM');
+        session = undefined;
+        codex = undefined;
+        if (problem?.startsWith('Orchestrator')) problem = undefined;
+      }
+    }
     if (!connections) {
       if (preparing || now() - preparedAt < retryAfter) return;
       preparing = true;
       preparedAt = now();
       const current = generation;
-      void prepare(options).then(
+      void prepare(options, cloud).then(
         (prepared) => {
           preparing = false;
+          if (stopped) return;
           // Choices changed while connecting: connect again with the new ones.
           if (current !== generation) return update(latest!);
           connections = prepared;
           problem = undefined;
+          if (cloud) announceWorkers([...prepared.workers.keys()]);
           update(latest!);
         },
         (error: unknown) => {
           preparing = false;
+          if (stopped) return;
           if (current !== generation) return update(latest!);
-          problem = `Agents off · ${message(error)}`;
+          problem = `${cloud ? 'Local workers' : 'Agents'} off · ${message(error)}`;
         },
       );
       return;
@@ -650,8 +725,9 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
       const count = workers.size;
       return (
         [
-          orchestrating ? 'Orchestrator working' : '',
+          !cloud && orchestrating ? 'Orchestrator working' : '',
           count ? `${count} agent${count === 1 ? '' : 's'} running` : '',
+          presenceProblem ? 'Worker availability disconnected · retrying' : '',
           problem ?? '',
         ]
           .filter(Boolean)
@@ -664,6 +740,7 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
     },
     async choose(off) {
       await saveAgentsOff(off);
+      stopPresence();
       // Running agents finish their tasks; the next update reconnects with the new choices.
       generation++;
       connections = undefined;
@@ -672,12 +749,13 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
       session = undefined;
       codex = undefined;
       preparedAt = -Infinity;
-      if (problem?.startsWith('Agents off')) problem = undefined;
+      if (problem?.startsWith('Agents off') || problem?.startsWith('Local workers off')) problem = undefined;
       if (latest) update(latest);
     },
     async stop() {
       if (stopped) return;
       stopped = true;
+      stopPresence();
       publicationAbort.abort();
       killAll();
       process.off('exit', killAll);

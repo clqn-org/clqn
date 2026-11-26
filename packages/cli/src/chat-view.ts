@@ -83,6 +83,7 @@ interface View {
   color: boolean;
   clan: string;
   host?: string | undefined;
+  cloudOrchestrator?: boolean;
   userId: string;
   state?: ChatState | undefined;
   // Animation frame for the message the orchestrator is processing.
@@ -216,7 +217,11 @@ export function chatFrame(view: View): Frame {
   const content = columns - 2 * margin;
   const rule = paint('─'.repeat(content), 'muted');
   const header = clip(`◆ clqn / ${plain(view.clan)}`, content);
-  const host = view.host ? `  ·  hosted by ${name(view.host)}` : '';
+  const host = view.cloudOrchestrator
+    ? '  ·  cloud orchestrator'
+    : view.host
+      ? `  ·  hosted by ${name(view.host)}`
+      : '';
   const lines = [
     paint(header.slice(0, 6), 'accent') +
       paint(header.slice(6), 'bold') +
