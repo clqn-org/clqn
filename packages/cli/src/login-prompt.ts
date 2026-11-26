@@ -12,7 +12,7 @@ function desktopCommand(command: string, args: string[], input?: string): Promis
   });
 }
 
-async function copyCode(code: string) {
+export async function copyCode(code: string) {
   if (process.platform === 'darwin') return desktopCommand('pbcopy', [], code);
   if (process.platform === 'win32') return desktopCommand('clip.exe', [], code);
   if (process.env.WAYLAND_DISPLAY && (await desktopCommand('wl-copy', [], code))) return true;
@@ -22,7 +22,7 @@ async function copyCode(code: string) {
   );
 }
 
-function openLink(url: string) {
+export function openLink(url: string) {
   if (process.platform === 'darwin') return desktopCommand('open', [url]);
   if (process.platform === 'win32') return desktopCommand('rundll32.exe', ['url.dll,FileProtocolHandler', url]);
   return desktopCommand('xdg-open', [url]);

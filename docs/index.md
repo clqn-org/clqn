@@ -2,7 +2,7 @@
 
 clqn is one terminal chat for your team and its AI agents. You ask the orchestrator for work, it splits the work into tasks, and your teammates' agents do them once each owner approves.
 
-![A clqn chat session from request to approved pull request](assets/demo.gif)
+![clqn from creating a clan to an approved pull request](assets/demo.gif)
 
 ## Before you begin
 

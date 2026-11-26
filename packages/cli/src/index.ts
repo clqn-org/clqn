@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { homedir } from 'node:os';
 import { serveMcp } from '@clqn/mcp';
 import {
   type Agent,
@@ -24,16 +25,17 @@ import { runChat } from './chat.js';
 import { hostedServer, preferredServer, readConfig, writeConfig } from './config.js';
 import { localRepository } from './git.js';
 import { removeGithubWebhook } from './github-hooks.js';
+import { landingFrame, openLanding } from './landing.js';
 import { runMcpSync } from './mcp-sync.js';
 import {
   chooseClan,
+  GoBack,
   linkGithubRepository,
   savedClan,
   selectClan,
   setupChatRepository,
   signIn,
   signOut,
-  terminalPrompt,
 } from './setup.js';
 import { runSyncWatch } from './sync-watch.js';
 import { terminalText } from './terminal.js';
@@ -429,96 +431,126 @@ program
   });
 
 // The one interactive command: sign in if needed, pick or set up a clan, then open the chat.
+// Everything before joining a session, including its settings, runs on the full-screen landing page.
 async function openChat() {
   const environmentToken = process.env.CLQN_TOKEN !== undefined;
-  if (!environmentToken) {
-    const { token } = await readConfig(apiUrl());
-    const valid =
-      token !== undefined &&
-      (await new ClqnClient(apiUrl(), token).whoami().then(
-        () => true,
-        (error: unknown) => {
-          if (error instanceof ApiError && error.status === 401) return false;
-          throw error;
-        },
-      ));
-    if (!valid) {
-      const user = await signIn(apiUrl());
-      console.error(terminalText(`Signed in as ${user.email}`, process.stderr.isTTY));
-    }
-  }
-  let clanId = process.env.CLQN_CLAN_ID;
-  let prompt: ReturnType<typeof terminalPrompt> | undefined;
-  const ask = (question: string) => {
-    prompt ??= terminalPrompt();
-    return prompt.ask(question);
-  };
-  const reauthenticate = async (userId: string) => {
-    prompt?.close();
-    prompt = undefined;
-    await signIn(apiUrl(), userId);
-  };
-  const print = (text: string) => console.log(text);
   const project = process.cwd();
-  let api: ClqnClient;
-  let repository: Awaited<ReturnType<typeof setupChatRepository>>;
+  const home = homedir();
+  const details: { user?: string; directory: string; repository?: string } = {
+    directory: project.startsWith(home) ? `~${project.slice(home.length)}` : project,
+  };
+  let landing = openLanding(details);
+  const know = (changes: { user?: string; repository?: string }) => {
+    Object.assign(details, changes);
+    landing.update(changes);
+  };
+  void localRepository(project).then(
+    (local) => know({ repository: local.repository }),
+    () => undefined,
+  );
+  const show = (uri: string, code: string) => landing.showGithubLogin(uri, code);
   try {
-    // Returning users see the same picker as new ones, with Enter reopening their last clan.
-    if (!clanId) {
-      const clan = await chooseClan({
-        connect: client,
-        ask,
-        print,
-        ...(environmentToken ? {} : { reauthenticate }),
-        current: await savedClan(apiUrl(), await client()),
-      });
-      clanId = clan.id;
-      await selectClan(apiUrl(), clanId);
+    if (!environmentToken) {
+      const { token } = await readConfig(apiUrl());
+      const user =
+        token === undefined
+          ? undefined
+          : await new ClqnClient(apiUrl(), token).whoami().catch((error: unknown) => {
+              if (error instanceof ApiError && error.status === 401) return undefined;
+              throw error;
+            });
+      know({ user: (user ?? (await signIn(apiUrl(), undefined, show))).email });
+    } else
+      void client()
+        .then((api) => api.whoami())
+        .then(
+          (user) => know({ user: user.email }),
+          () => undefined,
+        );
+  } catch (error) {
+    landing.close();
+    throw error;
+  }
+  const reauthenticate = (userId: string) => signIn(apiUrl(), userId, show).then(() => undefined);
+  // Going back from a later step returns to the clan picker.
+  const setup = async () => {
+    for (;;) {
+      try {
+        const { ask, print } = landing;
+        let clanId = process.env.CLQN_CLAN_ID;
+        // Returning users see the same picker as new ones, with Enter reopening their last clan.
+        if (!clanId) {
+          const clan = await chooseClan({
+            connect: client,
+            ask,
+            print,
+            ...(environmentToken ? {} : { reauthenticate }),
+            current: await savedClan(apiUrl(), await client()),
+          });
+          clanId = clan.id;
+          await selectClan(apiUrl(), clanId);
+        }
+        const api = await client();
+        const repository = await setupChatRepository({ api, server: apiUrl(), clanId, project, ask, print });
+        return { clanId, api, repository };
+      } catch (error) {
+        if (!(error instanceof GoBack)) throw error;
+      }
     }
-    api = await client();
-    repository = await setupChatRepository({ api, server: apiUrl(), clanId, project, ask, print });
-  } finally {
-    prompt?.close();
-  }
-  const syncController = new AbortController();
-  let repositoryStatus = repository.sync ? 'Checking main…' : undefined;
-  const sync =
-    repository.sync &&
-    runSyncWatch({
-      ...repository.sync,
-      signal: syncController.signal,
-      getEvents: (cursor, signal) => api.events(clanId, cursor, 100, signal),
-      onResult: ({ status, reason, branch, headSha }) => {
-        const skipped = {
-          not_main: 'default branch is not checked out',
-          dirty: 'local changes',
-          operation_in_progress: 'Git operation in progress',
-          local_commits: 'local commits',
-          diverged: 'local history has diverged',
-          no_local_main: 'no local default branch',
-        };
-        if (status === 'skipped' && reason) repositoryStatus = `${branch} sync paused · ${skipped[reason]}`;
-        else if (status === 'updated' && headSha) repositoryStatus = `${branch} synced to ${headSha.slice(0, 7)}`;
-        else repositoryStatus = `${branch} up to date`;
-      },
-      onError: () => {
-        repositoryStatus = 'Main sync unavailable · retrying';
-      },
+  };
+  for (;;) {
+    let chosen: Awaited<ReturnType<typeof setup>>;
+    try {
+      chosen = await setup();
+    } finally {
+      landing.close();
+    }
+    const { clanId, api, repository } = chosen;
+    const syncController = new AbortController();
+    let repositoryStatus = repository.sync ? 'Checking main…' : undefined;
+    const sync =
+      repository.sync &&
+      runSyncWatch({
+        ...repository.sync,
+        signal: syncController.signal,
+        getEvents: (cursor, signal) => api.events(clanId, cursor, 100, signal),
+        onResult: ({ status, reason, branch, headSha }) => {
+          const skipped = {
+            not_main: 'default branch is not checked out',
+            dirty: 'local changes',
+            operation_in_progress: 'Git operation in progress',
+            local_commits: 'local commits',
+            diverged: 'local history has diverged',
+            no_local_main: 'no local default branch',
+          };
+          if (status === 'skipped' && reason) repositoryStatus = `${branch} sync paused · ${skipped[reason]}`;
+          else if (status === 'updated' && headSha) repositoryStatus = `${branch} synced to ${headSha.slice(0, 7)}`;
+          else repositoryStatus = `${branch} up to date`;
+        },
+        onError: () => {
+          repositoryStatus = 'Main sync unavailable · retrying';
+        },
+      });
+    const agents = startAgentRunner({
+      api,
+      server: apiUrl(),
+      clanId,
+      project,
     });
-  const agents = startAgentRunner({
-    api,
-    server: apiUrl(),
-    clanId,
-    project,
-  });
-  let result: Awaited<ReturnType<typeof runChat>>;
-  try {
-    result = await runChat(api, clanId, agents, { repositoryStatus: () => repository.notice ?? repositoryStatus });
-  } finally {
-    syncController.abort();
-    await Promise.all([agents.stop(), sync]);
+    let result: Awaited<ReturnType<typeof runChat>>;
+    try {
+      result = await runChat(api, clanId, agents, {
+        repositoryStatus: () => repository.notice ?? repositoryStatus,
+        page: (view) => landingFrame({ ...view, links: process.env.TERM !== 'dumb', ...details, log: [] }),
+      });
+    } finally {
+      syncController.abort();
+      await Promise.all([agents.stop(), sync]);
+    }
+    if (result === 'sign-out') console.log(await signOut(apiUrl()));
+    if (result !== 'back') return;
+    landing = openLanding(details);
   }
-  if (result === 'sign-out') console.log(await signOut(apiUrl()));
 }
 
 try {

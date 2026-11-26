@@ -13,7 +13,7 @@ The npm package is `clqn-cli`; its executable is `clqn`. It bundles the CLI, MCP
 
 ### Prepare
 
-Start from a clean checkout with Node.js 22.12+ and npm 10+. Update workspace versions, internal dependency versions, the lockfile, and `VERSION` in `packages/shared/src/index.ts` together. Finish README edits before packaging; it is included in the archive.
+Start from a clean checkout with Node.js 22.12+ and npm 10+. Update workspace versions, internal dependency versions, the lockfile, and `VERSION` and `RELEASE_DATE` in `packages/shared/src/index.ts` together. Finish README edits before packaging; it is included in the archive.
 
 ```sh
 npm ci

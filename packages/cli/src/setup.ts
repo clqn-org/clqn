@@ -1,5 +1,4 @@
 import { basename } from 'node:path';
-import { createInterface } from 'node:readline/promises';
 import {
   ApiError,
   allowedModelsSchema,
@@ -17,7 +16,13 @@ import { configureGithubWebhook } from './github-hooks.js';
 import { githubLogin } from './login.js';
 import { terminalText } from './terminal.js';
 
-export type Ask = (question: string) => Promise<string>;
+// An Ask may reject with GoBack when the member asks to return to the previous step.
+export type Ask = (question: string, options?: { back?: boolean }) => Promise<string>;
+export class GoBack extends Error {
+  constructor() {
+    super('Went back');
+  }
+}
 export type Print = (text: string) => void;
 
 // Keep local preferences across sign-ins and remember the server for later runs.
@@ -27,8 +32,8 @@ async function saveToken(server: string, token: string) {
   await writeServer(server);
 }
 
-export async function signIn(server: string, expectedUserId?: string) {
-  const { token, user } = await githubLogin(server);
+export async function signIn(server: string, expectedUserId?: string, show?: Parameters<typeof githubLogin>[1]) {
+  const { token, user } = await githubLogin(server, show);
   if (expectedUserId !== undefined && user.id !== expectedUserId) {
     await new ClqnClient(server, token).logout().catch(() => undefined);
     throw new Error('Sign in with the GitHub account that received the invitation.');
@@ -134,9 +139,9 @@ export async function setupChatRepository(input: {
   }
 }
 
-async function pick(ask: Ask, count: number, question: string) {
+async function pick(ask: Ask, count: number, question: string, options?: { back?: boolean }) {
   for (;;) {
-    const answer = (await ask(question)).trim();
+    const answer = (await ask(question, options)).trim();
     if (!answer) return undefined;
     const choice = Number(answer);
     if (Number.isInteger(choice) && choice >= 1 && choice <= count) return choice - 1;
@@ -207,8 +212,8 @@ export async function chooseClan({ connect, ask, print, reauthenticate, current 
       'Join a clan',
     ];
     print(`\nChoose a clan\n${choices.map((choice, index) => `  ${index + 1}. ${choice}`).join('\n')}`);
-    const question = last ? `Enter a number (Enter for ${text(last.name)}): ` : 'Enter a number: ';
-    const choice = await pick(ask, choices.length, question);
+    // The clan list is the first step, so there is nothing to go back to. Enter still reopens the last clan.
+    const choice = await pick(ask, choices.length, 'Enter a number: ', { back: false });
     if (choice === undefined) {
       if (last) return last;
       continue;
@@ -216,7 +221,7 @@ export async function chooseClan({ connect, ask, print, reauthenticate, current 
     if (choice < clans.length) return clans[choice]!;
     if (choice === clans.length) {
       const fallback = basename(process.cwd()).trim().slice(0, 100) || 'My project';
-      const name = (await ask(`Clan name (${text(fallback)}): `)).trim() || fallback;
+      const name = (await ask('Clan name: ')).trim() || fallback;
       const parsed = createClanSchema.safeParse({ name });
       if (!parsed.success) {
         print('Enter a clan name of up to 100 characters.');
@@ -246,24 +251,4 @@ export async function chooseClan({ connect, ask, print, reauthenticate, current 
     await chooseLimits(api, clan.id, ask, print);
     return clan;
   }
-}
-
-// Plain line prompts before the full-screen chat opens. Ctrl+C or Ctrl+D quits.
-export function terminalPrompt() {
-  const prompt = createInterface({ input: process.stdin, output: process.stdout });
-  let done = false;
-  const quit = () => {
-    if (done) return;
-    process.stdout.write('\n');
-    process.exit(130);
-  };
-  prompt.on('SIGINT', quit);
-  prompt.on('close', quit);
-  return {
-    ask: (question: string) => prompt.question(question),
-    close: () => {
-      done = true;
-      prompt.close();
-    },
-  };
 }

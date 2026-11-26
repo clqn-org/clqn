@@ -18,17 +18,21 @@ import {
   backupHostingField,
   characters,
   chatFrame,
+  clip,
   type Frame,
   messageLines,
+  painter,
   plain,
   type StopTarget,
   settingsFields,
+  settingsLines,
   threaded,
   transcriptColumns,
 } from './chat-view.js';
+import { type LandingFrame, type LandingView, openLinkAt } from './landing.js';
 import { metricsFrame } from './metrics-view.js';
 import { chatMerger, chatPullRequests, pullRequestKey, pullRequestsFrame } from './pull-requests.js';
-import { mouseReportReader } from './terminal.js';
+import { mouseReportReader, terminalSizeNotice } from './terminal.js';
 
 const ctrlShortcuts: Record<string, string> = { s: 'f2', p: 'f3', q: 'f4', g: 'f5', l: 'f6' };
 const help = (error: unknown) => (error instanceof Error ? error.message : 'Request failed');
@@ -89,8 +93,12 @@ export async function runChat(
   api: ClqnClient,
   clanId: string,
   agents?: ChatAgents,
-  options?: { repositoryStatus?: () => string | undefined },
-): Promise<'quit' | 'sign-out'> {
+  options?: {
+    repositoryStatus?: () => string | undefined;
+    // Draws the settings shown before joining a session on the landing page; Esc there returns 'back'.
+    page?: (view: { columns: number; rows: number; color: boolean; content: LandingView['content'] }) => LandingFrame;
+  },
+): Promise<'quit' | 'sign-out' | 'back'> {
   const { stdin, stdout } = process;
   const actor = await api.whoami();
   if (actor.agentId) throw new Error('Sign in with a personal credential to open the chat');
@@ -98,7 +106,7 @@ export async function runChat(
   let setup: Setup | undefined = setupFor(info.settings, info.canStart);
   let saved: AgentChoices | undefined;
   void loadChoices();
-  let result: 'quit' | 'sign-out' = 'quit';
+  let result: 'quit' | 'sign-out' | 'back' = 'quit';
   let replaceField = true;
   let state: ChatState | undefined;
   let draft = '';
@@ -130,6 +138,7 @@ export async function runChat(
   const outbox: SendChat[] = [];
   const controller = new AbortController();
   const merger = chatMerger(api, clanId, controller.signal);
+  let pageLinks: LandingFrame['links'] = [];
   const readMouse = mouseReportReader(
     (lines) => {
       if (!state || setup || metrics || reviews) return;
@@ -137,6 +146,7 @@ export async function runChat(
       draw();
     },
     (column, row) => {
+      openLinkAt(pageLinks, column, row);
       if (!state || setup || metrics || reviews) return;
       const target = stopTargets.find(
         (stop) => stop.row === row - 1 && column - 1 >= stop.column && column - 1 < stop.column + stop.width,
@@ -199,31 +209,31 @@ export async function runChat(
     ]
       .filter(Boolean)
       .join(' · ');
+    const settings = setup && {
+      ...setup,
+      backupHosting: backupHosting(),
+      action: busy
+        ? 'Connecting…'
+        : state
+          ? 'Save settings'
+          : session
+            ? 'Join session'
+            : info.canStart
+              ? 'Start session'
+              : 'Check for session',
+    };
+    const color = !('NO_COLOR' in process.env);
     const chat = chatFrame({
       columns: columns(),
       rows: rows(),
-      color: !('NO_COLOR' in process.env),
+      color,
       clan: session?.clan ?? info.clan,
       host,
       userId: actor.id,
       state,
       frame: tick,
       messages: messages(),
-      settings: setup
-        ? {
-            ...setup,
-            backupHosting: backupHosting(),
-            action: busy
-              ? 'Connecting…'
-              : state
-                ? 'Save settings'
-                : session
-                  ? 'Join session'
-                  : info.canStart
-                    ? 'Start session'
-                    : 'Check for session',
-          }
-        : undefined,
+      settings,
       draft,
       caret,
       scroll,
@@ -247,6 +257,20 @@ export async function runChat(
     }
     stopTargets = chat.stops ?? [];
     let frame: Frame = chat;
+    pageLinks = [];
+    if (settings && !state && options?.page) {
+      const paint = painter(color);
+      const warning = notice ?? connection;
+      const page = options.page({
+        columns: columns(),
+        rows: rows(),
+        color,
+        content: (width, height) =>
+          settingsLines(settings, width, paint, height, warning ? paint(clip(plain(warning), width), 'warning') : ''),
+      });
+      pageLinks = page.links;
+      frame = page;
+    }
     if (metrics)
       frame = metricsFrame({
         columns: columns(),
@@ -507,9 +531,12 @@ export async function runChat(
 
   function setupKey(text: string, key: Key) {
     if (!setup || busy) return;
+    if (!state && options?.page && terminalSizeNotice(columns(), rows())) return;
     if (key.name === 'escape') {
-      if (!state) stop();
-      else setup = undefined;
+      if (!state) {
+        if (options?.page) result = 'back';
+        stop();
+      } else setup = undefined;
     } else if (key.name === 'tab' || key.name === 'up' || key.name === 'down') {
       const change = key.name === 'up' || key.shift ? -1 : 1;
       const fields = settingsFields(setup.inviteText !== undefined, backupHosting() !== undefined);
