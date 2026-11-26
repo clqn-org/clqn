@@ -195,6 +195,8 @@ async function assignChatTask(
       })
       .where(eq(chatMessages.id, messageId));
     let repository = task.repository;
+    // Never pushed: drop the binding, so the run counts against limits until it publishes again.
+    if (repository?.headSha === null) repository = null;
     if (repository) {
       // Pending until the worker reports its new head. A new head needs a new merge approval.
       const { mergeApproval: _approval, ...rest } = repository;
