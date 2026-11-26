@@ -192,7 +192,7 @@ interface ChooseClan {
 export async function chooseClan({ server, connect, ask, print, canSignIn, current }: ChooseClan): Promise<Clan> {
   const text = (value: string) => terminalText(value, false);
   for (;;) {
-    const api = await connect();
+    let api = await connect();
     const { clans } = await api.listClans();
     const last = clans.find((clan) => clan.id === current);
     const choices = [
@@ -220,27 +220,30 @@ export async function chooseClan({ server, connect, ask, print, canSignIn, curre
       await chooseLimits(api, clan.id, ask, print);
       return clan;
     }
+    const { invitations } = await api.listInvitations();
+    if (!invitations.length) {
+      const { email } = await api.whoami();
+      print(text(`No pending invitations. Ask a clan leader to invite ${email}.`));
+      continue;
+    }
+    print(`\nPending invitations\n${invitations.map((entry, i) => `  ${i + 1}. ${text(entry.clanName)}`).join('\n')}`);
+    const index = await pick(ask, invitations.length, 'Enter a number (Enter to go back): ');
+    if (index === undefined) continue;
+    const { clanId } = invitations[index]!;
+    let clan: Clan;
     try {
-      const { invitations } = await api.listInvitations();
-      if (!invitations.length) {
-        const { email } = await api.whoami();
-        print(text(`No pending invitations. Ask a clan leader to invite ${email}.`));
-        continue;
-      }
-      print(
-        `\nPending invitations\n${invitations.map((entry, i) => `  ${i + 1}. ${text(entry.clanName)}`).join('\n')}`,
-      );
-      const index = await pick(ask, invitations.length, 'Enter a number (Enter to go back): ');
-      if (index === undefined) continue;
-      const clan = await api.acceptInvitation(invitations[index]!.clanId);
-      await chooseLimits(api, clan.id, ask, print);
-      return clan;
+      clan = await api.acceptInvitation(clanId);
     } catch (error) {
+      // An invitation newer than this sign-in needs a fresh GitHub sign-in, once, to accept it.
       if (!(error instanceof ApiError) || error.code !== 'INVITATION_LOGIN_REQUIRED' || !canSignIn) throw error;
       const user = await api.whoami();
-      print('Verify your GitHub email to see your invitations.');
+      print('Verify your GitHub email to accept this invitation.');
       await signIn(server, user.id);
+      api = await connect();
+      clan = await api.acceptInvitation(clanId);
     }
+    await chooseLimits(api, clan.id, ask, print);
+    return clan;
   }
 }
 

@@ -293,7 +293,6 @@ export function createStore(url: string, poolSize = 10) {
         .selectDistinctOn([schema.invitations.clanId], {
           clanId: schema.invitations.clanId,
           clanName: schema.clans.name,
-          createdAt: schema.invitations.createdAt,
           expiresAt: schema.invitations.expiresAt,
         })
         .from(schema.invitations)
@@ -311,10 +310,12 @@ export function createStore(url: string, poolSize = 10) {
         )
         .orderBy(schema.invitations.clanId, desc(schema.invitations.createdAt), schema.invitations.id)
         .limit(page.limit + 1);
-      return invitations.map(({ clanId, clanName, createdAt, expiresAt }) => {
-        requireFreshInvitationLogin(actor, createdAt);
-        return { clanId, clanName, expiresAt: expiresAt.toISOString() };
-      });
+      // Listing shows only clan names; accepting is what requires a fresh GitHub sign-in.
+      return invitations.map(({ clanId, clanName, expiresAt }) => ({
+        clanId,
+        clanName,
+        expiresAt: expiresAt.toISOString(),
+      }));
     },
     async joinInvitation(actor, reference) {
       requirePersonal(actor);
