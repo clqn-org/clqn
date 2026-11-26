@@ -907,6 +907,7 @@ test('a member stops a running worker, hands its task back, and a follow-up cont
   assert.deepEqual(transitions.slice(3), [`claim ${taskId}`, `complete ${taskId}`]);
   assert.equal(reports[0]?.tokens, 100);
   assert.equal(reports[0]?.result?.text, 'Done now.');
+  await until(() => runner.stoppable().size === 0);
   assert.equal(await runner.stopRun(taskId), 'Long task is no longer running');
 });
 

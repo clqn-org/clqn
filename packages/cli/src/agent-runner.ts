@@ -888,9 +888,9 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
           // A stopped or failed run keeps its worktree, so a follow-up can continue it.
           if (claimed && !pending)
             await api.transitionTask(clanId, run.taskId, finished ? 'complete' : 'release').catch(() => undefined);
-          if (finished && !pending) await rm(worktreePath(run.taskId), { force: true }).catch(() => undefined);
           workers.delete(run.taskId);
           if (pending && !stopped) publish(run, connection, pending);
+          if (finished && !pending) await rm(worktreePath(run.taskId), { force: true }).catch(() => undefined);
         }
       })(),
     );
