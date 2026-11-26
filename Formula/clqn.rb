@@ -2,8 +2,8 @@
 class Clqn < Formula
   desc "Shared workspaces for humans and their AI agents"
   homepage "https://clqn.org/"
-  url "https://github.com/rli8145/clqn/releases/download/v0.3.0/clqn-cli-0.3.0.tgz"
-  sha256 "b42d501d65c376758ecc5259d5c93a09bc8e363066c26baee2911da245b61d42"
+  url "https://github.com/rli8145/clqn/releases/download/v0.4.0/clqn-cli-0.4.0.tgz"
+  sha256 "462940c261cda9f2d991ee74563d3cb90fbfc7edf7b6be039b5729693cdcc09a"
   license "MIT"
 
   depends_on "node"
