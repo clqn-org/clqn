@@ -31,7 +31,7 @@ import {
 import { type LandingFrame, type LandingView, openLinkAt } from './landing.js';
 import { metricsFrame } from './metrics-view.js';
 import { chatMerger, chatPullRequests, pullRequestKey, pullRequestsFrame } from './pull-requests.js';
-import { mouseReportReader } from './terminal.js';
+import { mouseReportReader, terminalSizeNotice } from './terminal.js';
 
 const ctrlShortcuts: Record<string, string> = { s: 'f2', p: 'f3', q: 'f4', g: 'f5', l: 'f6' };
 const help = (error: unknown) => (error instanceof Error ? error.message : 'Request failed');
@@ -488,6 +488,7 @@ export async function runChat(
 
   function setupKey(text: string, key: Key) {
     if (!setup || busy) return;
+    if (!state && options?.page && terminalSizeNotice(columns(), rows())) return;
     if (key.name === 'escape') {
       if (!state) {
         if (options?.page) result = 'back';

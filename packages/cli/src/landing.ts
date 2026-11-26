@@ -3,7 +3,7 @@ import { RELEASE_DATE, VERSION } from '@clqn/shared';
 import { type Frame, wrap } from './chat-view.js';
 import { copyCode, openLink } from './login-prompt.js';
 import { GoBack } from './setup.js';
-import { mouseReportReader } from './terminal.js';
+import { mouseReportReader, terminalSizeNotice } from './terminal.js';
 import { clip, painter, plain, width } from './text.js';
 
 // docs/assets/wordmark.svg, one character per pixel.
@@ -102,14 +102,21 @@ export interface LandingView {
   // What setup has printed so far, oldest first, and the question waiting for an answer.
   log: string[];
   prompt?: { question: string; answer: string; back?: boolean | undefined } | undefined;
+  // The number of lines back from the latest output.
+  scroll?: number;
   // Replaces the log and prompt, e.g. the session settings form, sized to the flow's columns and rows.
   content?: ((columns: number, rows: number) => string[]) | undefined;
 }
 
 // Wordmark on top, then a box with the logo and local context on the left and the setup flow on the right.
-export type LandingFrame = Frame & { links: { row: number; column: number; size: number; url: string }[] };
+export type LandingFrame = Frame & {
+  links: { row: number; column: number; size: number; url: string }[];
+  history?: { offset: number; max: number; pageSize: number };
+};
 export function landingFrame(view: LandingView): LandingFrame {
   const { columns, rows, color } = view;
+  const sizeNotice = terminalSizeNotice(columns, rows);
+  if (sizeNotice) return { lines: [sizeNotice], links: [] };
   const paint = painter(color);
   const tone = (text: string, code: number) => (color && text ? `\x1b[${fg(code)}m${text}\x1b[0m` : text);
   const margin = columns >= 60 ? 2 : 0;
@@ -146,22 +153,24 @@ export function landingFrame(view: LandingView): LandingFrame {
 
   const height = Math.max(1, rows - lines.length - 1);
   const body = inner - 4;
+  // The flow sits well clear of the logo and the top border when there is room.
+  const gap = 8;
+  const sidebar = body >= 34 + gap + 30 ? 34 : 0;
+  const pane = sidebar ? body - sidebar - gap : body;
+  const detailWidth = Math.min(34, sidebar || pane);
   const details = [
-    view.user ? tone(clip(plain(view.user), 34), peach) : paint('Not signed in', 'muted'),
-    paint(clip(plain(view.directory), 34), 'muted'),
+    view.user ? tone(clip(plain(view.user), detailWidth), peach) : paint('Not signed in', 'muted'),
+    paint(clip(plain(view.directory), detailWidth), 'muted'),
     ...(view.repository
       ? [
           link(
-            paint(clip(plain(view.repository), 34), 'muted'),
+            paint(clip(plain(view.repository), detailWidth), 'muted'),
             `https://github.com/${encodeURI(view.repository)}`,
             view.links,
           ),
         ]
       : []),
   ];
-  // The flow sits well clear of the logo and the top border when there is room.
-  const gap = 8;
-  const sidebar = body >= 34 + gap + 30 ? 34 : 0;
   const left: string[] = [];
   if (sidebar) {
     const showLogo = height >= logo.length + 2 + details.length;
@@ -172,31 +181,35 @@ export function landingFrame(view: LandingView): LandingFrame {
       ...block.map((line, index) => (index >= block.length - details.length ? center(line, sidebar) : line)),
     );
   }
-  const pane = sidebar ? body - sidebar - gap : body;
-
-  // The flow keeps its newest lines in view, with the prompt and its answer last.
-  // Session settings bring their own top line, so they start a row higher than the log.
+  // Setup output scrolls above the fixed prompt. Session settings bring their own top line.
   const flow = sidebar ? (view.content ? [''] : ['', '']) : [...details, ''];
   if (view.content) flow.push(...view.content(pane, height - flow.length));
   else flow.push(...view.log.flatMap((line) => wrap(line, pane)));
-  let cursor: Frame['cursor'];
+  const input: string[] = [];
   let promptRow = -1;
   if (view.prompt) {
     const question = plain(view.prompt.question);
     // A blank line separates the prompt from the text above it.
-    if (view.log.some((line) => line.trim())) flow.push('');
+    if (view.log.some((line) => line.trim())) input.push('');
     const answer = plain(view.prompt.answer);
-    if (width(question) + width(answer) < pane) flow.push(tone(question, peach) + answer);
+    if (width(question) + width(answer) < pane) input.push(tone(question, peach) + answer);
     else {
       const asked = wrap(question.trimEnd(), pane);
-      flow.push(...asked.map((line) => tone(line, peach)));
-      flow.push(tail(answer, pane - 1));
+      input.push(...asked.map((line) => tone(line, peach)), tail(answer, pane - 1));
     }
-    promptRow = flow.length - 1;
-    flow.push('', paint(view.prompt.back === false ? 'Ctrl+C Quit' : 'Esc Back  ·  Ctrl+C Quit', 'muted'));
+    promptRow = input.length - 1;
+    const keys = view.prompt.back === false ? 'Ctrl+C Quit' : 'Esc Back  ·  Ctrl+C Quit';
+    input.push('', ...wrap(keys, pane).map((line) => paint(line, 'muted')));
+    if (flow.length + input.length > height && input.length < height) {
+      input[promptRow + 1] = paint('↑↓ PgUp PgDn Scroll', 'muted');
+    }
   }
-  const offset = Math.max(0, flow.length - height);
-  const shown = flow.slice(offset);
+  const pageSize = Math.max(0, height - input.length);
+  const max = view.content || pageSize === 0 ? 0 : Math.max(0, flow.length - pageSize);
+  const offset = Math.max(0, Math.min(max, view.scroll ?? 0));
+  const end = flow.length - offset;
+  const visibleLog = flow.slice(Math.max(0, end - pageSize), end);
+  const shown = [...visibleLog, ...input].slice(-height);
   const top = lines.length;
   for (let row = 0; row < height; row++) {
     const right = shown[row] ?? '';
@@ -204,15 +217,21 @@ export function landingFrame(view: LandingView): LandingFrame {
     lines.push(`${indent + tone('│', dim)} ${fit(content, body)} ${tone('│', dim)}`);
   }
   lines.push(indent + tone(`└${'─'.repeat(inner - 2)}┘`, dim));
-  if (view.prompt) {
-    const last = stripped(flow[promptRow] ?? '');
-    cursor = {
-      row: top + promptRow - offset,
-      column: margin + 2 + (sidebar ? sidebar + gap : 0) + Math.min(width(last), pane - 1),
-    };
-  }
+  const row = shown.length - input.length + promptRow;
+  const cursor: Frame['cursor'] =
+    view.prompt && row >= 0
+      ? {
+          row: top + row,
+          column: margin + 2 + (sidebar ? sidebar + gap : 0) + Math.min(width(stripped(input[promptRow]!)), pane - 1),
+        }
+      : undefined;
   const shownLines = lines.slice(0, rows);
-  return { lines: shownLines, links: linkTargets(shownLines), ...(cursor ? { cursor } : {}) };
+  return {
+    lines: shownLines,
+    links: linkTargets(shownLines),
+    history: { offset, max, pageSize },
+    ...(cursor ? { cursor } : {}),
+  };
 }
 
 // Where each link sits on screen, so a click can open it in terminals without OSC 8 support.
@@ -277,10 +296,9 @@ export function openLanding(details: { user?: string; directory: string; reposit
   let login: { uri: string; code: string; status: string } | undefined;
   let closed = false;
   let targets: LandingFrame['links'] = [];
-  const readMouse = mouseReportReader(
-    () => undefined,
-    (column, row) => openLinkAt(targets, column, row),
-  );
+  let scroll = 0;
+  let pageSize = 0;
+  const readMouse = mouseReportReader(scrollBy, (column, row) => openLinkAt(targets, column, row));
 
   function draw() {
     if (closed) return;
@@ -305,13 +323,22 @@ export function openLanding(details: { user?: string; directory: string; reposit
       ...state,
       log: [...log, ...loginLines],
       prompt,
+      scroll,
     });
     targets = frame.links;
+    scroll = frame.history?.offset ?? scroll;
+    pageSize = frame.history?.pageSize ?? 0;
     const screen = frame.lines.map((line, index) => `\x1b[${index + 1};1H\x1b[2K${line}`).join('');
     const cursor = frame.cursor ? `\x1b[${frame.cursor.row + 1};${frame.cursor.column + 1}H\x1b[?25h` : '';
     // Clearing below a full-height frame would erase its last row, the bottom border.
     const rest = frame.lines.length < rows ? `\x1b[${frame.lines.length + 1};1H\x1b[J` : '';
     stdout.write(`\x1b[?25l${screen}${rest}${cursor}`);
+  }
+
+  function scrollBy(lines: number) {
+    if (pageSize === 0) return;
+    scroll = Math.max(0, scroll + lines);
+    draw();
   }
 
   function close() {
@@ -336,6 +363,10 @@ export function openLanding(details: { user?: string; directory: string; reposit
   function keypress(text: string | undefined, key: Key = {}) {
     if (readMouse(text, key.sequence)) return;
     if (key.ctrl && (key.name === 'c' || key.name === 'd')) return quit();
+    if (terminalSizeNotice(stdout.columns || 80, stdout.rows || 24)) return;
+    if (key.name === 'up' || key.name === 'down') return scrollBy(key.name === 'up' ? 1 : -1);
+    if (key.name === 'pageup' || key.name === 'pagedown') return scrollBy(key.name === 'pageup' ? pageSize : -pageSize);
+    if (key.name === 'end') return scrollBy(-scroll);
     if (prompt) {
       if (key.name === 'return' || key.name === 'enter') {
         const { answer, resolve } = prompt;
@@ -380,11 +411,15 @@ export function openLanding(details: { user?: string; directory: string; reposit
   return {
     ask: (question, options) =>
       new Promise((resolve, reject) => {
+        scroll = 0;
         prompt = { question, answer: '', back: options?.back, resolve, reject };
         draw();
       }),
     print(text) {
-      if (answered) log.length = 0;
+      if (answered) {
+        log.length = 0;
+        scroll = 0;
+      }
       answered = false;
       log.push(...text.replace(/^\n+/, () => (log.length ? '\n' : '')).split('\n'));
       draw();
@@ -394,9 +429,11 @@ export function openLanding(details: { user?: string; directory: string; reposit
       draw();
     },
     showGithubLogin(uri, code) {
+      scroll = 0;
       login = { uri, code, status: '' };
       draw();
       return () => {
+        scroll = 0;
         login = undefined;
         draw();
       };

@@ -2,6 +2,7 @@ import type { ChatMessage, ChatSettings, ChatState } from '@clqn/shared';
 
 import { type Runtime, runtimeNames } from './agent-session.js';
 import { markdownLines } from './markdown.js';
+import { terminalSizeNotice } from './terminal.js';
 import { cells, characters, clip, type Paint, pad, painter, plain, take, width } from './text.js';
 
 export { characters, clip, type Paint, pad, painter, plain, width };
@@ -258,7 +259,8 @@ export function chatFrame(view: View): ChatFrame {
   const columns = Math.max(1, view.columns);
   const rows = Math.max(1, view.rows);
   const paint = painter(view.color);
-  if (columns < 28 || rows < 12) return { lines: [clip('Enlarge terminal · Ctrl+C to quit', columns)] };
+  const sizeNotice = terminalSizeNotice(columns, rows);
+  if (sizeNotice) return { lines: [sizeNotice] };
   const margin = marginFor(columns);
   const content = columns - 2 * margin;
   const rule = paint('─'.repeat(content), 'muted');

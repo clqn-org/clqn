@@ -1,3 +1,9 @@
+import { clip } from './text.js';
+
+export function terminalSizeNotice(columns: number, rows: number) {
+  return columns < 28 || rows < 12 ? clip('Enlarge terminal · Ctrl+C to quit', Math.max(1, columns)) : undefined;
+}
+
 // Keep escape sequences in API text from reaching the terminal, and make URLs clickable in a TTY.
 // The full URL remains visible for copying.
 export function terminalText(text: string, tty: boolean): string {

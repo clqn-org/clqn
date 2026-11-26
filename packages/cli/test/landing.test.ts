@@ -58,12 +58,45 @@ test('narrow and short terminals drop the art and keep the flow', () => {
   assert.ok(frame.lines.every((line) => !line.includes('█') && !line.includes('⣿')));
   assert.equal(frame.lines[1], `│ ${'Not signed in'.padEnd(46)} │`);
   // Only the newest lines stay in view.
-  const long = landingFrame(view({ columns: 50, rows: 8, log: Array.from({ length: 20 }, (_, i) => `line ${i}`) }));
+  const long = landingFrame(view({ columns: 50, rows: 12, log: Array.from({ length: 20 }, (_, i) => `line ${i}`) }));
   const shown = long.lines.map(strip);
   assert.ok(shown.some((line) => line.includes('line 19')));
   assert.ok(!shown.some((line) => line.includes('line 0 ')));
   assert.match(shown.at(-4)!, /Enter a number: 1/);
   assert.match(shown.at(-2)!, /Esc Back/);
+});
+
+test('the landing page uses the chat resize notice at the same minimum size', () => {
+  assert.deepEqual(landingFrame(view({ columns: 80, rows: 11 })).lines, ['Enlarge terminal · Ctrl+C to quit']);
+  for (const columns of [1, 4, 5, 27]) {
+    const frame = landingFrame(view({ columns, rows: 24, log: ['Choose a clan'] }));
+    assert.equal(frame.lines.length, 1);
+    assert.ok(width(frame.lines[0]!) <= columns);
+    assert.deepEqual(frame.links, []);
+    assert.equal(frame.cursor, undefined);
+  }
+  const minimum = landingFrame(view({ columns: 28, rows: 12 })).lines.map(strip);
+  assert.ok(minimum.some((line) => line.includes('Enter a number')));
+  assert.ok(minimum.every((line) => width(line) <= 28));
+  const compact = landingFrame(
+    view({ columns: 28, rows: 24, directory: '~/projects/a-repository-with-a-long-directory-name' }),
+  );
+  assert.ok(compact.lines.map(strip).every((line) => width(line) <= 28));
+});
+
+test('long clan lists scroll above the prompt and stop at the first choices', () => {
+  const list = view({
+    log: ['Choose a clan', ...Array.from({ length: 25 }, (_, index) => `${index + 1}. Clan ${index + 1}`)],
+    prompt: { question: 'Enter a number: ', answer: '1', back: false },
+  });
+  const latest = landingFrame(list);
+  assert.ok(latest.lines.map(strip).some((line) => line.includes('25. Clan 25')));
+  assert.ok(latest.lines.map(strip).some((line) => line.includes('↑↓ PgUp PgDn Scroll')));
+  const oldest = landingFrame({ ...list, scroll: latest.history!.max });
+  assert.ok(oldest.lines.map(strip).some((line) => line.includes(' 1. Clan 1 ')));
+  assert.deepEqual(landingFrame({ ...list, scroll: 1_000 }), oldest);
+  assert.equal(oldest.cursor?.row, latest.cursor?.row);
+  assert.match(strip(oldest.lines[oldest.cursor!.row]!), /Enter a number: 1/);
 });
 
 test('long questions wrap and long answers keep their end in view', () => {
