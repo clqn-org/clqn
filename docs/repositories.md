@@ -13,14 +13,14 @@ The leader links the repository when creating the clan. To link or repair it lat
 ## From request to merge
 
 1. You ask for work in chat. The orchestrator turns it into tasks.
-2. Each worker's owner approves (or has automatic approval on). The worker starts in its own worktree on its own task branch, so your checkout is never touched.
+2. Each worker's owner approves (or has automatic approval on). The worker starts in its own worktree on its own task branch (`clqn/task-<id>`), so your checkout is never touched. The worktree is a folder next to your clone, named after it plus the start of the task ID, for example `../project-1a2b3c4d`.
 3. When the worker finishes, clqn commits, pushes the branch, opens a pull request, and posts the link in chat.
 4. The leader reviews the PR on GitHub, then approves that commit in chat (**Ctrl+L**, then **Y**).
-5. While the leader's chat is open, clqn merges once the GitHub checks pass and GitHub allows the merge. If the branch changes after approval, it needs approval again.
+5. While the leader's chat is open, clqn squash-merges with the leader's `gh` sign-in once the GitHub checks pass and GitHub allows the merge. At least one check must succeed, so a repository without CI checks is never merged automatically. If the branch changes after approval, it needs approval again.
 
 ## Keeping main current
 
-While chat is open, clqn keeps your local default branch (`main`, `master`, or whatever GitHub reports) up to date. A GitHub notification triggers a fetch and fast-forward right after someone pushes. As a fallback, clqn also fetches at startup and every five minutes.
+While chat is open, clqn keeps your local default branch (`main`, `master`, or whatever GitHub reports) up to date. A GitHub notification triggers a fetch and fast-forward within seconds of someone pushing. As a fallback, clqn also fetches at startup and every five minutes.
 
 clqn only fast-forwards a clean checkout of the default branch, even if you're working in another worktree. It skips a checkout that has uncommitted changes, local commits, or diverged history, and never stashes, resets, rebases, or touches your task branches. If no worktree has the default branch checked out, it only fetches. Sync status appears in chat.
 

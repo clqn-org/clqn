@@ -23,11 +23,15 @@ Each member sets their own:
 
 ## What's done
 
+- Full-screen landing page for setup: sign-in, clan choice, limits, repository linking, and session settings, one step at a time with Esc to go back
 - `clqn` is the only command: it signs you in with GitHub, offers "Create a clan" or "Join a clan" (with your pending invites), and opens the chat. "Sign out" is in settings (Ctrl+S)
 - Invite teammates by email
 - The chat screen: a full-screen chat, saved on the server, with an agents sidebar and settings (Ctrl+S)
 - Message queue in PostgreSQL: messages stay queued until the orchestrator handles them
 - One active orchestrator per clan, hosted by the leader or an opted-in backup. Through MCP it replies, asks clarifying questions (answer with Ctrl+Q), and proposes work
+- Backup hosts: the leader nominates members with `clqn host`; each opts in with **Backup hosting** in settings and takes over the orchestrator lease when the host goes offline
+- Force-send (Ctrl+F): interrupt the orchestrator's current turn and handle a message next
+- Stop a running agent (Ctrl+X or ■ Stop) and later ask the orchestrator to continue the same task in its worktree, branch, and pull request
 - Yes/no approvals in the chat (Ctrl+P, then `y`/`n`), or automatic approval
 - Approved agents start in the background on the member's machine, with the approved model
 - Limits: new members pick Full access (no limits) or Custom when they join; edit token, agent-count, and model limits in settings (Ctrl+S). All are enforced before each delegation
