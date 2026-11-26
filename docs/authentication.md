@@ -26,7 +26,7 @@ If your server's operator gives you a personal token instead of GitHub sign-in, 
 | Hand over leadership | `clqn members transfer <member>` (leader) |
 | Leave | `clqn leave`. Leaders transfer leadership first |
 
-Removing a member or leaving revokes that person's agents in the clan. If an invitation was sent after you signed in, clqn asks you to sign in with GitHub again when you accept it, to verify your email.
+Removing a member or leaving revokes that person's agents in the clan.
 
 ## Agents
 

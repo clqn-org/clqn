@@ -271,8 +271,8 @@ test('a skipped repository prompt stays skipped unless the clone gets linked', a
   });
 });
 
-// Current servers ask for a fresh sign-in when accepting; older ones already did when listing.
-async function joinWithStaleSignIn(t: TestContext, olderServer: boolean) {
+// Older servers asked for a fresh sign-in when listing or accepting invitations sent after the last one.
+async function joinWithStaleSignIn(t: TestContext, refuseListing: boolean) {
   const stale = `clqn_${'s'.repeat(43)}`;
   const token = `clqn_${'f'.repeat(43)}`;
   const user = { id: randomUUID(), email: 'verified@example.com' };
@@ -295,7 +295,7 @@ async function joinWithStaleSignIn(t: TestContext, olderServer: boolean) {
     else if (request.url === '/v1/clans') response.end(JSON.stringify({ clans: [] }));
     else if (request.url === '/v1/invitations') {
       lists.push(request.headers.authorization);
-      if (olderServer && request.headers.authorization === `Bearer ${stale}`) {
+      if (refuseListing && request.headers.authorization === `Bearer ${stale}`) {
         response.writeHead(403);
         response.end(JSON.stringify({ error: { code: 'INVITATION_LOGIN_REQUIRED', message: 'Sign in again' } }));
       } else response.end(JSON.stringify({ invitations }));
@@ -325,7 +325,7 @@ async function joinWithStaleSignIn(t: TestContext, olderServer: boolean) {
     'Agent count (blank for none): ',
     'Allowed models, comma-separated (blank for any): ',
   ]);
-  if (olderServer) {
+  if (refuseListing) {
     assert.deepEqual(lists, [`Bearer ${stale}`, `Bearer ${token}`]);
     assert.deepEqual(accepts, [`Bearer ${token}`]);
   } else {
@@ -336,11 +336,10 @@ async function joinWithStaleSignIn(t: TestContext, olderServer: boolean) {
   assert.equal((await readConfig(f.url)).token, token);
 }
 
-test('joining a clan accepts the chosen invitation and refreshes a stale GitHub sign-in', (t) =>
+test('joining a clan through an older server signs in again and retries accepting', (t) =>
   joinWithStaleSignIn(t, false));
 
-test('joining a clan through an older server refreshes a stale sign-in before listing', (t) =>
-  joinWithStaleSignIn(t, true));
+test('joining a clan through an older server signs in again and retries listing', (t) => joinWithStaleSignIn(t, true));
 
 test('sign-in for an invitation rejects a different GitHub account without saving it', async (t) => {
   const token = `clqn_${'d'.repeat(43)}`;

@@ -193,7 +193,7 @@ export async function chooseClan({ server, connect, ask, print, canSignIn, curre
   const text = (value: string) => terminalText(value, false);
   for (;;) {
     let api = await connect();
-    // An invitation sent after this sign-in needs a fresh GitHub sign-in to verify the email, then a retry.
+    // Older servers ask for a fresh GitHub sign-in for invitations sent after this one; sign in, then retry.
     const reverify = async (error: unknown, message: string) => {
       if (!(error instanceof ApiError) || error.code !== 'INVITATION_LOGIN_REQUIRED' || !canSignIn) throw error;
       const user = await api.whoami();
@@ -228,7 +228,6 @@ export async function chooseClan({ server, connect, ask, print, canSignIn, curre
       await chooseLimits(api, clan.id, ask, print);
       return clan;
     }
-    // Older servers also check this when listing.
     const { invitations } = await api.listInvitations().catch(async (error: unknown) => {
       await reverify(error, 'Verify your GitHub email to see your invitations.');
       return api.listInvitations();
