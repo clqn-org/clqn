@@ -351,7 +351,7 @@ export function chatFrame(view: View): ChatFrame {
       lines.push(line);
     } else {
       // Only the trusted styles generated here have ANSI sequences.
-      const visibleWidth = width(line.replace(/\x1b\[\d+m/g, ''));
+      const visibleWidth = width(line.replace(/\x1b\[[\d;]*m/g, ''));
       lines.push(line + ' '.repeat(Math.max(0, left - visibleWidth)) + sep + (activity[i] ?? ''));
     }
   }

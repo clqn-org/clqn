@@ -56,7 +56,11 @@ export function pullRequestsFrame(view: {
   const index = view.requests.findIndex((request) => pullRequestKey(request) === view.selected);
   const request = view.requests[index];
   const line = (value: string) => clip(plain(value), columns);
-  const lines = [paint(line(`◆ clqn / ${view.clan} · Pull requests`), 'bold'), paint('─'.repeat(columns), 'muted')];
+  const header = line(`◆ clqn / ${view.clan} · Pull requests`);
+  const lines = [
+    paint(header.slice(0, 6), 'accent') + paint(header.slice(6), 'bold'),
+    paint('─'.repeat(columns), 'muted'),
+  ];
   if (request) {
     const { repository } = request;
     const url = `https://github.com/${repository.slug}/pull/${repository.prNumber}`;
