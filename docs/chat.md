@@ -34,7 +34,7 @@ On macOS, use the **Ctrl** keys: function keys usually control brightness and vo
 | Ctrl+L (F6) | Pull requests. The leader presses **Y** to approve a merge or **N** to decline |
 | Ctrl+S (F2) | Settings |
 | Ctrl+G (F5) | Metrics. **T** or **Tab** switches between 24 hours and 7 days |
-| ↑ ↓, Page Up, Page Down | Scroll chat history. **End** jumps back to the latest |
+| Mouse wheel, ↑ ↓, Page Up, Page Down | Scroll chat history. **End** jumps back to the latest. To select text, hold **Option** (iTerm2, Terminal) or **Shift** (most others) while dragging |
 | Ctrl+R | Retry a message that failed to send |
 | Ctrl+C | Quit |
 

@@ -104,6 +104,8 @@ export async function runChat(
   let failed = false;
   let closed = false;
   let paste: string | undefined;
+  // Node splits a mouse report like ESC[<64;10;5M into keystrokes, so they are collected here.
+  let mouse: string | undefined;
   let metrics: { window: ChatMetricsWindow; data?: ChatMetrics; at: number } | undefined;
   let reviews: { selected?: string } | undefined;
   const outbox: SendChat[] = [];
@@ -453,6 +455,15 @@ export async function runChat(
     }
   }
 
+  // Positive lines scroll back through history, loading older messages near the top.
+  function scrollBy(lines: number) {
+    const span = Math.max(2, transcriptColumns(columns()));
+    const total = messages().reduce((sum, message) => sum + messageLines(message, span, actor.id).length, 0);
+    const max = Math.max(0, total - 2);
+    scroll = Math.max(0, Math.min(max, scroll + lines));
+    if (lines > 0 && scroll >= Math.max(0, max - Math.max(lines, rows() - 13))) void olderPage();
+  }
+
   function composerKey(text: string, key: Key) {
     if (key.name === 'f2' && state) {
       setup = { ...setupFor(state.settings, info.canStart), agents: saved };
@@ -483,14 +494,9 @@ export async function runChat(
     } else if (key.name === 'escape') {
       reply = undefined;
     } else if (['pageup', 'pagedown', 'up', 'down'].includes(key.name ?? '')) {
-      // Terminals send the mouse wheel as ↑/↓ in full-screen apps, so those scroll a line at a time.
-      const increment = key.name === 'up' || key.name === 'down' ? 1 : Math.max(1, rows() - 13);
-      const back = key.name === 'pageup' || key.name === 'up';
-      const span = Math.max(2, transcriptColumns(columns()));
-      const total = messages().reduce((sum, message) => sum + messageLines(message, span, actor.id).length, 0);
-      const max = Math.max(0, total - 2);
-      scroll = Math.max(0, Math.min(max, scroll + (back ? increment : -increment)));
-      if (back && scroll >= Math.max(0, max - Math.max(increment, rows() - 13))) void olderPage();
+      const page = Math.max(1, rows() - 13);
+      const increment = key.name === 'up' || key.name === 'down' ? 1 : page;
+      scrollBy(key.name === 'pageup' || key.name === 'up' ? increment : -increment);
     } else if (key.name === 'end' && scroll) {
       scroll = 0;
     } else if (key.name === 'return' && draft.trim()) {
@@ -538,6 +544,24 @@ export async function runChat(
 
   function keypress(text: string | undefined, key: Key = {}) {
     if (closed) return;
+    if (key.sequence === '\x1b[<') {
+      mouse = '';
+      return;
+    }
+    if (mouse !== undefined) {
+      if (text !== 'M' && text !== 'm') {
+        if (mouse.length < 32) mouse += text ?? '';
+        return;
+      }
+      // Wheel up is button 64 and down is 65; other mouse events are ignored.
+      const button = Number(mouse.split(';')[0]);
+      mouse = undefined;
+      if ((button === 64 || button === 65) && state && !setup && !metrics && !reviews) {
+        scrollBy(button === 64 ? 3 : -3);
+        draw();
+      }
+      return;
+    }
     if (key.name === 'paste-start') {
       paste = '';
       return;
@@ -601,7 +625,7 @@ export async function runChat(
       process.off('SIGTERM', stop);
       stdin.setRawMode(wasRaw);
       stdin.pause();
-      stdout.write('\x1b[0m\x1b[?25h\x1b[?2004l\x1b[?1007l\x1b[?1049l');
+      stdout.write('\x1b[0m\x1b[?25h\x1b[?2004l\x1b[?1006l\x1b[?1000l\x1b[?1049l');
       resolve(result);
     };
     // Show the orchestrator's answer as soon as its turn ends instead of at the next poll.
@@ -613,8 +637,9 @@ export async function runChat(
     stdout.on('resize', draw);
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
-    // ?1007h asks xterm-style terminals to send the mouse wheel as ↑/↓ on this screen.
-    stdout.write('\x1b[?1049h\x1b[?2004h\x1b[?1007h\x1b[2J');
+    // ?1000h and ?1006h report mouse buttons, including the wheel, so the wheel scrolls in every terminal.
+    // Text selection then needs Option-drag (iTerm2, Terminal) or Shift-drag (most others).
+    stdout.write('\x1b[?1049h\x1b[?2004h\x1b[?1000h\x1b[?1006h\x1b[2J');
     stdin.resume();
     draw();
   });
