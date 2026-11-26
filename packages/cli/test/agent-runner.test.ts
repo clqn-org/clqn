@@ -867,18 +867,13 @@ test('a member stops a running worker, hands its task back, and a follow-up cont
     status: 'queued',
     tokens: null,
   };
-  // Another task left running by a chat that closed on this machine.
+  // A task that another chat window on this machine is running.
   const orphan: ChatRun = { ...run, messageId: randomUUID(), title: 'Orphan', taskId: stale, status: 'running' };
   f.advance(1000);
   runner.update(chatState({ runs: [run, orphan] }));
   await until(() => f.spawned.length === 1);
-  assert.deepEqual(
-    [...runner.stoppable()],
-    [
-      [taskId, 1000],
-      [stale, undefined],
-    ],
-  );
+  // Only the worker this chat started: another window may still be running the other one.
+  assert.deepEqual([...runner.stoppable()], [[taskId, 1000]]);
 
   assert.equal(await runner.stopRun(taskId), 'Stopping Long task…');
   assert.ok(f.spawned[0]!.child.killed);
@@ -887,8 +882,8 @@ test('a member stops a running worker, hands its task back, and a follow-up cont
   assert.equal(reports.length, 0, 'a stopped run posts no partial result');
   assert.equal(runner.status(), 'Long task stopped · ask the orchestrator to continue it');
 
-  assert.equal(await runner.stopRun(stale), 'Stopped Orphan · ask the orchestrator to continue it');
-  assert.deepEqual(transitions.slice(2), [`release ${stale}`]);
+  assert.equal(await runner.stopRun(stale), 'Orphan is no longer running');
+  assert.equal(transitions.length, 2);
 
   // The same message does not start twice, but a follow-up for the same task does, adding to its usage.
   runner.update(chatState({ runs: [{ ...run, status: 'released' }] }));
@@ -903,8 +898,8 @@ test('a member stops a running worker, hands its task back, and a follow-up cont
       '{"type":"item.completed","item":{"type":"agent_message","text":"Done now."}}',
     ].join('\n'),
   );
-  await until(() => transitions.length === 5);
-  assert.deepEqual(transitions.slice(3), [`claim ${taskId}`, `complete ${taskId}`]);
+  await until(() => transitions.length === 4);
+  assert.deepEqual(transitions.slice(2), [`claim ${taskId}`, `complete ${taskId}`]);
   assert.equal(reports[0]?.tokens, 100);
   assert.equal(reports[0]?.result?.text, 'Done now.');
   await until(() => runner.stoppable().size === 0);
@@ -1078,4 +1073,63 @@ test('workers run commands as the member allows: off, sandboxed by default, or u
   assert.equal(codex('orchestrator')[codex('orchestrator').indexOf('--sandbox') + 1], 'read-only');
   assert.ok(codex('worker', 'unrestricted').includes('--dangerously-bypass-approvals-and-sandbox'));
   assert.ok(!codex('worker', 'unrestricted').includes('--sandbox'));
+});
+
+test('a worker stopped while its workspace opens never starts', async (t) => {
+  const f = await fixture(t);
+  const workerId = randomUUID();
+  await saveAgentProfile({ agentId: workerId, clanId, server, token: token('w'), runtime: 'codex' });
+  const transitions: string[] = [];
+  const api = {
+    whoami: async () => ({ id: userId, email: 'member@example.com' }),
+    listAgents: async () => ({ agents: [agent(workerId, 'worker')] }),
+    members: async () => ({ members: [{ userId, email: 'member@example.com', role: 'member' }] }),
+  } as unknown as ClqnClient;
+  const workerApi = {
+    transitionTask: async (_clan: string, _task: string, action: string) => {
+      transitions.push(action);
+      return {};
+    },
+    task: async (_clan: string, taskId: string) => ({ id: taskId, description: 'Build it', repository: null }),
+    reportChatUsage: async () => ({ ok: true }),
+  } as unknown as ClqnClient;
+  let open!: () => void;
+  const opened = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  let opening = false;
+  const runner = startAgentRunner({
+    api,
+    server,
+    clanId,
+    project: f.directory,
+    spawn: f.spawn,
+    runtimes: async () => ['codex'],
+    now: f.now,
+    agentClient: () => workerApi,
+    workspace: async () => {
+      opening = true;
+      await opened;
+      return f.directory;
+    },
+  });
+  t.after(() => runner.stop());
+  const taskId = randomUUID();
+  const run: ChatRun = {
+    messageId: randomUUID(),
+    title: 'Slow start',
+    worker: 'Codex',
+    workerId,
+    estimatedTokens: 5,
+    taskId,
+    status: 'queued',
+    tokens: null,
+  };
+  runner.update(chatState({ runs: [run] }));
+  await until(() => opening);
+  assert.equal(await runner.stopRun(taskId), 'Stopping Slow start…');
+  open();
+  await until(() => transitions.length === 2);
+  assert.deepEqual(transitions, ['claim', 'release']);
+  assert.equal(f.spawned.length, 0);
 });

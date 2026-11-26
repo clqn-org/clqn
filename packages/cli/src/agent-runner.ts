@@ -353,8 +353,6 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
   const attempted = new Set<string>();
   // Workers running on this machine, by task.
   const workers = new Map<string, { since: number; child?: ChildProcess; stopped: boolean }>();
-  // Tasks with a finished commit waiting to publish; stopping must not release them.
-  const publishing = new Set<string>();
   const publicationRetry = new Map<string, number>();
   const publicationAbort = new AbortController();
   let connections: Awaited<ReturnType<typeof prepare>> | undefined;
@@ -401,10 +399,11 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
     model?: string | null,
     commands?: WorkerCommands,
     orchestrator?: { instructions: string; resume?: string | undefined; turn: ActiveTurn },
-    onChild?: (child: ChildProcess) => void,
+    // A worker's job: checked right before spawning, since Stop may come while the log opens.
+    job?: { stopped: boolean; child?: ChildProcess },
   ) {
     const log = await openLog(name, role, cwd);
-    if (stopped || (orchestrator && !orchestrator.turn.canRun())) {
+    if (stopped || job?.stopped || (orchestrator && !orchestrator.turn.canRun())) {
       log.end();
       return { ok: false, output: { tokens: 0 } };
     }
@@ -422,7 +421,7 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
       // Output goes to a log, never to the terminal running the chat.
       const child = spawn(command.command, command.args, { cwd, env: command.env, stdio: ['pipe', 'pipe', 'pipe'] });
       if (orchestrator) orchestrator.turn.child = child;
-      onChild?.(child);
+      if (job) job.child = child;
       children.set(child, role);
       child.stdout?.setEncoding('utf8');
       child.stdout?.on('data', (chunk: string) => {
@@ -756,7 +755,6 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
         try {
           const pending = saved ?? (await readPublication(taskId));
           if (!pending || stopped) return;
-          publishing.add(taskId);
           const task = await api.task(clanId, taskId);
           if (task.ownerAgentId !== connection.profile.agentId || !['claimed', 'completed'].includes(task.status))
             throw new Error('The worker no longer owns this task');
@@ -810,7 +808,6 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
           });
           await rm(publicationPath(taskId), { force: true });
           await rm(worktreePath(taskId), { force: true });
-          publishing.delete(taskId);
           if (problem?.startsWith(`${title} · Publishing`)) problem = undefined;
         } catch (error) {
           publicationRetry.set(taskId, now() + retryAfter);
@@ -848,9 +845,7 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
             run.model,
             commands,
             undefined,
-            (child) => {
-              job.child = child;
-            },
+            job,
           );
           const text = job.stopped ? undefined : output.text?.replaceAll('\0', '').slice(0, 4000).trim();
           const usage: ChatUsage = {
@@ -896,43 +891,27 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
     );
   }
 
+  // Only workers this chat started: another window or a closed chat may still be running the others.
   function stoppable() {
     const result = new Map<string, number | undefined>();
     for (const [taskId, job] of workers) if (!job.stopped) result.set(taskId, job.since);
-    // A run left claimed by a closed or crashed chat can be handed back from here.
-    for (const run of latest?.runs ?? []) {
-      if (
-        run.status === 'running' &&
-        // Not yet published, or a continuation that has not reported its new head.
-        (!run.repository || (run.repository.state === 'pending' && run.repository.headSha !== null)) &&
-        run.workerId &&
-        connections?.workers.has(run.workerId) &&
-        !workers.has(run.taskId) &&
-        !publishing.has(run.taskId)
-      )
-        result.set(run.taskId, undefined);
-    }
     return result;
   }
 
+  // The task is released once the worker has exited, so nothing else can start in its worktree meanwhile.
   async function stopRun(taskId: string) {
-    const run = latest?.runs.find((candidate) => candidate.taskId === taskId);
-    const title = run?.title ?? 'Agent';
+    const title = latest?.runs.find((candidate) => candidate.taskId === taskId)?.title ?? 'Agent';
     const job = workers.get(taskId);
-    if (job) {
-      if (job.stopped) return `Stopping ${title}…`;
+    if (!job) return `${title} is no longer running`;
+    if (!job.stopped) {
       job.stopped = true;
       const child = job.child;
       if (child) {
         child.kill('SIGTERM');
         setTimeout(() => child.exitCode === null && child.signalCode === null && child.kill('SIGKILL'), 2000).unref();
       }
-      return `Stopping ${title}…`;
     }
-    const connection = run?.workerId ? connections?.workers.get(run.workerId) : undefined;
-    if (!run || !connection || !stoppable().has(taskId)) return `${title} is no longer running`;
-    await agentClient(options, connection.profile).transitionTask(options.clanId, taskId, 'release');
-    return `Stopped ${title} · ask the orchestrator to continue it`;
+    return `Stopping ${title}…`;
   }
 
   function update(state: ChatState) {
