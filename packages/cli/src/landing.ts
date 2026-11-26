@@ -4,7 +4,7 @@ import { type Frame, wrap } from './chat-view.js';
 import { copyCode, openLink } from './login-prompt.js';
 import { GoBack } from './setup.js';
 import { mouseReportReader } from './terminal.js';
-import { accentColor, clip, painter, plain, width } from './text.js';
+import { clip, painter, plain, width } from './text.js';
 
 // docs/assets/wordmark.svg, one character per pixel.
 const wordmark = [
@@ -53,10 +53,11 @@ const repository = 'https://github.com/rli8145/clqn';
 const npm = 'https://www.npmjs.com/package/clqn-cli';
 
 // xterm 256-color palette entries, which render in every color terminal, unlike 24-bit color.
-const gradient = [81, 81, 81, 81, accentColor, accentColor, accentColor, accentColor, 31, 31, 31, 31];
-const shadow = 24;
-const nose = 80;
-const dim = 31;
+const peach = 216;
+const gradient = [223, 223, 223, 223, 216, 216, 216, 216, 173, 173, 173, 173];
+const shadow = 95;
+const nose = 211;
+const dim = 137;
 const fg = (color: number) => `38;5;${color}`;
 
 // The wordmark one row per pixel, as two full blocks in foreground colors, with a vertical gradient and a
@@ -81,7 +82,7 @@ function logoLines(color: boolean): string[] {
   if (!color) return logo.map((row) => row.replaceAll('⠀', ' ').trimEnd());
   return logo.map((row, y) =>
     [...row]
-      .map((cell, x) => (cell === '⠀' ? ' ' : `\x1b[${fg(noses[y]![x] === 'p' ? nose : accentColor)}m${cell}\x1b[0m`))
+      .map((cell, x) => (cell === '⠀' ? ' ' : `\x1b[${fg(noses[y]![x] === 'p' ? nose : peach)}m${cell}\x1b[0m`))
       .join(''),
   );
 }
@@ -134,7 +135,7 @@ export function landingFrame(view: LandingView): LandingFrame {
     ? ` ${parts
         .map((part, index) => {
           const url = urls[part];
-          const styled = index ? tone(part, dim) : paint(part, 'accent');
+          const styled = tone(part, index ? dim : peach);
           return url ? link(styled, url, view.links) : styled;
         })
         .join(tone(' · ', dim))} `
@@ -146,7 +147,7 @@ export function landingFrame(view: LandingView): LandingFrame {
   const height = Math.max(1, rows - lines.length - 1);
   const body = inner - 4;
   const details = [
-    view.user ? paint(clip(plain(view.user), 34), 'accent') : paint('Not signed in', 'muted'),
+    view.user ? tone(clip(plain(view.user), 34), peach) : paint('Not signed in', 'muted'),
     paint(clip(plain(view.directory), 34), 'muted'),
     ...(view.repository
       ? [
@@ -185,10 +186,10 @@ export function landingFrame(view: LandingView): LandingFrame {
     // A blank line separates the prompt from the text above it.
     if (view.log.some((line) => line.trim())) flow.push('');
     const answer = plain(view.prompt.answer);
-    if (width(question) + width(answer) < pane) flow.push(paint(question, 'accent') + answer);
+    if (width(question) + width(answer) < pane) flow.push(tone(question, peach) + answer);
     else {
       const asked = wrap(question.trimEnd(), pane);
-      flow.push(...asked.map((line) => paint(line, 'accent')));
+      flow.push(...asked.map((line) => tone(line, peach)));
       flow.push(tail(answer, pane - 1));
     }
     promptRow = flow.length - 1;
