@@ -4,7 +4,7 @@
 
 Run `clqn`, open the GitHub link it shows, and enter the one-time code. clqn needs your verified primary GitHub email to find your invitations. Check who you're signed in as with `clqn whoami`.
 
-To sign out, choose **Sign out** in chat settings (**Ctrl+S**). It revokes the saved credential and clears your clan selection on this computer, even if the server can't be reached.
+To sign out, choose **Sign out** in chat settings (**Ctrl+S**). It revokes the saved credential and deletes this server's saved settings on this computer, even if the server can't be reached.
 
 clqn uses the hosted server by default. For a self-hosted server, run `clqn --api-url https://clqn.example.com` once; clqn remembers it after you sign in.
 

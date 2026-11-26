@@ -12,7 +12,7 @@ clqn host alex@example.com sam@example.com
 
 Run `clqn host` to see the list. Passing names replaces the list. Run `clqn host off` to clear it.
 
-Each nominated member opens ordinary `clqn` and enables **Backup hosting** in chat settings on the device they want to use. Keep chat open with a signed-in Codex or Claude Code runtime enabled. The current host runs the orchestrator using their existing agent CLI and account.
+Each nominated member opens ordinary `clqn` and enables **Backup hosting** in chat settings on the device they want to use. Keep chat open with a signed-in Codex or Claude Code runtime enabled. The current host runs the orchestrator using their existing agent CLI and account. If both Codex and Claude Code are turned on, the orchestrator uses Codex.
 
 When the active host exits normally, an opted-in backup with chat open can take over on its next check. After a disconnect, the last heartbeat expires within 45 seconds. The next host uses shared chat history and picks up unfinished requests.
 
@@ -20,7 +20,7 @@ Only one host processes the queue at a time. If a backup is already active, a re
 
 ## Send a message
 
-Type a task, question, or piece of project context and press **Enter**. Messages wait in a queue. The orchestrator handles one at a time, oldest first, and shows the one it's working on as **Processing**. Its answer appears right below your message.
+Type a task, question, or piece of project context (up to 4,000 characters) and press **Enter**. Messages wait in a queue. The orchestrator handles one at a time, oldest first, and shows the one it's working on as **Processing**. Its answer appears right below your message.
 
 Press **Ctrl+F** to force-send your draft. The orchestrator interrupts its current turn and handles the new message next. An unfinished message returns to the queue. Force-sent messages are handled in the order they arrive.
 
@@ -44,7 +44,7 @@ To pick the work up again, ask in chat, for example "continue the login fix" or 
 
 ## Review pull requests
 
-When a worker finishes code changes, clqn commits them on the task's own branch, pushes, opens a pull request, and posts the link in chat. Press **Ctrl+L** to see pull requests. The clan leader reviews the PR on GitHub, then presses **Y** to approve the merge or **N** to decline. clqn merges once the GitHub checks pass. See the [repository workflow](repositories.md).
+When a worker finishes code changes, clqn commits them on the task's own branch, pushes, opens a pull request, and posts the link in chat. Press **Ctrl+L** to see pull requests. The clan leader reviews the PR on GitHub, then presses **Y** to approve the merge or **N** to decline. clqn squash-merges once the GitHub checks pass. See the [repository workflow](repositories.md).
 
 ## Keys
 
@@ -62,20 +62,21 @@ On macOS, use the **Ctrl** keys: function keys usually control brightness and vo
 | Ctrl+G (F5) | Metrics. **T** or **Tab** switches between 24 hours and 7 days |
 | Mouse wheel, ↑ ↓, Page Up, Page Down | Scroll chat history. **End** jumps back to the latest. To select text, hold **Option** (iTerm2, Terminal) or **Shift** (most others) while dragging |
 | Ctrl+R | Retry a message that failed to send |
-| Ctrl+C | Quit |
+| Ctrl+C or Ctrl+D | Quit |
 
 ## Settings
 
-Press **Ctrl+S**. Move with **↑ ↓**, change a value with **← →**, type numbers or model names, then choose **Save settings**.
+Press **Ctrl+S**. Move with **↑ ↓** (or **Tab**), change a value with **← →**, type numbers or model names, then choose **Save settings**. The same form opens before the chat, where that row reads **Start session** or **Join session**. **Esc** closes settings, or goes back to the clan list before the chat opens.
 
 | Setting | What it does |
 | --- | --- |
 | Spawn approval | **Manual** (default) asks before each agent starts. **Automatic** approves within your limits |
-| Token limit | Total tokens your agents can use in this clan. `none` for no limit |
+| Token limit | Total tokens your agents can use in this clan, over all time. `none` for no limit |
 | Agent limit | How many of your agents can run at once. `none` for no limit |
 | Models | Comma-separated model IDs your agents may use. Blank allows any |
 | Worker commands | What your agents may run: **Off**, **Sandboxed** (default, inside the agent's sandbox), or **Unrestricted** |
 | Agents | Which installed agent CLIs (Claude Code, Codex) the orchestrator can use |
+| Backup hosting | Nominated [backup hosts](#set-up-backup-hosts) only. **On** lets this device host the orchestrator when the leader is offline |
 | Invite | Leaders only. Type a teammate's email and press **Enter** to invite them. Invitations expire after seven days |
 | Sign out | Revoke this computer's sign-in |
 

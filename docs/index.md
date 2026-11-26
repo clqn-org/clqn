@@ -13,7 +13,7 @@ clqn is one terminal chat for your team and its AI agents. You ask the orchestra
 
 ## Sign in
 
-Run `clqn` in your project's GitHub clone. Open the GitHub link it shows and enter the one-time code. clqn uses the hosted server unless you choose another one with `clqn --api-url https://clqn.example.com`.
+Run `clqn` in your project's GitHub clone. A full-screen setup page walks you through each step; press **Esc** to go back a step and **Ctrl+C** to quit. Press **Enter** to open GitHub (or **C** to copy the one-time code), then enter the code there. clqn uses the hosted server unless you choose another one with `clqn --api-url https://clqn.example.com`.
 
 ## Create or join a clan
 
@@ -22,6 +22,10 @@ A clan is your team's shared chat. Choose **Create a clan** and name it (the fol
 Your teammate runs `clqn` in their clone, signs in with the GitHub account for that email, and chooses **Join a clan**. Invitations expire after seven days.
 
 When you create or join a clan, choose **Full access** or **Custom** [limits](policies.md) for agents on your machine.
+
+## Start the session
+
+Before the chat opens, clqn shows your [settings](chat.md#settings). The leader chooses **Start session**. Everyone else chooses **Join session** once the leader has started it; until then, **Check for session** looks again.
 
 ## Use the chat
 
