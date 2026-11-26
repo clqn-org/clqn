@@ -12,7 +12,7 @@ import {
 } from '@clqn/shared';
 import { type Config, readConfig, removeConfig, writeConfig, writeServer } from './config.js';
 import { localRepository } from './git.js';
-import { configureGithubWebhook } from './github-hooks.js';
+import { configureGithubWebhook, removeGithubWebhook } from './github-hooks.js';
 import { githubLogin } from './login.js';
 import { terminalText } from './terminal.js';
 
@@ -24,6 +24,12 @@ export class GoBack extends Error {
   }
 }
 export type Print = (text: string) => void;
+// A menu picked with ↑↓ and Enter. Resolves with the chosen index, or rejects with GoBack on Esc.
+export type Choose = (
+  question: string,
+  choices: string[],
+  options?: { back?: boolean; selected?: number },
+) => Promise<number>;
 
 // Keep local preferences across sign-ins and remember the server for later runs.
 async function saveToken(server: string, token: string) {
@@ -90,6 +96,23 @@ export async function linkGithubRepository(api: ClqnClient, server: string, clan
   }
 }
 
+// Deletes a clan, then removes its repositories' webhooks. Returns the repositories whose webhooks remain.
+export async function deleteClan(api: ClqnClient, server: string, clanId: string) {
+  const result = await api.deleteClan(clanId);
+  const leftover: string[] = [];
+  // The clan is already gone, so webhook cleanup is best effort.
+  for (const binding of result.repositories) {
+    try {
+      await removeGithubWebhook({ repository: binding.slug, url: new URL(`/hooks/github/${binding.id}`, server).href });
+    } catch {
+      leftover.push(binding.slug);
+    }
+  }
+  return { ...result, webhooksLeft: leftover };
+}
+export const leftoverNotice = (slugs: string[]) =>
+  slugs.length ? `\nRemove its old webhooks in GitHub repository settings: ${slugs.join(', ')}` : '';
+
 interface ChatRepositorySetup {
   sync?: { repoPath: string; repository: string; initialCursor: number };
   notice?: string;
@@ -100,10 +123,10 @@ export async function setupChatRepository(input: {
   server: string;
   clanId: string;
   project: string;
-  ask: Ask;
+  choose: Choose;
   print: Print;
 }): Promise<ChatRepositorySetup> {
-  const { api, server, clanId, project, ask, print } = input;
+  const { api, server, clanId, project, choose, print } = input;
   const local = await localRepository(project).catch(() => undefined);
   if (!local) return { notice: 'Main sync off · open clqn from a GitHub clone' };
   const readLink = async () =>
@@ -119,12 +142,8 @@ export async function setupChatRepository(input: {
   const skipped = { notice: 'Main sync off · run clqn repo link to enable' };
   const key = `${clanId}:${local.repository}`;
   if ((await readConfig(server)).skippedRepositoryLinks?.includes(key)) return skipped;
-  for (;;) {
-    const answer = (await ask(`Link ${local.repository} to this clan for pull requests and main sync? [y/N] `))
-      .trim()
-      .toLowerCase();
-    if (answer === 'y' || answer === 'yes') break;
-    if (answer !== '' && answer !== 'n' && answer !== 'no') continue;
+  const question = `Link ${local.repository} to this clan for pull requests and main sync?`;
+  if ((await choose(question, ['Yes', 'No'], { selected: 1 })) !== 0) {
     const config = await readConfig(server);
     await writeConfig(server, { ...config, skippedRepositoryLinks: [...(config.skippedRepositoryLinks ?? []), key] });
     return skipped;
@@ -136,15 +155,6 @@ export async function setupChatRepository(input: {
     print(terminalText(error instanceof Error ? error.message : 'Could not link the repository', false));
     const saved = await readLink().catch(() => undefined);
     return saved ? { ...start(saved), notice: 'Webhook setup failed · retry clqn repo link' } : skipped;
-  }
-}
-
-async function pick(ask: Ask, count: number, question: string, options?: { back?: boolean }) {
-  for (;;) {
-    const answer = (await ask(question, options)).trim();
-    if (!answer) return undefined;
-    const choice = Number(answer);
-    if (Number.isInteger(choice) && choice >= 1 && choice <= count) return choice - 1;
   }
 }
 
@@ -167,10 +177,14 @@ const modelList = (answer: string) => {
 };
 
 // New members, including the leader of a new clan, choose their limits. Approvals still apply either way.
-export async function chooseLimits(api: ClqnClient, clanId: string, ask: Ask, print: Print) {
-  print('\nLimits for agents on your machine\n  1. Full access (no limits)\n  2. Custom');
+export async function chooseLimits(
+  api: ClqnClient,
+  clanId: string,
+  prompts: { ask: Ask; choose: Choose; print: Print },
+) {
+  const { ask, choose, print } = prompts;
   let settings: ChatSettings = defaultChatSettings;
-  if ((await pick(ask, 2, 'Enter a number (1): ')) === 1) {
+  if ((await choose('Limits for agents on your machine', ['Full access (no limits)', 'Custom'])) === 1) {
     settings = {
       ...settings,
       tokenLimit: await askLimit(ask, print, 'Token limit (blank for none): ', wholeNumber),
@@ -185,6 +199,7 @@ export async function chooseLimits(api: ClqnClient, clanId: string, ask: Ask, pr
 interface ChooseClan {
   connect: () => Promise<ClqnClient>;
   ask: Ask;
+  choose: Choose;
   print: Print;
   reauthenticate?: (userId: string) => Promise<void>;
   // The last clan used; Enter picks it.
@@ -192,7 +207,7 @@ interface ChooseClan {
 }
 
 // Offer the user's clans, creating a clan, or accepting a pending invitation.
-export async function chooseClan({ connect, ask, print, reauthenticate, current }: ChooseClan): Promise<Clan> {
+export async function chooseClan({ connect, ask, choose, print, reauthenticate, current }: ChooseClan): Promise<Clan> {
   const text = (value: string) => terminalText(value, false);
   for (;;) {
     let api = await connect();
@@ -209,15 +224,10 @@ export async function chooseClan({ connect, ask, print, reauthenticate, current 
     const choices = [
       ...clans.map((clan) => text(clan.name) + (clan === last ? ' (last used)' : '')),
       'Create a clan',
-      'Join a clan',
+      'View clan invites',
     ];
-    print(`\nChoose a clan\n${choices.map((choice, index) => `  ${index + 1}. ${choice}`).join('\n')}`);
-    // The clan list is the first step, so there is nothing to go back to. Enter still reopens the last clan.
-    const choice = await pick(ask, choices.length, 'Enter a number: ', { back: false });
-    if (choice === undefined) {
-      if (last) return last;
-      continue;
-    }
+    // The clan list is the first step, so there is nothing to go back to. The last clan starts selected.
+    const choice = await choose('Choose a clan', choices, { back: false, selected: last ? clans.indexOf(last) : 0 });
     if (choice < clans.length) return clans[choice]!;
     if (choice === clans.length) {
       const fallback = basename(process.cwd()).trim().slice(0, 100) || 'My project';
@@ -228,7 +238,7 @@ export async function chooseClan({ connect, ask, print, reauthenticate, current 
         continue;
       }
       const clan = await api.createClan(parsed.data.name);
-      await chooseLimits(api, clan.id, ask, print);
+      await chooseLimits(api, clan.id, { ask, choose, print });
       return clan;
     }
     const { invitations } = await api.listInvitations().catch(async (error: unknown) => {
@@ -240,15 +250,22 @@ export async function chooseClan({ connect, ask, print, reauthenticate, current 
       print(text(`No pending invitations. Ask a clan leader to invite ${email}.`));
       continue;
     }
-    print(`\nPending invitations\n${invitations.map((entry, i) => `  ${i + 1}. ${text(entry.clanName)}`).join('\n')}`);
-    const index = await pick(ask, invitations.length, 'Enter a number (Enter to go back): ');
-    if (index === undefined) continue;
+    let index: number;
+    try {
+      index = await choose(
+        'Pending invitations',
+        invitations.map((entry) => text(entry.clanName)),
+      );
+    } catch (error) {
+      if (error instanceof GoBack) continue;
+      throw error;
+    }
     const { clanId } = invitations[index]!;
     const clan = await api.acceptInvitation(clanId).catch(async (error: unknown) => {
       await reverify(error, 'Verify your GitHub email to accept this invitation.');
       return api.acceptInvitation(clanId);
     });
-    await chooseLimits(api, clan.id, ask, print);
+    await chooseLimits(api, clan.id, { ask, choose, print });
     return clan;
   }
 }

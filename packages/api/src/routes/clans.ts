@@ -105,6 +105,11 @@ export function createClanRoutes(store: WorkspaceStore) {
     await store.removeMember(actor, c.req.param('clanId'), actor.id);
     return c.json({ left: true as const });
   });
+  app.post('/clans/:clanId/delete', smallBody, async (c) => {
+    await emptyBody(c);
+    const repositories = await store.deleteClan(c.get('user'), c.req.param('clanId'));
+    return c.json({ deleted: true as const, repositories });
+  });
   app.post('/clans/:clanId/leader', smallBody, async (c) => {
     const body = transferLeadershipSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) throw new ApiError(400, 'INVALID_REQUEST', 'Provide the user ID of the new leader');

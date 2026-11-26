@@ -57,7 +57,7 @@ Press <kbd>Ctrl</kbd>+<kbd>S</kbd> to open settings and type teammate email in *
 clqn invite teammate@example.com
 ```
 
-Teammates run `clqn` in their own clone, sign in with the invited GitHub account, choose **Join a clan**, then **Join session**.
+Teammates run `clqn` in their own clone, sign in with the invited GitHub account, choose **View clan invites**, then **Join session**.
 
 ## Work
 

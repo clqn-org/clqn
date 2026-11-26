@@ -19,6 +19,7 @@ import {
   characters,
   chatFrame,
   clip,
+  deleteClanField,
   type Frame,
   messageLines,
   painter,
@@ -32,7 +33,8 @@ import {
 import { type LandingFrame, type LandingView, openLinkAt } from './landing.js';
 import { metricsFrame } from './metrics-view.js';
 import { chatMerger, chatPullRequests, pullRequestKey, pullRequestsFrame } from './pull-requests.js';
-import { mouseReportReader, terminalSizeNotice } from './terminal.js';
+import { leftoverNotice } from './setup.js';
+import { mouseReportReader, terminalSizeNotice, terminalText } from './terminal.js';
 
 const ctrlShortcuts: Record<string, string> = { s: 'f2', p: 'f3', q: 'f4', g: 'f5', l: 'f6' };
 const help = (error: unknown) => (error instanceof Error ? error.message : 'Request failed');
@@ -50,6 +52,7 @@ const models = (text: string) => {
 };
 
 type Info = Awaited<ReturnType<ClqnClient['chatInfo']>>;
+export type ChatResult = 'quit' | 'sign-out' | 'back' | { deleted: string };
 type Setup = Omit<NonNullable<Parameters<typeof chatFrame>[0]['settings']>, 'action'>;
 // Leaders get an Invite row before the session action, which shifts the last two rows down.
 const setupFor = (settings: ChatSettings, leader: boolean): Setup => ({
@@ -57,7 +60,7 @@ const setupFor = (settings: ChatSettings, leader: boolean): Setup => ({
   tokenText: settings.tokenLimit?.toString() ?? '',
   agentText: settings.agentLimit?.toString() ?? '',
   modelText: settings.allowedModels?.join(', ') ?? '',
-  ...(leader ? { inviteText: '' } : {}),
+  ...(leader ? { inviteText: '', deleteText: '' } : {}),
   field: leader ? 7 : 6,
 });
 const settingsRows = (setup: Setup) => (setup.inviteText === undefined ? 8 : 9);
@@ -88,7 +91,8 @@ function nextChoice(choices: AgentChoices, step: number): AgentChoices {
   return { installed, off: [...kept, ...installed.filter((_, index) => next & (1 << index))] };
 }
 
-// Resolves when the user quits, or with 'sign-out' when they choose Sign out in settings.
+// Resolves when the user quits, with 'sign-out' when they choose Sign out in settings, or with a notice
+// after the leader deletes the clan.
 export async function runChat(
   api: ClqnClient,
   clanId: string,
@@ -97,8 +101,10 @@ export async function runChat(
     repositoryStatus?: () => string | undefined;
     // Draws the settings shown before joining a session on the landing page; Esc there returns 'back'.
     page?: (view: { columns: number; rows: number; color: boolean; content: LandingView['content'] }) => LandingFrame;
+    // Deletes this clan; returns the repositories whose webhooks could not be removed.
+    deleteClan?: () => Promise<{ webhooksLeft: string[] }>;
   },
-): Promise<'quit' | 'sign-out' | 'back'> {
+): Promise<ChatResult> {
   const { stdin, stdout } = process;
   const actor = await api.whoami();
   if (actor.agentId) throw new Error('Sign in with a personal credential to open the chat');
@@ -106,7 +112,7 @@ export async function runChat(
   let setup: Setup | undefined = setupFor(info.settings, info.canStart);
   let saved: AgentChoices | undefined;
   void loadChoices();
-  let result: 'quit' | 'sign-out' | 'back' = 'quit';
+  let result: ChatResult = 'quit';
   let replaceField = true;
   let state: ChatState | undefined;
   let draft = '';
@@ -498,9 +504,30 @@ export async function runChat(
     draw();
     try {
       const { email } = await api.createInvitation(clanId, parsed.data.email);
-      notice = `Invited ${email}. They run clqn and choose Join a clan.`;
+      notice = `Invited ${email}. They run clqn and choose View clan invites.`;
       setup.inviteText = '';
       replaceField = true;
+    } catch (error) {
+      notice = help(error);
+    } finally {
+      busy = false;
+      draw();
+    }
+  }
+
+  async function removeClan() {
+    if (!setup || setup.deleteText === undefined || busy || !options?.deleteClan) return;
+    const name = (state?.session ?? info.session)?.clan ?? info.clan;
+    if (setup.deleteText.trim().toLowerCase() !== name.trim().toLowerCase()) {
+      notice = 'Type the clan name exactly to delete it.';
+      return;
+    }
+    busy = true;
+    draw();
+    try {
+      const { webhooksLeft } = await options.deleteClan();
+      result = { deleted: terminalText(`Deleted ${name}.`, false) + leftoverNotice(webhooksLeft) };
+      stop();
     } catch (error) {
       notice = help(error);
     } finally {
@@ -539,7 +566,11 @@ export async function runChat(
       } else setup = undefined;
     } else if (key.name === 'tab' || key.name === 'up' || key.name === 'down') {
       const change = key.name === 'up' || key.shift ? -1 : 1;
-      const fields = settingsFields(setup.inviteText !== undefined, backupHosting() !== undefined);
+      const fields = settingsFields(
+        setup.inviteText !== undefined,
+        backupHosting() !== undefined,
+        setup.deleteText !== undefined,
+      );
       const index = fields.indexOf(setup.field);
       setup.field = fields[(index + fields.length + change) % fields.length]!;
       replaceField = true;
@@ -558,6 +589,15 @@ export async function runChat(
         replaceField = false;
       } else if (text && /^[^\s\x00-\x1f\x7f-\x9f]+$/.test(text) && !key.ctrl && !key.meta) {
         setup.inviteText = ((replaceField ? '' : setup.inviteText) + text).slice(0, 254);
+        replaceField = false;
+      }
+    } else if (setup.deleteText !== undefined && setup.field === deleteClanField) {
+      if (key.name === 'return') void removeClan();
+      else if (key.name === 'backspace') {
+        setup.deleteText = setup.deleteText.slice(0, -1);
+        replaceField = false;
+      } else if (text && /^[^\x00-\x1f\x7f-\x9f]+$/.test(text) && !key.ctrl && !key.meta) {
+        setup.deleteText = ((replaceField ? '' : setup.deleteText) + text).slice(0, 100);
         replaceField = false;
       }
     } else if (key.name === 'return') {
