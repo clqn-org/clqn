@@ -124,6 +124,15 @@ test('choosing a clan opens an existing one, creates one, or reports no invitati
   assert.match(pickExisting.printed[0]!, /1\. Existing\n {2}2\. Create a clan\n {2}3\. Join a clan/);
   assert.equal(pickExisting.questions.length, 2);
 
+  // Returning users get the same choices, and Enter reopens their last clan.
+  const returning = scripted(['']);
+  assert.deepEqual(
+    await chooseClan({ server: f.url, connect, canSignIn: true, current: existing.id, ...returning }),
+    existing,
+  );
+  assert.match(returning.printed[0]!, /1\. Existing \(last used\)\n {2}2\. Create a clan\n {2}3\. Join a clan/);
+  assert.deepEqual(returning.questions, ['Enter a number (Enter for Existing): ']);
+
   assert.deepEqual(saved, []);
 
   // The leader of a new clan is a member too, and Enter picks full access.

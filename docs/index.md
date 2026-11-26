@@ -33,4 +33,4 @@ Type a request, question, or piece of context and press **Enter**. The orchestra
 
 Press **Ctrl+S** to open settings, where you choose which installed agents (Claude Code, Codex) to offer and change your limits.
 
-If you're in more than one clan, list them with `clqn clans` and switch with `clqn use "My project"`.
+Every time you run `clqn` it asks which clan to open, and you can also create or join one there. Press Enter to reopen the clan you used last.

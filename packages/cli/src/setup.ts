@@ -184,18 +184,29 @@ interface ChooseClan {
   print: Print;
   // False when an environment token is in use, which a new GitHub sign-in would not replace.
   canSignIn: boolean;
+  // The last clan used; Enter picks it.
+  current?: string | undefined;
 }
 
 // Offer the user's clans, creating a clan, or accepting a pending invitation.
-export async function chooseClan({ server, connect, ask, print, canSignIn }: ChooseClan): Promise<Clan> {
+export async function chooseClan({ server, connect, ask, print, canSignIn, current }: ChooseClan): Promise<Clan> {
   const text = (value: string) => terminalText(value, false);
   for (;;) {
     const api = await connect();
     const { clans } = await api.listClans();
-    const choices = [...clans.map((clan) => text(clan.name)), 'Create a clan', 'Join a clan'];
+    const last = clans.find((clan) => clan.id === current);
+    const choices = [
+      ...clans.map((clan) => text(clan.name) + (clan === last ? ' (last used)' : '')),
+      'Create a clan',
+      'Join a clan',
+    ];
     print(`\nChoose a clan\n${choices.map((choice, index) => `  ${index + 1}. ${choice}`).join('\n')}`);
-    const choice = await pick(ask, choices.length, 'Enter a number: ');
-    if (choice === undefined) continue;
+    const question = last ? `Enter a number (Enter for ${text(last.name)}): ` : 'Enter a number: ';
+    const choice = await pick(ask, choices.length, question);
+    if (choice === undefined) {
+      if (last) return last;
+      continue;
+    }
     if (choice < clans.length) return clans[choice]!;
     if (choice === clans.length) {
       const fallback = basename(process.cwd()).trim().slice(0, 100) || 'My project';
