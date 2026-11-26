@@ -109,6 +109,56 @@ const agent = (id: string, role: 'worker' | 'orchestrator', ownerId = userId) =>
   active: true,
 });
 
+for (const runtime of ['claude', 'codex'] as const) {
+  test(`${runtime} force send waits for the interrupted turn to close`, async (t) => {
+    const f = await fixture(t);
+    const api = {
+      whoami: async () => ({ id: userId, email: 'lead@example.com' }),
+      listAgents: async () => ({ agents: [] }),
+      members: async () => ({ members: [{ userId, email: 'lead@example.com', role: 'leader' }] }),
+      registerAgent: async (_clan: string, name: string, role: 'worker' | 'orchestrator') => ({
+        agent: { ...agent(randomUUID(), role), name },
+        token: token(role === 'worker' ? 'w' : 'o'),
+      }),
+    } as unknown as ClqnClient;
+    const runner = startAgentRunner({
+      api,
+      server,
+      clanId,
+      project: f.directory,
+      spawn: f.spawn,
+      runtimes: async () => [runtime],
+      now: f.now,
+    });
+    t.after(() => runner.stop());
+    let turns = 0;
+    runner.listen(() => turns++);
+
+    runner.update(chatState({ queued: 1, forcePending: null }));
+    await until(() => f.spawned.length === 1);
+    const interrupted = f.spawned[0]!.child;
+    const kill = t.mock.method(interrupted, 'kill', () => true);
+    const forcePending = { id: randomUUID(), processing: false };
+    const pending = chatState({ queued: 2, forcePending });
+    runner.update(pending);
+    assert.deepEqual(kill.mock.calls[0]?.arguments, ['SIGTERM']);
+    interrupted.stdout.write('{"type":"result","subtype":"success","is_error":false}\n');
+    runner.update(pending);
+    assert.equal(turns, 0, 'a late result does not end the interrupted turn');
+    assert.equal(f.spawned.length, 1);
+
+    interrupted.finish(null);
+    await until(() => turns === 1);
+    assert.doesNotMatch(runner.status() ?? '', /failed/);
+    runner.update(pending);
+    await until(() => f.spawned.length === 2);
+    const forced = f.spawned[1]!.child;
+    runner.update(chatState({ queued: 3, forcePending: { id: randomUUID(), processing: false } }));
+    assert.equal(forced.killed, false, 'a later forced message waits its turn');
+    await runner.stop();
+  });
+}
+
 test('the leader’s chat connects an orchestrator and runs it only while messages are queued', async (t) => {
   const f = await fixture(t);
   const registered: { name: string; role: string; alias?: string | undefined }[] = [];

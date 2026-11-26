@@ -134,6 +134,13 @@
       "when": 1795569451959,
       "tag": "0018_chat_picked_at",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1795663618399,
+      "tag": "0019_chat_force_send",
+      "breakpoints": true
     }
   ]
 }

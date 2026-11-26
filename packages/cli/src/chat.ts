@@ -319,11 +319,14 @@ export async function runChat(
     if (sending) return;
     sending = true;
     failed = false;
+    let pending: SendChat | undefined;
     try {
       while (outbox.length && !closed) {
-        const message = await api.sendChat(clanId, outbox[0]!, controller.signal);
+        pending = outbox.find(({ force }) => force) ?? outbox[0]!;
+        const message = await api.sendChat(clanId, pending, controller.signal);
         if (!recent.some(({ id }) => id === message.id)) recent.push(message);
-        outbox.shift();
+        outbox.splice(outbox.indexOf(pending), 1);
+        if (pending.force) void refresh();
         draw();
       }
       void refresh();
@@ -333,6 +336,7 @@ export async function runChat(
     } finally {
       sending = false;
       draw();
+      if (failed && !pending?.force && outbox.some(({ force }) => force) && !closed) void flush();
     }
   }
 
@@ -455,16 +459,25 @@ export async function runChat(
       if (back && scroll >= Math.max(0, max - Math.max(increment, rows() - 13))) void olderPage();
     } else if (key.name === 'end' && scroll) {
       scroll = 0;
-    } else if (key.name === 'return' && draft.trim()) {
+    } else if (
+      (key.name === 'return' || (key.ctrl && key.name === 'f' && state?.forcePending !== undefined)) &&
+      draft.trim()
+    ) {
       if (outbox.length === 10) {
         notice = 'Outbox full · Ctrl+R Retry';
         return;
       }
-      outbox.push({ id: randomUUID(), text: draft.trim(), ...(reply?.replyTo ? { replyTo: reply.replyTo } : {}) });
+      const force = key.name === 'f';
+      outbox.push({
+        id: randomUUID(),
+        text: draft.trim(),
+        ...(reply?.replyTo ? { replyTo: reply.replyTo } : {}),
+        ...(force ? { force } : {}),
+      });
       draft = '';
       caret = scroll = 0;
       reply = undefined;
-      if (!failed) void flush();
+      if (force || !failed) void flush();
     } else if (key.name === 'backspace' || key.name === 'left') {
       const length = characters(draft.slice(0, caret)).at(-1)?.length ?? 0;
       if (key.name === 'backspace') draft = draft.slice(0, caret - length) + draft.slice(caret);

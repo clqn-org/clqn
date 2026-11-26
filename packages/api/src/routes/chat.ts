@@ -2,7 +2,7 @@ import {
   type Actor,
   ApiError,
   chatApprovalSchema,
-  chatDecisionSchema,
+  chatDecisionRequestSchema,
   chatMetricsWindowSchema,
   chatSettingsSchema,
   chatUsageSchema,
@@ -31,6 +31,7 @@ import {
   chatMergeQueue,
   chatQueue,
   chatUsage,
+  forcePending,
   messageView,
   pickNext,
 } from '../db/chat-read.js';
@@ -127,12 +128,13 @@ export function createChatRoutes(db: WorkspaceDb) {
     requirePersonal(actor);
     const membership = await requireClan(db, actor, clanId);
     const member = await requireChatMember(db, clanId, actor.id);
-    const [identity, history, activity, usage, mergeQueue] = await Promise.all([
+    const [identity, history, activity, usage, mergeQueue, priority] = await Promise.all([
       chatIdentity(db, clanId),
       chatHistory(db, clanId),
       chatActivity(db, clanId, actor.id),
       chatUsage(db, clanId, actor.id),
       membership.role === 'leader' ? chatMergeQueue(db, clanId) : undefined,
+      forcePending(db, clanId),
     ]);
     const safeNumber = (value: bigint) => Math.min(Number(value), Number.MAX_SAFE_INTEGER);
     return c.json({
@@ -140,6 +142,7 @@ export function createChatRoutes(db: WorkspaceDb) {
       settings: member.settings,
       ...history,
       ...activity,
+      forcePending: priority,
       ...(mergeQueue ? { mergeQueue } : {}),
       usage: { tokens: safeNumber(usage.tokens), reserved: safeNumber(usage.reserved), agents: usage.agents },
     });
@@ -180,20 +183,22 @@ export function createChatRoutes(db: WorkspaceDb) {
   app.post('/inbox', async (c) => {
     const actor = c.get('user');
     const clanId = c.req.param('clanId')!;
-    await requireOrchestrator(db, actor, clanId);
-    await requireChat(db, clanId);
-    const next = await pickNext(db, clanId);
+    const picked = await db.transaction(async (tx) => {
+      await requireOrchestrator(tx, actor, clanId, 'share');
+      await requireChat(tx, clanId, true);
+      return pickNext(tx, clanId);
+    });
     const [history, held] = await Promise.all([
       chatHistory(db, clanId, undefined, 20),
       chatQueue(db, clanId, 'clarification'),
     ]);
-    return c.json({ ...history, next, held });
+    return c.json({ ...history, ...picked, held });
   });
   app.post('/messages/:id/decision', async (c) => {
     const actor = c.get('user');
     const clanId = c.req.param('clanId')!;
     const id = uuid(c.req.param('id'));
-    const body = await parse(c, chatDecisionSchema);
+    const body = await parse(c, chatDecisionRequestSchema);
     return c.json(
       await db.transaction(async (tx) => {
         await requireOrchestrator(tx, actor, clanId, 'share');

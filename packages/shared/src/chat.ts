@@ -45,7 +45,9 @@ const chatText = z
   .max(4000)
   .refine((text) => !text.includes('\0'));
 const tokenCount = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
-export const sendChatSchema = z.object({ id: z.uuid(), text: chatText, replyTo: z.uuid().optional() }).strict();
+export const sendChatSchema = z
+  .object({ id: z.uuid(), text: chatText, replyTo: z.uuid().optional(), force: z.boolean().optional() })
+  .strict();
 export type SendChat = z.infer<typeof sendChatSchema>;
 export const chatDecisionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('reply'), text: chatText }).strict(),
@@ -68,6 +70,14 @@ export const chatDecisionSchema = z.discriminatedUnion('action', [
     .strict(),
 ]);
 export type ChatDecision = z.infer<typeof chatDecisionSchema>;
+const [replyDecision, clarifyDecision, delegateDecision] = chatDecisionSchema.options;
+const pick = { pickId: z.uuid().optional() };
+export const chatDecisionRequestSchema = z.discriminatedUnion('action', [
+  replyDecision.extend(pick),
+  clarifyDecision.extend(pick),
+  delegateDecision.extend(pick),
+]);
+export type ChatDecisionRequest = z.infer<typeof chatDecisionRequestSchema>;
 export const chatApprovalSchema = z.object({ approve: z.boolean() }).strict();
 export const chatUsageSchema = z
   .object({ tokens: tokenCount, result: z.object({ id: z.uuid(), text: chatText }).strict().optional() })
@@ -86,6 +96,7 @@ export const chatMessageSchema = z.object({
   replyTo: z.uuid().nullable(),
   // True while the orchestrator is handling this queued message. Older servers omit it.
   processing: z.boolean().optional(),
+  force: z.boolean().optional(),
 });
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
 export const chatProposalSchema = z.object({
@@ -130,6 +141,7 @@ export const chatStateSchema = chatHistorySchema.extend({
   runs: z.array(chatRunSchema),
   mergeQueue: z.array(chatMergeRequestSchema).optional(),
   queued: z.number().int().nonnegative(),
+  forcePending: z.object({ id: z.uuid(), processing: z.boolean() }).nullable().optional(),
   running: z.number().int().nonnegative(),
   usage: z.object({ tokens: tokenCount, reserved: tokenCount, agents: z.number().int().nonnegative() }),
 });
@@ -137,6 +149,7 @@ export type ChatState = z.infer<typeof chatStateSchema>;
 // Recent chat plus the one queued message to handle now (null when the queue is empty).
 export const chatInboxSchema = chatHistorySchema.extend({
   next: chatMessageSchema.nullable(),
+  pickId: z.uuid().nullish(),
   held: z.array(chatMessageSchema),
 });
 

@@ -20,11 +20,11 @@ import {
 } from './agents.js';
 import { setAliasSchema } from './aliases.js';
 import {
-  type ChatDecision,
+  type ChatDecisionRequest,
   type ChatMetricsWindow,
   type ChatSettings,
   type ChatUsage,
-  chatDecisionSchema,
+  chatDecisionRequestSchema,
   chatHistorySchema,
   chatInboxSchema,
   chatInfoSchema,
@@ -251,11 +251,11 @@ export class ClqnClient {
   chatInbox(clanId: string) {
     return this.request(`${this.chatPath(clanId)}/inbox`, chatInboxSchema, {});
   }
-  decideChat(clanId: string, id: string, decision: ChatDecision) {
+  decideChat(clanId: string, id: string, decision: ChatDecisionRequest) {
     return this.request(
       `${this.chatPath(clanId)}/messages/${encodeURIComponent(id)}/decision`,
       z.object({ status: chatMessageStatusSchema, blocker: z.string().nullable() }),
-      chatDecisionSchema.parse(decision),
+      chatDecisionRequestSchema.parse(decision),
     );
   }
   chatMetrics(clanId: string, window: ChatMetricsWindow, signal?: AbortSignal) {

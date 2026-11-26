@@ -49,6 +49,12 @@ interface Session {
   turns: number;
   finish?: ((result: Turn) => void) | undefined;
 }
+interface ActiveTurn {
+  forceId: string | null;
+  interrupted: boolean;
+  child?: ChildProcess;
+  killTimer?: NodeJS.Timeout;
+}
 type Turn = { ok: boolean; error?: string | undefined };
 interface Connection {
   path: string;
@@ -280,12 +286,12 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
   let preparing = false;
   let preparedAt = -Infinity;
   let problem: string | undefined;
-  let orchestrating = false;
+  let activeTurn: ActiveTurn | undefined;
   let session: Session | undefined;
   // The Codex orchestrator's session, resumed by each run until it has had its turns.
   let codex: { id: string; turns: number } | undefined;
   const listeners: (() => void)[] = [];
-  let lastRun = { at: -Infinity, failed: false, queue: '' };
+  let lastRun = { at: -Infinity, failed: false, queue: '', forceId: null as string | null };
   let stopped = false;
   const killAll = () => {
     for (const child of children) child.kill('SIGTERM');
@@ -308,20 +314,26 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
     prompt: string,
     model?: string | null,
     commands?: WorkerCommands,
-    orchestrator?: { instructions: string; resume?: string | undefined },
+    orchestrator?: { instructions: string; resume?: string | undefined; turn: ActiveTurn },
   ) {
     const log = await openLog(name, role, cwd);
+    if (orchestrator && (stopped || orchestrator.turn.interrupted)) {
+      log.end();
+      return { ok: false, output: agentOutput(connection.runtime, '') };
+    }
     const command = agentCommand(connection.runtime, connection.path, {
       project: cwd,
       role,
       model,
       commands,
-      ...orchestrator,
+      instructions: orchestrator?.instructions,
+      resume: orchestrator?.resume,
     });
     let stdout = '';
     const result = await new Promise<{ code: number | null; error?: Error }>((done) => {
       // Output goes to a log, never to the terminal running the chat.
       const child = spawn(command.command, command.args, { cwd, env: command.env, stdio: ['pipe', 'pipe', 'pipe'] });
+      if (orchestrator) orchestrator.turn.child = child;
       children.add(child);
       child.stdout?.setEncoding('utf8');
       child.stdout?.on('data', (chunk: string) => {
@@ -332,6 +344,7 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
       child.stdin?.on('error', () => undefined);
       child.stdin?.end(prompt);
       child.once('error', (error) => {
+        if (orchestrator?.turn.interrupted) return;
         children.delete(child);
         done({ code: null, error });
       });
@@ -353,9 +366,13 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
 
   // Starts a Claude Code orchestrator that stays open between messages, so each one skips startup and the
   // orchestrator remembers the conversation.
-  async function openSession(connection: Connection) {
+  async function openSession(connection: Connection, running: ActiveTurn) {
     const cwd = options.project;
     const log = await openLog('orchestrator', 'orchestrator session', cwd);
+    if (stopped || running.interrupted) {
+      log.end();
+      return;
+    }
     const command = agentCommand(connection.runtime, connection.path, {
       project: cwd,
       role: 'orchestrator',
@@ -380,7 +397,7 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
           continue;
         }
         // Claude Code ends each turn with a result event.
-        if (event?.type !== 'result') continue;
+        if (event?.type !== 'result' || (activeTurn?.child === child && activeTurn.interrupted)) continue;
         const { error } = agentOutput('claude', line);
         current.finish?.({ ok: !error, error });
       }
@@ -398,13 +415,15 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
         problem = `Install ${runtimeNames[connection.runtime]} to run agents`;
       current.finish?.({ ok: false, error: error ? message(error) : 'The orchestrator session ended' });
     };
-    child.once('error', close);
+    child.once('error', (error) => {
+      if (!(activeTurn?.child === child && activeTurn.interrupted)) close(error);
+    });
     child.once('close', () => close());
     return current;
   }
 
   // One orchestrator turn that handles the next queued message.
-  async function turn(connection: Connection): Promise<Turn> {
+  async function turn(connection: Connection, running: ActiveTurn): Promise<Turn> {
     if (connection.runtime !== 'claude') {
       // Codex cannot stay open, so each message gets its own run that resumes the last one's session.
       const resume = codex && codex.turns < sessionTurns ? codex : undefined;
@@ -419,14 +438,18 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
         {
           instructions: orchestratorRules,
           resume: resume?.id,
+          turn: running,
         },
       );
       // A failed run starts a fresh session next time.
-      codex = ok && output.session ? { id: output.session, turns: (resume?.turns ?? 0) + 1 } : undefined;
+      if (!running.interrupted)
+        codex = ok && output.session ? { id: output.session, turns: (resume?.turns ?? 0) + 1 } : undefined;
       return { ok, error: output.error };
     }
-    session ??= await openSession(connection);
+    session ??= await openSession(connection, running);
     const current = session;
+    if (!current) return { ok: false };
+    running.child = current.child;
     current.turns++;
     // Retire the session after its last turn so the next message starts a fresh one.
     if (current.turns >= sessionTurns) session = undefined;
@@ -445,26 +468,50 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
     });
   }
 
+  function interrupt(running: ActiveTurn) {
+    if (running.interrupted) return;
+    running.interrupted = true;
+    if (!running.child) return;
+    const child = running.child;
+    if (session?.child === child) session = undefined;
+    child.kill('SIGTERM');
+    running.killTimer = setTimeout(() => child.kill('SIGKILL'), 2000).unref();
+  }
+
   function orchestrate(state: ChatState, connection: Connection) {
+    const priority = state.forcePending;
+    const forceId = priority?.id ?? null;
+    if (activeTurn) {
+      if (priority && !activeTurn.forceId) {
+        // An ordinary turn can pick up a newly arrived forced message before our next poll.
+        if (priority.processing) activeTurn.forceId = priority.id;
+        else interrupt(activeTurn);
+      }
+      return;
+    }
     const queue = `${state.queued}:${state.messages.find(({ status }) => status === 'queued')?.id ?? ''}`;
     // Back off when the last turn failed or left the queue exactly as it was.
-    const wait = lastRun.failed || lastRun.queue === queue ? retryAfter : 0;
-    if (orchestrating || !state.queued || now() - lastRun.at < wait) return;
-    orchestrating = true;
+    const wait =
+      (lastRun.failed || lastRun.queue === queue) && (!forceId || forceId === lastRun.forceId) ? retryAfter : 0;
+    if ((!state.queued && !forceId) || now() - lastRun.at < wait) return;
+    const running: ActiveTurn = { forceId, interrupted: false };
+    activeTurn = running;
     track(
       (async () => {
         let failed = true;
         try {
-          const result = await turn(connection);
+          const result = await turn(connection, running);
+          if (running.interrupted) return;
           failed = !result.ok;
           if (failed && !problem?.startsWith('Install'))
             problem = `Orchestrator failed · ${result.error ?? `see ${join(configDirectory(), 'logs', 'orchestrator.log')}`}`;
           else if (problem?.startsWith('Orchestrator')) problem = undefined;
         } catch (error) {
-          problem = `Orchestrator · ${message(error)}`;
+          if (!running.interrupted) problem = `Orchestrator · ${message(error)}`;
         } finally {
-          orchestrating = false;
-          lastRun = { at: now(), failed, queue };
+          clearTimeout(running.killTimer);
+          activeTurn = undefined;
+          lastRun = { at: running.interrupted ? -Infinity : now(), failed, queue, forceId: running.forceId };
           for (const listener of listeners) listener();
         }
       })(),
@@ -650,7 +697,7 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
       const count = workers.size;
       return (
         [
-          orchestrating ? 'Orchestrator working' : '',
+          activeTurn ? 'Orchestrator working' : '',
           count ? `${count} agent${count === 1 ? '' : 's'} running` : '',
           problem ?? '',
         ]

@@ -1,9 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { type Actor, ApiError, type ChatDecision, type ChatUsage, type SendChat } from '@clqn/shared';
-import { and, eq, lt, sql } from 'drizzle-orm';
+import { type Actor, ApiError, type ChatDecisionRequest, type ChatUsage, type SendChat } from '@clqn/shared';
+import { and, eq, isNotNull, lt, sql } from 'drizzle-orm';
 import { appendEvent, requireClan, type WorkspaceDb } from '../lib/access.js';
 import { type ChatProposal, chatMembers, chatMessages, chats, chatTokenHours } from './chat.js';
-import { chatTokenRetention, chatUsage, currentChatHour, memberScope, messageScope, workerBusy } from './chat-read.js';
+import {
+  chatTokenRetention,
+  chatUsage,
+  currentChatHour,
+  forcePending,
+  memberScope,
+  messageScope,
+  workerBusy,
+} from './chat-read.js';
 import { agents, credentials } from './schema.js';
 import { tasks } from './tasks.js';
 
@@ -58,6 +66,7 @@ export async function addChatMessage(db: WorkspaceDb, message: typeof chatMessag
     existing.authorId !== message.authorId ||
     existing.role !== message.role ||
     existing.text !== message.text ||
+    existing.force !== (message.force ?? false) ||
     existing.replyTo !== (message.replyTo ?? null)
   )
     throw conflict('Message ID is already in use');
@@ -70,7 +79,7 @@ export async function sendChat(db: WorkspaceDb, actor: Actor, clanId: string, bo
     const target = await getMessage(db, clanId, body.replyTo);
     if (target.role !== 'member') throw conflict('Choose a member message to reply to');
   }
-  return addChatMessage(db, {
+  const message = await addChatMessage(db, {
     ...body,
     authorId: actor.id,
     author: actor.email,
@@ -78,6 +87,21 @@ export async function sendChat(db: WorkspaceDb, actor: Actor, clanId: string, bo
     clanId,
     status: 'queued',
   });
+  if (message.force && message.status === 'queued') {
+    // Invalidate the current ordinary turn's decision before the host sees the forced message.
+    await db
+      .update(chatMessages)
+      .set({ pickedAt: null, pickId: null })
+      .where(
+        and(
+          messageScope(clanId),
+          eq(chatMessages.status, 'queued'),
+          eq(chatMessages.force, false),
+          isNotNull(chatMessages.pickedAt),
+        ),
+      );
+  }
+  return message;
 }
 
 async function getWorker(db: WorkspaceDb, clanId: string, id: string) {
@@ -153,9 +177,11 @@ async function assignChatTask(
   }
 }
 
-export async function decideChat(db: WorkspaceDb, actor: Actor, clanId: string, id: string, body: ChatDecision) {
+export async function decideChat(db: WorkspaceDb, actor: Actor, clanId: string, id: string, body: ChatDecisionRequest) {
   const message = await getMessage(db, clanId, id);
   if (message.status !== 'queued') throw conflict('This message has already been handled');
+  if (body.pickId ? body.pickId !== message.pickId : !message.force && (await forcePending(db, clanId)))
+    throw conflict('Take the next message from the inbox before deciding');
   await markDecided(db, id);
   const related = message.replyTo ? await getMessage(db, clanId, message.replyTo) : undefined;
   const held = related?.status === 'clarification' ? related : undefined;

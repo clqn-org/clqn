@@ -12,6 +12,67 @@ import {
 import { createApp } from '../src/app.js';
 import { database, skip } from './postgres.js';
 
+test('PostgreSQL: force sends are FIFO and invalidate the interrupted turn', { skip }, async (t) => {
+  const { connection, user } = await database(t);
+  const [host, outsider] = await Promise.all([user(), user()]);
+  const clan = await connection.store.createClan(host.user.id, 'Force send');
+  const coordinator = await connection.store.registerAgent(host.user, clan.id, 'Coordinator', 'orchestrator');
+  const app = createApp(connection.store, connection.db);
+  const chat = (token: string, suffix: string, body?: object) =>
+    app.request(`/v1/clans/${clan.id}/chat${suffix}`, {
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }),
+    });
+  async function inbox() {
+    const response = await chat(coordinator.token, '/inbox', {});
+    assert.equal(response.status, 200, await response.clone().text());
+    return chatInboxSchema.parse(await response.json());
+  }
+  const send = (message: SendChat) => chat(host.token, '/messages', message);
+  const state = async () => chatStateSchema.parse(await (await chat(host.token, '/state')).json());
+  const decide = (id: string, pickId?: string | null) =>
+    chat(coordinator.token, `/messages/${id}/decision`, { action: 'reply', text: 'Handled', pickId });
+
+  assert.equal((await chat(host.token, '/join', defaultChatSettings)).status, 200);
+  const ordinary = { id: randomUUID(), text: 'Ordinary request' };
+  const urgent = { id: randomUUID(), text: 'First urgent request', force: true };
+  const next = { id: randomUUID(), text: 'Second urgent request', force: true };
+  assert.equal((await send(ordinary)).status, 201);
+  const interrupted = await inbox();
+  assert.equal(interrupted.next?.id, ordinary.id);
+  assert.ok(interrupted.pickId);
+  assert.equal((await chat(outsider.token, '/messages', urgent)).status, 404);
+  assert.equal((await chat(coordinator.token, '/messages', urgent)).status, 403);
+  assert.deepEqual(
+    (await Promise.all([send(urgent), send(urgent)])).map(({ status }) => status),
+    [201, 201],
+  );
+  assert.equal((await send({ ...urgent, force: false })).status, 409);
+  assert.deepEqual((await state()).forcePending, { id: urgent.id, processing: false });
+  assert.equal((await state()).messages.find(({ id }) => id === ordinary.id)?.processing, undefined);
+  assert.equal((await decide(ordinary.id, interrupted.pickId)).status, 409);
+  assert.equal((await decide(ordinary.id)).status, 409);
+
+  const first = await inbox();
+  assert.equal(first.next?.id, urgent.id);
+  assert.ok(first.pickId);
+  assert.equal((await send(next)).status, 201);
+  assert.deepEqual((await state()).forcePending, { id: urgent.id, processing: true });
+  assert.equal((await decide(urgent.id, first.pickId)).status, 200);
+  const second = await inbox();
+  assert.equal(second.next?.id, next.id);
+  assert.equal((await decide(next.id, second.pickId)).status, 200);
+
+  const resumed = await inbox();
+  assert.equal(resumed.next?.id, ordinary.id);
+  assert.notEqual(resumed.pickId, interrupted.pickId);
+  assert.equal((await decide(ordinary.id, interrupted.pickId)).status, 409);
+  assert.equal((await send(urgent)).status, 201);
+  assert.equal((await decide(ordinary.id, resumed.pickId)).status, 200);
+  assert.equal((await state()).forcePending, null);
+  assert.equal((await inbox()).next, null);
+});
+
 test('PostgreSQL: shared chat, held work, owner approvals, and competing delegations', {
   skip,
 }, async (t) => {

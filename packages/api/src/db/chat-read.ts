@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   type ChatMergeRequest,
   type ChatMessage,
@@ -32,6 +33,7 @@ export function messageView(row: typeof chatMessages.$inferSelect): ChatMessage 
     status,
     replyTo,
     ...(processing ? { processing } : {}),
+    ...(row.force ? { force: true } : {}),
   };
 }
 
@@ -85,29 +87,40 @@ export async function chatQueue(db: WorkspaceDb, clanId: string, status: 'queued
   ).map(messageView);
 }
 
-// Hands the orchestrator the oldest queued message, so it handles one at a time and members see which.
+export async function forcePending(db: WorkspaceDb, clanId: string) {
+  const [row] = await db
+    .select({ id: chatMessages.id, pickedAt: chatMessages.pickedAt })
+    .from(chatMessages)
+    .where(and(messageScope(clanId), eq(chatMessages.status, 'queued'), eq(chatMessages.force, true)))
+    .orderBy(asc(chatMessages.sequence))
+    .limit(1);
+  return row
+    ? { id: row.id, processing: row.pickedAt !== null && Date.now() - row.pickedAt.getTime() < processingFor }
+    : null;
+}
+
+// Called with the chat locked. Forced messages go first, and each priority is FIFO.
 export async function pickNext(db: WorkspaceDb, clanId: string) {
-  return db.transaction(async (tx) => {
-    const [next] = await tx
-      .select({ id: chatMessages.id })
-      .from(chatMessages)
-      .where(and(messageScope(clanId), eq(chatMessages.status, 'queued')))
-      .orderBy(asc(chatMessages.sequence))
-      .limit(1);
-    await tx
-      .update(chatMessages)
-      .set({ pickedAt: null })
-      .where(
-        and(messageScope(clanId), isNotNull(chatMessages.pickedAt), next ? ne(chatMessages.id, next.id) : undefined),
-      );
-    if (!next) return null;
-    const [picked] = await tx
-      .update(chatMessages)
-      .set({ pickedAt: sql`clock_timestamp()` })
-      .where(eq(chatMessages.id, next.id))
-      .returning();
-    return messageView(picked!);
-  });
+  const [next] = await db
+    .select({ id: chatMessages.id })
+    .from(chatMessages)
+    .where(and(messageScope(clanId), eq(chatMessages.status, 'queued')))
+    .orderBy(desc(chatMessages.force), asc(chatMessages.sequence))
+    .limit(1);
+  await db
+    .update(chatMessages)
+    .set({ pickedAt: null, pickId: null })
+    .where(
+      and(messageScope(clanId), isNotNull(chatMessages.pickedAt), next ? ne(chatMessages.id, next.id) : undefined),
+    );
+  if (!next) return { next: null, pickId: null };
+  const pickId = randomUUID();
+  const [picked] = await db
+    .update(chatMessages)
+    .set({ pickedAt: sql`clock_timestamp()`, pickId })
+    .where(eq(chatMessages.id, next.id))
+    .returning();
+  return { next: messageView(picked!), pickId };
 }
 
 export const activeRun = and(
