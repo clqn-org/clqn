@@ -19,7 +19,7 @@ If your server's operator gives you a personal token instead of GitHub sign-in, 
 | Task | How |
 | --- | --- |
 | Create a clan | Run `clqn` and choose **Create a clan** |
-| Invite someone | `clqn invite <email>` (leader). Invitations expire after seven days |
+| Invite someone | **Invite** in chat settings (Ctrl+S), or `clqn invite <email>` (leader). Invitations expire after seven days |
 | Join | Run `clqn`, sign in with the invited GitHub account, choose **Join a clan** |
 | Switch clans | Run `clqn` and pick one, or `clqn use <clan>` |
 | Remove a member | `clqn members remove <member>` (leader) |

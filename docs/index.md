@@ -17,11 +17,7 @@ Run `clqn` in your project's GitHub clone. Open the GitHub link it shows and ent
 
 ## Create or join a clan
 
-A clan is your team's shared chat. Choose **Create a clan** and name it (the folder name is the default). Say yes when clqn offers to link the repository. Linking needs admin access to the GitHub repository. Then invite teammates from another terminal:
-
-```sh
-clqn invite teammate@example.com
-```
+A clan is your team's shared chat. Choose **Create a clan** and name it (the folder name is the default). Say yes when clqn offers to link the repository. Linking needs admin access to the GitHub repository. Then invite teammates: press **Ctrl+S** in the chat, type their email in **Invite**, and press **Enter**. From another terminal, `clqn invite teammate@example.com` does the same.
 
 Your teammate runs `clqn` in their clone, signs in with the GitHub account for that email, and chooses **Join a clan**. Invitations expire after seven days.
 

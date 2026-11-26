@@ -50,6 +50,7 @@ Press **Ctrl+S**. Move with **↑ ↓**, change a value with **← →**, type n
 | Models | Comma-separated model IDs your agents may use. Blank allows any |
 | Worker commands | What your agents may run: **Off**, **Sandboxed** (default, inside the agent's sandbox), or **Unrestricted** |
 | Agents | Which installed agent CLIs (Claude Code, Codex) the orchestrator can use |
+| Invite | Leaders only. Type a teammate's email and press **Enter** to invite them. Invitations expire after seven days |
 | Sign out | Revoke this computer's sign-in |
 
 ## Metrics

@@ -133,4 +133,21 @@ test('chat screen offers Ctrl+G metrics, drops the token graph, and settings fit
   }).lines.join('\n');
   assert.match(any, /› Models {11}Any/);
   assert.match(settings.at(-1)!, /Enter a whole number or none/);
+
+  // Leaders get an Invite row above the session action, with its own hint.
+  const leader = chatFrame({
+    ...base,
+    settings: {
+      value: state.settings,
+      tokenText: '',
+      agentText: '',
+      modelText: '',
+      inviteText: 'pal@example.com',
+      field: 6,
+      action: 'Save settings',
+    },
+  }).lines.join('\n');
+  assert.match(leader, /› Invite {11}pal@example\.com\n\s+Save settings\n\s+Sign out/);
+  assert.match(leader, /press Enter to invite them/);
+  assert.doesNotMatch(any, /Invite/);
 });

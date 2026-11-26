@@ -9,6 +9,7 @@ import {
   type ChatSettings,
   type ChatState,
   type ClqnClient,
+  createInvitationSchema,
   type SendChat,
 } from '@clqn/shared';
 import type { AgentChoices } from './agent-runner.js';
@@ -34,13 +35,16 @@ const models = (text: string) => {
 
 type Info = Awaited<ReturnType<ClqnClient['chatInfo']>>;
 type Setup = Omit<NonNullable<Parameters<typeof chatFrame>[0]['settings']>, 'action'>;
-const setupFor = (settings: ChatSettings): Setup => ({
+// Leaders get an Invite row before the session action, which shifts the last two rows down.
+const setupFor = (settings: ChatSettings, leader: boolean): Setup => ({
   value: settings,
   tokenText: settings.tokenLimit?.toString() ?? '',
   agentText: settings.agentLimit?.toString() ?? '',
   modelText: settings.allowedModels?.join(', ') ?? '',
-  field: 6,
+  ...(leader ? { inviteText: '' } : {}),
+  field: leader ? 7 : 6,
 });
+const settingsRows = (setup: Setup) => (setup.inviteText === undefined ? 8 : 9);
 
 // Background agents that follow the polled chat state and report a short status line.
 export interface ChatAgents {
@@ -74,7 +78,7 @@ export async function runChat(
   const actor = await api.whoami();
   if (actor.agentId) throw new Error('Sign in with a personal credential to open the chat');
   let info: Info = await api.chatInfo(clanId);
-  let setup: Setup | undefined = setupFor(info.settings);
+  let setup: Setup | undefined = setupFor(info.settings, info.canStart);
   let saved: AgentChoices | undefined;
   void loadChoices();
   let result: 'quit' | 'sign-out' = 'quit';
@@ -370,6 +374,30 @@ export async function runChat(
     }
   }
 
+  // Invites go to the open clan; the API still checks that the user leads it.
+  async function invite() {
+    if (busy || setup?.inviteText === undefined) return;
+    const parsed = createInvitationSchema.safeParse({ email: setup.inviteText });
+    if (!parsed.success) {
+      notice = 'Enter a valid email address to invite';
+      return;
+    }
+    busy = true;
+    notice = undefined;
+    draw();
+    try {
+      const { email } = await api.createInvitation(clanId, parsed.data.email);
+      notice = `Invited ${email}. They run clqn and choose Join a clan.`;
+      setup.inviteText = '';
+      replaceField = true;
+    } catch (error) {
+      notice = help(error);
+    } finally {
+      busy = false;
+      draw();
+    }
+  }
+
   function edit(text: string) {
     const insert = plain(text).slice(0, Math.max(0, 4000 - draft.length));
     draft = draft.slice(0, caret) + insert + draft.slice(caret);
@@ -383,7 +411,8 @@ export async function runChat(
       else setup = undefined;
     } else if (key.name === 'tab' || key.name === 'up' || key.name === 'down') {
       const change = key.name === 'up' || key.shift ? -1 : 1;
-      setup.field = (setup.field + 8 + change) % 8;
+      const count = settingsRows(setup);
+      setup.field = (setup.field + count + change) % count;
       replaceField = true;
     } else if (setup.field === 0 && ['left', 'right', 'space', 'return'].includes(key.name ?? '')) {
       setup.value = { ...setup.value, approval: setup.value.approval === 'manual' ? 'automatic' : 'manual' };
@@ -393,9 +422,18 @@ export async function runChat(
       setup.value = { ...setup.value, commands: levels[next % 3]! };
     } else if (setup.field === 5 && ['left', 'right', 'space', 'return'].includes(key.name ?? '')) {
       if (setup.agents?.installed.length) setup.agents = nextChoice(setup.agents, key.name === 'left' ? -1 : 1);
+    } else if (setup.inviteText !== undefined && setup.field === 6) {
+      if (key.name === 'return') void invite();
+      else if (key.name === 'backspace') {
+        setup.inviteText = setup.inviteText.slice(0, -1);
+        replaceField = false;
+      } else if (text && /^[^\s\x00-\x1f\x7f-\x9f]+$/.test(text) && !key.ctrl && !key.meta) {
+        setup.inviteText = ((replaceField ? '' : setup.inviteText) + text).slice(0, 254);
+        replaceField = false;
+      }
     } else if (key.name === 'return') {
-      if (setup.field === 6) void save();
-      else if (setup.field === 7) {
+      if (setup.field === settingsRows(setup) - 2) void save();
+      else if (setup.field === settingsRows(setup) - 1) {
         result = 'sign-out';
         stop();
       } else {
@@ -417,7 +455,7 @@ export async function runChat(
 
   function composerKey(text: string, key: Key) {
     if (key.name === 'f2' && state) {
-      setup = { ...setupFor(state.settings), agents: saved };
+      setup = { ...setupFor(state.settings, info.canStart), agents: saved };
       void loadChoices();
       approvalFocused = false;
     } else if (key.name === 'f5') {
@@ -507,6 +545,10 @@ export async function runChat(
     if (paste !== undefined) {
       if (key.name === 'paste-end') {
         if (state && !setup && !metrics && !reviews && !approvalFocused) edit(paste);
+        else if (setup?.inviteText !== undefined && setup.field === 6) {
+          setup.inviteText = ((replaceField ? '' : setup.inviteText) + plain(paste).trim()).slice(0, 254);
+          replaceField = false;
+        }
         paste = undefined;
         draw();
       } else if (paste.length < 4000) {

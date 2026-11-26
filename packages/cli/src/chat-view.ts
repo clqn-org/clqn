@@ -74,6 +74,8 @@ interface SettingsView {
   modelText: string;
   // Agent CLIs on this machine; undefined until they are found.
   agents?: { installed: Runtime[]; off: Runtime[] } | undefined;
+  // The email being typed in the leader-only Invite row; undefined hides the row.
+  inviteText?: string | undefined;
   field: number;
   action: string;
 }
@@ -191,9 +193,14 @@ function settingsLines(settings: SettingsView, columns: number, paint: Paint, co
     `Models           ${plain(settings.modelText) || 'Any'}`,
     `Worker commands  ${{ off: 'Off', sandboxed: 'Sandboxed', unrestricted: 'Unrestricted' }[settings.value.commands]}`,
     `Agents           ${agentsText(settings.agents)}`,
+    ...(settings.inviteText === undefined ? [] : [`Invite           ${plain(settings.inviteText) || 'Type an email'}`]),
     settings.action,
     'Sign out',
   ];
+  const hint =
+    settings.inviteText !== undefined && settings.field === 6
+      ? 'Type a teammate’s email and press Enter to invite them to this clan.'
+      : 'Enter a whole number or none for unlimited; models comma-separated, blank for any.';
   return [
     paint('Session settings', 'bold'),
     ...(compact ? [] : ['']),
@@ -203,7 +210,7 @@ function settingsLines(settings: SettingsView, columns: number, paint: Paint, co
     }),
     // Short terminals drop the key hints so every row still fits.
     ...(compact ? [] : ['', paint(clip('↑↓ Move  ←→ Change  Enter Select  Esc Back', columns), 'muted')]),
-    paint(clip('Enter a whole number or none for unlimited; models comma-separated, blank for any.', columns), 'muted'),
+    paint(clip(hint, columns), 'muted'),
   ];
 }
 
