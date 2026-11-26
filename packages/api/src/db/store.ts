@@ -1,11 +1,13 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { type Actor, type Agent, ApiError, type Clan, type PageQuery, type PendingInvitation } from '@clqn/shared';
-import { and, count, desc, eq, gt, inArray, isNull, sql as query } from 'drizzle-orm';
+import { and, count, desc, eq, gt, inArray, isNull, ne, sql as query } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { appendEvent, lockClan, requireClan, requirePersonal } from '../lib/access.js';
 import { resourceFilter, rethrowAliasConflict } from '../lib/aliases.js';
 import { limitReached, limits } from '../lib/limits.js';
+import { chats } from './chat.js';
+import { removeChatBackup } from './chat-host.js';
 import * as schema from './schema.js';
 
 export const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
@@ -111,7 +113,13 @@ export function createStore(url: string, poolSize = 10) {
         return await db.transaction(async (tx) => {
           const membership = await requireClan(tx, actor, clanId, 'share');
           if (role === 'orchestrator' && membership.role !== 'leader') {
-            throw new ApiError(403, 'FORBIDDEN', 'Only the clan leader can register the orchestrator');
+            const [nomination] = await tx
+              .select({ backupUserId: chats.backupUserId })
+              .from(chats)
+              .where(eq(chats.clanId, clanId))
+              .for('share');
+            if (nomination?.backupUserId !== actor.id)
+              throw new ApiError(403, 'FORBIDDEN', 'Only the leader or nominated backup can register an orchestrator');
           }
           const [agent] = await tx
             .insert(schema.agents)
@@ -134,8 +142,8 @@ export function createStore(url: string, poolSize = 10) {
         });
       } catch (error) {
         const cause = (error as { cause?: { code?: string; constraint_name?: string } }).cause;
-        if (cause?.code === '23505' && cause.constraint_name === 'agents_one_orchestrator_per_clan') {
-          throw new ApiError(409, 'ORCHESTRATOR_EXISTS', 'This clan already has an orchestrator');
+        if (cause?.code === '23505' && cause.constraint_name === 'agents_one_orchestrator_per_owner') {
+          throw new ApiError(409, 'ORCHESTRATOR_EXISTS', 'You already have an orchestrator in this clan');
         }
         rethrowAliasConflict(error);
       }
@@ -393,6 +401,7 @@ export function createStore(url: string, poolSize = 10) {
         if (!target) throw new ApiError(404, 'NOT_FOUND', 'Member not found');
         if (target.role === 'leader')
           throw new ApiError(409, 'LEADER_REQUIRED', 'The clan leader cannot leave or be removed');
+        await removeChatBackup(tx, clanId, userId);
         // Pending invitations must not let removed members reinstate their own access.
         if (user) {
           await tx
@@ -435,11 +444,21 @@ export function createStore(url: string, poolSize = 10) {
           .update(schema.memberships)
           .set({ role: 'member' })
           .where(and(eq(schema.memberships.clanId, clanId), eq(schema.memberships.userId, actor.id)));
-        // Only a leader's agent may orchestrate, and a clan has one orchestrator; free the slot for the new leader.
+        await tx
+          .update(chats)
+          .set({ hostId: userId, backupUserId: null, leaseExpiresAt: null })
+          .where(eq(chats.clanId, clanId));
+        // Preserve the incoming leader's orchestrator when they were already hosting as the backup.
         await tx
           .update(schema.agents)
           .set({ role: 'worker' })
-          .where(and(eq(schema.agents.clanId, clanId), eq(schema.agents.role, 'orchestrator')));
+          .where(
+            and(
+              eq(schema.agents.clanId, clanId),
+              eq(schema.agents.role, 'orchestrator'),
+              ne(schema.agents.ownerId, userId),
+            ),
+          );
         await appendEvent(tx, { clanId, actorId: actor.id, type: 'clan.leader_changed', resourceId: userId });
       });
     },

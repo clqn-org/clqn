@@ -24,10 +24,14 @@ import {
   type ChatMetricsWindow,
   type ChatSettings,
   type ChatUsage,
+  chatBackupInputSchema,
+  chatBackupSchema,
   chatDecisionSchema,
   chatHistorySchema,
   chatInboxSchema,
   chatInfoSchema,
+  chatLeaseInputSchema,
+  chatLeaseSchema,
   chatMessageSchema,
   chatMessageStatusSchema,
   chatMetricsSchema,
@@ -247,13 +251,38 @@ export class ClqnClient {
   sendChat(clanId: string, message: SendChat, signal?: AbortSignal) {
     return this.request(`${this.chatPath(clanId)}/messages`, chatMessageSchema, sendChatSchema.parse(message), signal);
   }
-  // Takes the next queued message for the orchestrator to handle.
-  chatInbox(clanId: string) {
-    return this.request(`${this.chatPath(clanId)}/inbox`, chatInboxSchema, {});
-  }
-  decideChat(clanId: string, id: string, decision: ChatDecision) {
+  setChatBackup(clanId: string, userId: string | null) {
     return this.request(
-      `${this.chatPath(clanId)}/messages/${encodeURIComponent(id)}/decision`,
+      `${this.chatPath(clanId)}/host/backup`,
+      chatBackupSchema,
+      chatBackupInputSchema.parse({ userId }),
+    );
+  }
+  heartbeatChatLease(clanId: string, leaseId: string, signal?: AbortSignal) {
+    return this.request(
+      `${this.chatPath(clanId)}/host/heartbeat`,
+      chatLeaseSchema,
+      chatLeaseInputSchema.parse({ leaseId }),
+      signal,
+    );
+  }
+  releaseChatLease(clanId: string, leaseId: string, signal?: AbortSignal) {
+    return this.request(
+      `${this.chatPath(clanId)}/host/release`,
+      chatLeaseSchema,
+      chatLeaseInputSchema.parse({ leaseId }),
+      signal,
+    );
+  }
+  // Takes the next queued message for the orchestrator to handle.
+  chatInbox(clanId: string, leaseId?: string) {
+    const query = leaseId ? `?lease=${encodeURIComponent(leaseId)}` : '';
+    return this.request(`${this.chatPath(clanId)}/inbox${query}`, chatInboxSchema, {});
+  }
+  decideChat(clanId: string, id: string, decision: ChatDecision, leaseId?: string) {
+    const query = leaseId ? `?lease=${encodeURIComponent(leaseId)}` : '';
+    return this.request(
+      `${this.chatPath(clanId)}/messages/${encodeURIComponent(id)}/decision${query}`,
       z.object({ status: chatMessageStatusSchema, blocker: z.string().nullable() }),
       chatDecisionSchema.parse(decision),
     );

@@ -111,6 +111,14 @@ export const chatMergeRequestSchema = z.object({
   repository: taskRepositorySchema,
 });
 export type ChatMergeRequest = z.infer<typeof chatMergeRequestSchema>;
+export const chatBackupInputSchema = z.object({ userId: z.uuid().nullable() }).strict();
+export const chatBackupSchema = z.object({ backupUserId: z.uuid().nullable() });
+export const chatLeaseInputSchema = z.object({ leaseId: z.uuid() }).strict();
+export const chatLeaseSchema = z.object({ active: z.boolean() });
+export const chatOrchestrationSchema = chatBackupSchema.extend({
+  eligible: z.boolean(),
+  activeHost: z.string().nullable(),
+});
 export const chatSessionSchema = z.object({ host: z.string(), clan: z.string() });
 export const chatInfoSchema = z.object({
   session: chatSessionSchema.nullable(),
@@ -129,6 +137,7 @@ export const chatStateSchema = chatHistorySchema.extend({
   questions: z.array(chatMessageSchema),
   runs: z.array(chatRunSchema),
   mergeQueue: z.array(chatMergeRequestSchema).optional(),
+  orchestration: chatOrchestrationSchema.optional(),
   queued: z.number().int().nonnegative(),
   running: z.number().int().nonnegative(),
   usage: z.object({ tokens: tokenCount, reserved: tokenCount, agents: z.number().int().nonnegative() }),
