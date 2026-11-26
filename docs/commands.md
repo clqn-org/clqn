@@ -5,6 +5,8 @@ Most of the time you only need `clqn`: it signs you in, lets you pick or create 
 | Command | What it does |
 | --- | --- |
 | `clqn` | Sign in, choose a clan, and open the chat |
+| `clqn --backup` | Offer to host orchestration while this chat is open, if nominated |
+| `clqn host <member>` / `clqn host off` | Nominate a backup host by email or ID, or clear it (leader only) |
 | `clqn whoami` | Show who you're signed in as |
 | `clqn clans` | List your clans |
 | `clqn use <clan>` | Switch to another clan by name |

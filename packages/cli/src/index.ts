@@ -4,6 +4,7 @@ import {
   type Agent,
   ApiError,
   ClqnClient,
+  chatLeaseInputSchema,
   registerAgentSchema,
   repositorySlugSchema,
   resourceAliasSchema,
@@ -47,6 +48,7 @@ const program = new Command()
   .version(VERSION)
   .option('--api-url <url>', 'override the saved clqn server for this command')
   .option('--json', 'output machine-readable JSON')
+  .option('--backup', 'offer to host the orchestrator for this chat if nominated')
   .option('--verbose', 'show Git and GitHub CLI error output, with credentials redacted')
   .hook('preAction', async (_root, command) => {
     if (program.opts().verbose) process.env.CLQN_VERBOSE = '1';
@@ -214,6 +216,21 @@ const findMember = async (api: ClqnClient, clanId: string, member: string) => {
   if (!found) throw new Error('Member not found in this clan');
   return found;
 };
+program
+  .command('host <member>')
+  .description('Nominate an orchestrator backup by email or ID, or use off (leader only)')
+  .option('--clan <id>', 'clan ID')
+  .action(async (member: string, options: { clan?: string }) => {
+    const api = await client();
+    const clanId = await selectedClan(options);
+    const backup = member === 'off' ? null : await findMember(api, clanId, member);
+    const result = await api.setChatBackup(clanId, backup?.userId ?? null);
+    output(
+      result,
+      backup ? `${backup.email} can host the orchestrator by opening clqn --backup.` : 'Orchestrator backup cleared.',
+    );
+  });
+
 members
   .command('remove <member>')
   .description('Remove a member by email or user ID and revoke their agents in the clan (leader only)')
@@ -289,7 +306,7 @@ agent
   .description('Register an agent and save its local connection')
   .option('--clan <id>', 'clan ID')
   .option('--alias <alias>', 'short name for assignment (defaults to the name if valid)')
-  .option('--orchestrator', 'register the clan orchestrator (leader only, one per clan)')
+  .option('--orchestrator', 'register an orchestrator for the leader or nominated backup')
   .addOption(runtimeOption())
   .option('--show-token', 'include the credential for a custom runtime')
   .action(
@@ -361,7 +378,8 @@ program
   .option('--path <directory>', 'project clone or worktree (defaults to current directory)', '.')
   .addOption(new Option('--profile <path>').hideHelp())
   .addOption(new Option('--no-sync').hideHelp())
-  .action(async (options: { path: string; sync: boolean }) => {
+  .addOption(new Option('--lease <id>').hideHelp())
+  .action(async (options: { path: string; sync: boolean; lease?: string }) => {
     const api = await client();
     const config = sessionProfile ? {} : await readConfig(apiUrl());
     const actor = sessionProfile || process.env.CLQN_TOKEN || config.token ? await api.whoami() : undefined;
@@ -370,7 +388,10 @@ program
     const clanId = sessionProfile?.clanId ?? process.env.CLQN_CLAN_ID ?? actor?.clanId ?? config.clanId;
     const controller = new AbortController();
     const stop = () => controller.abort();
-    const server = await serveMcp(api, clanId, stop);
+    const leaseId =
+      options.lease === undefined ? undefined : chatLeaseInputSchema.parse({ leaseId: options.lease }).leaseId;
+    if (leaseId && (!sessionProfile || !actor?.agentId)) throw new Error('An agent profile is required to host chat');
+    const server = await serveMcp(api, clanId, stop, leaseId);
     const shutdown = () => {
       stop();
       void server.close();
@@ -470,8 +491,13 @@ async function openChat() {
         repositoryStatus = 'Main sync unavailable · retrying';
       },
     });
-  // The orchestrator (for the leader) and approved workers run in the background only while the chat is open.
-  const agents = startAgentRunner({ api, server: apiUrl(), clanId, project });
+  const agents = startAgentRunner({
+    api,
+    server: apiUrl(),
+    clanId,
+    project,
+    backupHost: Boolean(program.opts().backup),
+  });
   let result: Awaited<ReturnType<typeof runChat>>;
   try {
     result = await runChat(api, clanId, agents, { repositoryStatus: () => repository.notice ?? repositoryStatus });

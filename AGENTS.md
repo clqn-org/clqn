@@ -1,6 +1,6 @@
 # Project context
 
-clqn is a terminal app for teams and their AI agents. Typing `clqn` opens a full-screen chat (TUI) where every member talks to one orchestrator agent on the leader's machine. The orchestrator turns requests into tasks and, with each member's yes/no approval, starts agents on their machines within their limits. Read `ROADMAP.md` for scope and priorities. Everything stays in the terminal; no web dashboard is planned.
+clqn is a terminal app for teams and their AI agents. Typing `clqn` opens a full-screen chat (TUI) where every member talks to one active orchestrator agent on the leader's or an opted-in backup's machine. The orchestrator turns requests into tasks and, with each member's yes/no approval, starts agents on their machines within their limits. Read `ROADMAP.md` for scope and priorities. Everything stays in the terminal; no web dashboard is planned.
 
 - TypeScript npm workspaces: `packages/cli` (Commander), `packages/api` (Hono + Drizzle/PostgreSQL), `packages/shared` (contracts/client), `packages/mcp` (local stdio adapter).
 - Host the API on GCP with managed PostgreSQL. Keep infrastructure minimal.

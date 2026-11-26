@@ -121,14 +121,22 @@ export async function runChat(
   function draw() {
     if (closed) return;
     const session = state?.session ?? info.session;
+    const orchestration = state?.orchestration;
+    const host = orchestration ? (orchestration.activeHost ?? undefined) : session?.host;
     const pullRequests = chatPullRequests(state);
-    const background = [agents?.status(), options?.repositoryStatus?.()].filter(Boolean).join(' · ');
+    const background = [
+      agents?.status(),
+      orchestration && !host && state?.queued ? 'Orchestrator offline · messages queued' : undefined,
+      options?.repositoryStatus?.(),
+    ]
+      .filter(Boolean)
+      .join(' · ');
     let frame = chatFrame({
       columns: columns(),
       rows: rows(),
       color: !('NO_COLOR' in process.env),
       clan: session?.clan ?? info.clan,
-      host: session?.host,
+      host,
       userId: actor.id,
       state,
       frame: tick,

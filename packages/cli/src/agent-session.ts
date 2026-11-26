@@ -115,6 +115,7 @@ export function agentCommand(
     instructions?: string | undefined;
     // Codex only: continue this earlier session, so the agent remembers it.
     resume?: string | undefined;
+    leaseId?: string | undefined;
   },
 ): AgentCommand {
   const commands = options.role === 'worker' ? (options.commands ?? 'sandboxed') : 'off';
@@ -122,6 +123,7 @@ export function agentCommand(
   const npmCache = join(configDirectory(), 'npm-cache');
   // The parent chat already watches the project, even while no agent is running.
   const args = [resolve(process.argv[1]!), 'mcp', '--profile', profilePath, '--path', options.project, '--no-sync'];
+  if (options.role === 'orchestrator' && options.leaseId) args.push('--lease', options.leaseId);
   const model = options.model ? (runtime === 'codex' ? ['-m', options.model] : ['--model', options.model]) : [];
   const runtimeArgs =
     runtime === 'codex'

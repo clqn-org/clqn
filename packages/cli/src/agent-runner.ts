@@ -55,12 +55,27 @@ interface Connection {
   profile: AgentProfile;
   runtime: Runtime;
 }
+type HostMode = 'legacy' | 'lease' | undefined;
+interface HostLease {
+  id: string;
+  connection: Connection;
+  api: ClqnClient;
+  nextBeat: number;
+  expiresAt: number;
+  pending?: Promise<{ active: boolean }> | undefined;
+}
+interface HostTurn {
+  leaseId?: string | undefined;
+  canRun: () => boolean;
+}
 export interface AgentRunnerOptions {
   api: ClqnClient;
   server: string;
   clanId: string;
   // Where clqn was opened. Workers get their own Git worktree of it, never this checkout.
   project: string;
+  // Backups only host while the nominated member explicitly opts in on this chat.
+  backupHost?: boolean | undefined;
   spawn?: typeof nodeSpawn;
   // The agent CLIs installed on this machine.
   runtimes?: () => Promise<Runtime[]>;
@@ -85,6 +100,8 @@ export interface AgentRunner {
 }
 
 const retryAfter = 60_000;
+const heartbeatInterval = 10_000;
+const leaseDuration = 45_000;
 // A Claude Code orchestrator session restarts after this many turns, which bounds its context and clears old chat
 // text, and a turn that runs longer than this is stopped.
 const sessionTurns = 20;
@@ -138,14 +155,20 @@ function handle(email: string) {
     .replace(/^-|-$/g, '');
 }
 
-// Connect a worker for each agent CLI the member has on, and turn off the ones they don't, so the orchestrator
-// only picks agents this machine will run. The leader also connects the orchestrator.
-async function prepare(options: AgentRunnerOptions) {
+function hostMode(options: AgentRunnerOptions, state: ChatState, userId: string, legacyLeader: boolean): HostMode {
+  const hosting = state.orchestration;
+  if (!hosting) return legacyLeader ? 'legacy' : undefined;
+  if (hosting.eligible && (hosting.backupUserId !== userId || options.backupHost)) return 'lease';
+  return undefined;
+}
+
+// Connect the workers this machine has enabled and an eligible host's own orchestrator.
+async function prepare(options: AgentRunnerOptions, state: ChatState, leaseSupported: boolean) {
   const { api, clanId, server } = options;
   const user = await api.whoami();
   const [{ agents }, { members }, installed, off] = await Promise.all([
     api.listAgents(clanId),
-    api.members(clanId),
+    leaseSupported ? { members: [] } : api.members(clanId),
     (options.runtimes ?? installedRuntimes)(),
     readAgentsOff(),
   ]);
@@ -179,17 +202,22 @@ async function prepare(options: AgentRunnerOptions) {
       workers.set(worker.profile.agentId, worker);
     }
   }
+  const legacyLeader = members.some((member) => member.userId === user.id && member.role === 'leader');
+  const mode = hostMode(options, state, user.id, legacyLeader);
+  const runtime = on[0] ?? (state.orchestration?.backupUserId === user.id ? undefined : installed[0]);
   let orchestrator: Connection | undefined;
-  if (members.find((member) => member.userId === user.id)?.role === 'leader') {
-    const existing = agents.find((agent) => agent.role === 'orchestrator');
+  if (mode && runtime) {
+    const existing = agents.find(
+      (agent) => agent.role === 'orchestrator' && (mode === 'legacy' || agent.ownerId === user.id),
+    );
     if (!existing || existing.ownerId === user.id) {
       const alias = agents.some((agent) => agent.alias === 'orchestrator') ? undefined : 'orchestrator';
-      orchestrator = await connect(options, existing, on[0] ?? installed[0]!, () =>
+      orchestrator = await connect(options, existing, runtime, () =>
         api.registerAgent(clanId, 'Orchestrator', 'orchestrator', alias),
       );
     }
   }
-  return { workers, orchestrator };
+  return { workers, orchestrator, mode, userId: user.id, legacyLeader };
 }
 
 interface TaskWorkspace {
@@ -268,7 +296,7 @@ ${description}
 export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
   const spawn = options.spawn ?? nodeSpawn;
   const now = options.now ?? Date.now;
-  const children = new Set<ChildProcess>();
+  const children = new Map<ChildProcess, 'orchestrator' | 'worker'>();
   const lifecycles = new Set<Promise<void>>();
   const attempted = new Set<string>();
   const workers = new Map<string, string>();
@@ -280,6 +308,14 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
   let preparing = false;
   let preparedAt = -Infinity;
   let problem: string | undefined;
+  let leaseProblem: string | undefined;
+  let leaseSupported = false;
+  let lease: HostLease | undefined;
+  let heartbeatTimer: NodeJS.Timeout | undefined;
+  let expiryTimer: NodeJS.Timeout | undefined;
+  let leaseDrain: Promise<void> | undefined;
+  let hostGeneration = 0;
+  let hostUserId: string | undefined;
   let orchestrating = false;
   let session: Session | undefined;
   // The Codex orchestrator's session, resumed by each run until it has had its turns.
@@ -288,7 +324,7 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
   let lastRun = { at: -Infinity, failed: false, queue: '' };
   let stopped = false;
   const killAll = () => {
-    for (const child of children) child.kill('SIGTERM');
+    for (const child of children.keys()) if (!child.killed) child.kill('SIGTERM');
   };
   process.once('exit', killAll);
 
@@ -308,9 +344,13 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
     prompt: string,
     model?: string | null,
     commands?: WorkerCommands,
-    orchestrator?: { instructions: string; resume?: string | undefined },
+    orchestrator?: HostTurn & { instructions: string; resume?: string | undefined },
   ) {
     const log = await openLog(name, role, cwd);
+    if (stopped || (orchestrator && !orchestrator.canRun())) {
+      log.end();
+      return { ok: false, output: { tokens: 0 } };
+    }
     const command = agentCommand(connection.runtime, connection.path, {
       project: cwd,
       role,
@@ -322,7 +362,7 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
     const result = await new Promise<{ code: number | null; error?: Error }>((done) => {
       // Output goes to a log, never to the terminal running the chat.
       const child = spawn(command.command, command.args, { cwd, env: command.env, stdio: ['pipe', 'pipe', 'pipe'] });
-      children.add(child);
+      children.set(child, role);
       child.stdout?.setEncoding('utf8');
       child.stdout?.on('data', (chunk: string) => {
         stdout = (stdout + chunk).slice(-outputLimit);
@@ -341,7 +381,10 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
       });
     });
     log.end(`\n--- exit ${result.error ? message(result.error) : result.code}\n`);
-    if ((result.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT')
+    if (
+      (result.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT' &&
+      (!orchestrator || orchestrator.canRun())
+    )
       problem = `Install ${runtimeNames[connection.runtime]} to run agents`;
     return { ok: result.code === 0, output: agentOutput(connection.runtime, stdout) };
   }
@@ -353,17 +396,22 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
 
   // Starts a Claude Code orchestrator that stays open between messages, so each one skips startup and the
   // orchestrator remembers the conversation.
-  async function openSession(connection: Connection) {
+  async function openSession(connection: Connection, host: HostTurn) {
     const cwd = options.project;
     const log = await openLog('orchestrator', 'orchestrator session', cwd);
+    if (!host.canRun()) {
+      log.end();
+      return undefined;
+    }
     const command = agentCommand(connection.runtime, connection.path, {
       project: cwd,
       role: 'orchestrator',
       session: true,
       instructions: orchestratorRules,
+      leaseId: host.leaseId,
     });
     const child = spawn(command.command, command.args, { cwd, env: command.env, stdio: ['pipe', 'pipe', 'pipe'] });
-    children.add(child);
+    children.set(child, 'orchestrator');
     const current: Session = { child, turns: 0 };
     let buffer = '';
     child.stdout?.setEncoding('utf8');
@@ -394,7 +442,7 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
       children.delete(child);
       if (session === current) session = undefined;
       log.end(`\n--- exit ${error ? message(error) : 'session'}\n`);
-      if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT')
+      if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT' && host.canRun())
         problem = `Install ${runtimeNames[connection.runtime]} to run agents`;
       current.finish?.({ ok: false, error: error ? message(error) : 'The orchestrator session ended' });
     };
@@ -404,7 +452,7 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
   }
 
   // One orchestrator turn that handles the next queued message.
-  async function turn(connection: Connection): Promise<Turn> {
+  async function turn(connection: Connection, host: HostTurn): Promise<Turn> {
     if (connection.runtime !== 'claude') {
       // Codex cannot stay open, so each message gets its own run that resumes the last one's session.
       const resume = codex && codex.turns < sessionTurns ? codex : undefined;
@@ -417,16 +465,19 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
         null,
         undefined,
         {
+          ...host,
           instructions: orchestratorRules,
           resume: resume?.id,
         },
       );
       // A failed run starts a fresh session next time.
-      codex = ok && output.session ? { id: output.session, turns: (resume?.turns ?? 0) + 1 } : undefined;
+      if (host.canRun())
+        codex = ok && output.session ? { id: output.session, turns: (resume?.turns ?? 0) + 1 } : undefined;
       return { ok, error: output.error };
     }
-    session ??= await openSession(connection);
-    const current = session;
+    const current = session ?? (await openSession(connection, host));
+    if (!current || !host.canRun()) return { ok: false };
+    session = current;
     current.turns++;
     // Retire the session after its last turn so the next message starts a fresh one.
     if (current.turns >= sessionTurns) session = undefined;
@@ -445,7 +496,11 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
     });
   }
 
-  function orchestrate(state: ChatState, connection: Connection) {
+  function orchestrate(state: ChatState, connection: Connection, grant?: HostLease) {
+    const host = hostGeneration;
+    const stillHosting = () =>
+      !stopped && host === hostGeneration && (!grant || (grant === lease && now() < grant.expiresAt));
+    if (!stillHosting()) return;
     const queue = `${state.queued}:${state.messages.find(({ status }) => status === 'queued')?.id ?? ''}`;
     // Back off when the last turn failed or left the queue exactly as it was.
     const wait = lastRun.failed || lastRun.queue === queue ? retryAfter : 0;
@@ -455,20 +510,141 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
       (async () => {
         let failed = true;
         try {
-          const result = await turn(connection);
+          const result = await turn(connection, { leaseId: grant?.id, canRun: stillHosting });
+          if (!stillHosting()) return;
           failed = !result.ok;
           if (failed && !problem?.startsWith('Install'))
             problem = `Orchestrator failed · ${result.error ?? `see ${join(configDirectory(), 'logs', 'orchestrator.log')}`}`;
           else if (problem?.startsWith('Orchestrator')) problem = undefined;
         } catch (error) {
-          problem = `Orchestrator · ${message(error)}`;
+          if (stillHosting()) problem = `Orchestrator · ${message(error)}`;
         } finally {
-          orchestrating = false;
-          lastRun = { at: now(), failed, queue };
-          for (const listener of listeners) listener();
+          if (host === hostGeneration) {
+            orchestrating = false;
+            lastRun = { at: now(), failed, queue };
+            for (const listener of listeners) listener();
+          }
         }
       })(),
     );
+  }
+
+  function stopOrchestrator() {
+    hostGeneration++;
+    orchestrating = false;
+    session = undefined;
+    codex = undefined;
+    lastRun = { at: -Infinity, failed: false, queue: '' };
+    if (problem?.startsWith('Orchestrator')) problem = undefined;
+    for (const [child, role] of children) if (role === 'orchestrator' && !child.killed) child.kill('SIGTERM');
+  }
+
+  function releaseLease(current: HostLease) {
+    // A heartbeat already in flight may have acquired the lease. Release the exact pair after it settles.
+    const prior = leaseDrain;
+    const pending = current.pending;
+    const drain = (async () => {
+      await prior;
+      await pending?.catch(() => undefined);
+      await current.api.releaseChatLease(options.clanId, current.id, AbortSignal.timeout(2_000)).catch(() => undefined);
+    })();
+    leaseDrain = drain;
+    track(
+      drain.then(() => {
+        if (leaseDrain === drain) {
+          leaseDrain = undefined;
+          heartbeat();
+        }
+      }),
+    );
+  }
+
+  function stopHosting() {
+    stopOrchestrator();
+    if (lease) releaseLease(lease);
+    lease = undefined;
+    clearTimeout(expiryTimer);
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = undefined;
+    leaseProblem = undefined;
+  }
+
+  function replaceLease(current: HostLease, release: boolean) {
+    if (lease !== current || stopped) return;
+    clearTimeout(expiryTimer);
+    if (current.expiresAt !== -Infinity) stopOrchestrator();
+    if (release) releaseLease(current);
+    // Use a fresh ID so a former session cannot regain permission if this chat takes over again.
+    lease = {
+      id: randomUUID(),
+      connection: current.connection,
+      api: current.api,
+      nextBeat: current.nextBeat,
+      expiresAt: -Infinity,
+    };
+  }
+
+  function heartbeat() {
+    const current = lease;
+    if (!current || stopped || leaseDrain) return;
+    const started = now();
+    if (current.expiresAt !== -Infinity && started >= current.expiresAt) {
+      replaceLease(current, true);
+      return;
+    }
+    if (current.pending || started < current.nextBeat) return;
+    current.nextBeat = started + heartbeatInterval;
+    const pending = current.api.heartbeatChatLease(options.clanId, current.id, AbortSignal.timeout(4_000));
+    current.pending = pending;
+    void pending.then(
+      ({ active }) => {
+        current.pending = undefined;
+        if (lease !== current || stopped) return;
+        leaseProblem = undefined;
+        const arrived = now();
+        const expiresAt = started + leaseDuration;
+        if (!active || arrived >= expiresAt || (current.expiresAt !== -Infinity && arrived >= current.expiresAt)) {
+          replaceLease(current, active);
+          return;
+        }
+        current.expiresAt = expiresAt;
+        clearTimeout(expiryTimer);
+        expiryTimer = setTimeout(
+          () => {
+            if (lease === current && current.expiresAt === expiresAt) {
+              replaceLease(current, true);
+            }
+          },
+          Math.min(leaseDuration, expiresAt - arrived),
+        ).unref();
+        if (latest && connections?.orchestrator) orchestrate(latest, connections.orchestrator, current);
+      },
+      (error: unknown) => {
+        current.pending = undefined;
+        if (lease !== current || stopped) return;
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) replaceLease(current, true);
+        leaseProblem = `Orchestrator host · ${message(error)}`;
+      },
+    );
+  }
+
+  function followLease(connection: Connection) {
+    const { agentId, token } = connection.profile;
+    if (lease?.connection.profile.agentId === agentId && lease.connection.profile.token === token) {
+      lease.connection = connection;
+    } else {
+      if (lease) stopHosting();
+      lease = {
+        id: randomUUID(),
+        connection,
+        api: agentClient(options, connection.profile),
+        nextBeat: -Infinity,
+        expiresAt: -Infinity,
+      };
+      heartbeatTimer = setInterval(heartbeat, heartbeatInterval).unref();
+    }
+    heartbeat();
+    return lease;
   }
 
   function publish(run: ChatRun, connection: Connection, saved?: PendingPublication) {
@@ -603,29 +779,51 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
   function update(state: ChatState) {
     if (stopped) return;
     latest = state;
+    leaseSupported ||= state.orchestration !== undefined;
+    const mode =
+      hostUserId === undefined
+        ? undefined
+        : hostMode(options, state, hostUserId, !leaseSupported && (connections?.legacyLeader ?? false));
+    const modeChanged = connections && connections.mode !== mode;
+    if ((lease && mode !== 'lease') || (modeChanged && connections?.orchestrator)) stopHosting();
+    if (modeChanged) {
+      generation++;
+      connections = undefined;
+      preparedAt = -Infinity;
+    }
     if (!connections) {
       if (preparing || now() - preparedAt < retryAfter) return;
       preparing = true;
       preparedAt = now();
       const current = generation;
-      void prepare(options).then(
+      void prepare(options, state, leaseSupported).then(
         (prepared) => {
           preparing = false;
+          if (stopped) return;
           // Choices changed while connecting: connect again with the new ones.
           if (current !== generation) return update(latest!);
           connections = prepared;
+          if (lease && !prepared.orchestrator) stopHosting();
+          hostUserId = prepared.userId;
           problem = undefined;
           update(latest!);
         },
         (error: unknown) => {
           preparing = false;
+          if (stopped) return;
           if (current !== generation) return update(latest!);
           problem = `Agents off · ${message(error)}`;
         },
       );
       return;
     }
-    if (connections.orchestrator) orchestrate(state, connections.orchestrator);
+    if (connections.orchestrator) {
+      if (connections.mode === 'legacy') orchestrate(state, connections.orchestrator);
+      else if (connections.mode === 'lease') {
+        const grant = followLease(connections.orchestrator);
+        if (grant) orchestrate(state, connections.orchestrator, grant);
+      }
+    }
     const limit = state.settings.agentLimit ?? Number.POSITIVE_INFINITY;
     for (const run of state.runs) {
       const connection = run.workerId ? connections.workers.get(run.workerId) : undefined;
@@ -641,6 +839,16 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
     }
   }
 
+  function backupNotice() {
+    if (!options.backupHost || !latest) return '';
+    if (!latest.orchestration) return 'Backup hosting requires an updated server';
+    if (!latest.orchestration.eligible) return 'You are not the nominated backup host';
+    if (latest.orchestration.backupUserId !== hostUserId) return '';
+    if (connections && !connections.orchestrator) return 'Enable an agent for backup hosting';
+    if (!lease || now() >= lease.expiresAt) return 'Backup host on standby';
+    return '';
+  }
+
   return {
     update,
     listen(listener) {
@@ -652,6 +860,7 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
         [
           orchestrating ? 'Orchestrator working' : '',
           count ? `${count} agent${count === 1 ? '' : 's'} running` : '',
+          leaseProblem ?? backupNotice(),
           problem ?? '',
         ]
           .filter(Boolean)
@@ -664,6 +873,8 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
     },
     async choose(off) {
       await saveAgentsOff(off);
+      if (lease && latest?.orchestration?.backupUserId === hostUserId && off.includes(lease.connection.runtime))
+        stopHosting();
       // Running agents finish their tasks; the next update reconnects with the new choices.
       generation++;
       connections = undefined;
@@ -679,6 +890,7 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
       if (stopped) return;
       stopped = true;
       publicationAbort.abort();
+      stopHosting();
       killAll();
       process.off('exit', killAll);
       // Give killed workers a moment to hand their tasks back.

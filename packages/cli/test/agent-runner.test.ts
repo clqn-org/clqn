@@ -216,6 +216,177 @@ test('the leader’s chat connects an orchestrator and runs it only while messag
   assert.equal(f.spawned[1]!.child.killed, true);
 });
 
+test('an opted-in backup waits for its lease, fences stale heartbeats, and keeps workers running on lease loss', async (t) => {
+  const f = await fixture(t);
+  const workerId = randomUUID();
+  const leaderId = randomUUID();
+  const hostId = randomUUID();
+  await saveAgentProfile({ agentId: workerId, clanId, server, token: token('w'), runtime: 'claude' });
+  const registered: string[] = [];
+  const api = {
+    whoami: async () => ({ id: userId, email: 'backup@example.com' }),
+    listAgents: async () => ({
+      agents: [agent(randomUUID(), 'orchestrator', leaderId), agent(workerId, 'worker')],
+    }),
+    registerAgent: async (_clan: string, name: string, role: 'worker' | 'orchestrator') => {
+      registered.push(role);
+      assert.equal(role, 'orchestrator');
+      return { agent: { ...agent(hostId, role), name }, token: token('o') };
+    },
+  } as unknown as ClqnClient;
+  const beats: Array<{ id: string; send: (active: boolean) => void }> = [];
+  const released: string[] = [];
+  const hostApi = {
+    heartbeatChatLease: (_clan: string, id: string) =>
+      new Promise<{ active: boolean }>((resolve) => beats.push({ id, send: (active) => resolve({ active }) })),
+    releaseChatLease: async (_clan: string, id: string) => {
+      released.push(id);
+      return { active: false };
+    },
+  } as unknown as ClqnClient;
+  const transitions: string[] = [];
+  const workerApi = {
+    transitionTask: async (_clan: string, _task: string, action: string) => {
+      transitions.push(action);
+    },
+    task: async () => ({ description: 'Work on the project' }),
+  } as unknown as ClqnClient;
+  const runner = startAgentRunner({
+    api,
+    server,
+    clanId,
+    project: f.directory,
+    backupHost: true,
+    spawn: f.spawn,
+    runtimes: async () => ['claude'],
+    workspace: async () => f.directory,
+    now: f.now,
+    agentClient: (profile) => (profile.agentId === hostId ? hostApi : workerApi),
+  });
+  t.after(() => runner.stop());
+
+  const state = chatState({
+    queued: 1,
+    orchestration: { backupUserId: userId, eligible: true, activeHost: 'lead@example.com' },
+    runs: [
+      {
+        messageId: randomUUID(),
+        title: 'Worker task',
+        worker: 'Claude Code',
+        taskId: randomUUID(),
+        workerId,
+        estimatedTokens: 100,
+        status: 'queued',
+        tokens: null,
+      },
+    ],
+  });
+  const leaseArgument = (spawned: (typeof f.spawned)[number]) => {
+    const config = JSON.parse(spawned.args[spawned.args.indexOf('--mcp-config') + 1]!);
+    const args: string[] = config.mcpServers.clqn.args;
+    const leaseFlag = args.indexOf('--lease');
+    return leaseFlag < 0 ? undefined : args[leaseFlag + 1];
+  };
+  runner.update(state);
+  await until(() => beats.length === 1 && f.spawned.length === 1);
+  assert.deepEqual(registered, ['orchestrator']);
+  assert.equal(leaseArgument(f.spawned[0]!), undefined);
+  assert.match(runner.status() ?? '', /Backup host on standby/);
+  beats[0]!.send(false);
+  await Promise.resolve();
+  f.advance(10_000);
+  runner.update(state);
+  await until(() => beats.length === 2);
+  beats[1]!.send(true);
+  await until(() => f.spawned.length === 2);
+  const firstHost = f.spawned[1]!;
+  assert.equal(leaseArgument(firstHost), beats[1]!.id);
+
+  f.advance(10_000);
+  runner.update(state);
+  await until(() => beats.length === 3);
+  assert.equal(beats[2]!.id, beats[1]!.id);
+  // A suspended chat may wake after its lease expired even with an old heartbeat still in flight.
+  f.advance(36_000);
+  runner.update(state);
+  assert.equal(firstHost.child.killed, true);
+  assert.equal(f.spawned[0]!.child.killed, false);
+  assert.equal(beats.length, 3);
+  beats[2]!.send(true);
+  await until(() => beats.length === 4);
+  assert.deepEqual(released, [beats[1]!.id]);
+  assert.notEqual(beats[3]!.id, beats[1]!.id);
+  assert.equal(f.spawned.length, 2);
+
+  beats[3]!.send(true);
+  await until(() => f.spawned.length === 3);
+  assert.equal(leaseArgument(f.spawned[2]!), beats[3]!.id);
+  f.spawned[0]!.child.finish(0);
+  await until(() => transitions.includes('complete'));
+  assert.deepEqual(transitions, ['claim', 'complete']);
+  await runner.stop();
+  assert.equal(f.spawned[2]!.child.killed, true);
+  assert.deepEqual(released, [beats[1]!.id, beats[3]!.id]);
+});
+
+test('a nominated member only hosts with explicit opt-in and an enabled runtime', async (t) => {
+  const f = await fixture(t);
+  const workerId = randomUUID();
+  await saveAgentProfile({ agentId: workerId, clanId, server, token: token('w'), runtime: 'claude' });
+  const api = {
+    whoami: async () => ({ id: userId, email: 'backup@example.com' }),
+    listAgents: async () => ({ agents: [agent(workerId, 'worker')] }),
+    registerAgent: async () => assert.fail('no new registration expected'),
+    revokeAgent: async () => undefined,
+  } as unknown as ClqnClient;
+  const workerApi = {
+    transitionTask: async () => undefined,
+    task: async () => ({ description: 'Work on the project' }),
+  } as unknown as ClqnClient;
+  const connect = (backupHost: boolean) =>
+    startAgentRunner({
+      api,
+      server,
+      clanId,
+      project: f.directory,
+      backupHost,
+      spawn: f.spawn,
+      runtimes: async () => ['claude'],
+      workspace: async () => f.directory,
+      now: f.now,
+      agentClient: () => workerApi,
+    });
+  const state = chatState({
+    queued: 1,
+    orchestration: { backupUserId: userId, eligible: true, activeHost: null },
+    runs: [
+      {
+        messageId: randomUUID(),
+        title: 'Worker task',
+        worker: 'Claude Code',
+        taskId: randomUUID(),
+        workerId,
+        estimatedTokens: 100,
+        status: 'queued',
+        tokens: null,
+      },
+    ],
+  });
+  const member = connect(false);
+  t.after(() => member.stop());
+  member.update(state);
+  await until(() => f.spawned.length === 1);
+  await until(() => f.spawned[0]!.child.input.includes('Work on the project'));
+  await member.stop();
+
+  const disabled = connect(true);
+  t.after(() => disabled.stop());
+  await disabled.choose(['claude']);
+  disabled.update(state);
+  await until(() => disabled.status() === 'Enable an agent for backup hosting');
+  assert.equal(f.spawned.length, 1);
+});
+
 test('a Codex orchestrator resumes one session, a run per message, and starts fresh after a failure', async (t) => {
   const f = await fixture(t);
   const api = {

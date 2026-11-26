@@ -56,6 +56,10 @@ async function fixture(t: TestContext) {
       response.end(JSON.stringify({ agent: registered, token: agentToken }));
     } else if (request.url === `/v1/clans/${clanId}/agents`) {
       response.end(JSON.stringify({ agents: registered ? [registered] : [] }));
+    } else if (request.url === `/v1/clans/${clanId}/members`) {
+      response.end(JSON.stringify({ members: [{ userId, email: user.email, role: 'member', createdAt }] }));
+    } else if (request.url === `/v1/clans/${clanId}/chat/host/backup` && request.method === 'POST') {
+      response.end(JSON.stringify({ backupUserId: body.userId }));
     } else {
       response.writeHead(404);
       response.end(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Unknown route' } }));
@@ -208,4 +212,17 @@ test('main help hides mcp while explicit mcp help remains available', async (t) 
   assert.match((await f.call(['mcp', '--help'])).stdout, /Start the local stdio MCP server/);
   assert.doesNotMatch((await f.call(['agent', '--help'])).stdout, /^\s+(status|connect|run)(?:\s|$)/m);
   assert.equal(f.requests.length, 0);
+});
+
+test('host resolves a backup member and can clear the nomination', async (t) => {
+  const f = await fixture(t);
+  const nominated = await f.call(['host', f.user.email, '--json']);
+  assert.deepEqual(JSON.parse(nominated.stdout), { backupUserId: userId });
+  const cleared = await f.call(['host', 'off', '--json']);
+  assert.deepEqual(JSON.parse(cleared.stdout), { backupUserId: null });
+  const path = `/v1/clans/${clanId}/chat/host/backup`;
+  assert.deepEqual(
+    f.requests.filter((entry) => entry.path === path).map((entry) => entry.body),
+    [{ userId }, { userId: null }],
+  );
 });
