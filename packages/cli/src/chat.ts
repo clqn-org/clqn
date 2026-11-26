@@ -549,18 +549,22 @@ export async function runChat(
       return;
     }
     if (mouse !== undefined) {
-      if (text !== 'M' && text !== 'm') {
-        if (mouse.length < 32) mouse += text ?? '';
+      if (text && /^[0-9;]$/.test(text) && mouse.length < 32) {
+        mouse += text;
         return;
       }
-      // Wheel up is button 64 and down is 65; other mouse events are ignored.
-      const button = Number(mouse.split(';')[0]);
+      const report = mouse;
       mouse = undefined;
-      if ((button === 64 || button === 65) && state && !setup && !metrics && !reviews) {
-        scrollBy(button === 64 ? 3 : -3);
-        draw();
+      // Anything but a report's end, such as Ctrl+C after a cut-off report, is handled as a normal key.
+      if (text === 'M' || text === 'm') {
+        // Wheel up is button 64 and down is 65; other mouse events are ignored.
+        const button = Number(report.split(';')[0]);
+        if ((button === 64 || button === 65) && state && !setup && !metrics && !reviews) {
+          scrollBy(button === 64 ? 3 : -3);
+          draw();
+        }
+        return;
       }
-      return;
     }
     if (key.name === 'paste-start') {
       paste = '';
