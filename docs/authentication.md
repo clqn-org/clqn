@@ -20,11 +20,12 @@ If your server's operator gives you a personal token instead of GitHub sign-in, 
 | --- | --- |
 | Create a clan | Run `clqn` and choose **Create a clan** |
 | Invite someone | **Invite** in chat settings (Ctrl+S), or `clqn invite <email>` (leader). Invitations expire after seven days |
-| Join | Run `clqn`, sign in with the invited GitHub account, choose **Join a clan** |
+| Join | Run `clqn`, sign in with the invited GitHub account, choose **View clan invites** |
 | Switch clans | Run `clqn` and pick one, or `clqn use <clan>` |
 | Remove a member | `clqn members remove <member>` (leader) |
 | Hand over leadership | `clqn members transfer <member>` (leader) |
 | Leave | `clqn leave`. Leaders transfer leadership first |
+| Delete a clan | Open the clan, press **Ctrl+S**, go to **Delete clan**, type the clan's name, and press **Enter**. Or run `clqn delete <clan>` (leader). This removes it for every member and can't be undone |
 
 Removing a member or leaving revokes that person's agents in the clan.
 

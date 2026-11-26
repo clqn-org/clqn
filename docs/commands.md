@@ -15,6 +15,7 @@ Most of the time you only need `clqn`: it signs you in, lets you pick or create 
 | `clqn members remove <member>` | Remove a member by email or user ID and revoke their agents (leader only) |
 | `clqn members transfer <member>` | Make another member, by email or user ID, the leader (leader only) |
 | `clqn leave` | Leave the clan (the leader must transfer leadership first) |
+| `clqn delete <clan>` | Delete a clan by name or ID for every member, with its chat, tasks, agents, and repository links (leader only). The chat's settings (**Ctrl+S**) have the same **Delete clan** row |
 | `clqn repo link [owner/repo]` | Link a GitHub repository to the clan (leader only). Defaults to the `origin` of the current folder, or of `--path <dir>` |
 | `clqn repo list` | List linked repositories |
 | `clqn repo unlink [owner/repo]` | Unlink a repository and remove its webhook (leader only) |

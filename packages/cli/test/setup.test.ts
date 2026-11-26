@@ -9,7 +9,7 @@ import { basename, delimiter, join } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { ClqnClient, defaultChatSettings } from '@clqn/shared';
 import { readConfig, readServer, writeConfig } from '../src/config.js';
-import { chooseClan, savedClan, setupChatRepository, signIn, signOut } from '../src/setup.js';
+import { chooseClan, GoBack, savedClan, setupChatRepository, signIn, signOut } from '../src/setup.js';
 
 type Handler = (request: IncomingMessage, body: unknown, response: ServerResponse) => void;
 
@@ -50,17 +50,33 @@ const deviceStart = {
 };
 
 // Answer prompts in order and record what was printed.
+// Typed answers go to ask. Menus take a choice's label, '' for the preselected choice, or 'Esc'.
 function scripted(answers: string[]) {
   const questions: string[] = [];
   const printed: string[] = [];
+  const menus: { question: string; choices: string[]; selected: number }[] = [];
+  const next = (question: string) => {
+    const answer = answers.shift();
+    if (answer === undefined) throw new Error(`Unexpected prompt: ${question}`);
+    return answer;
+  };
   return {
     questions,
     printed,
+    menus,
     ask: async (question: string) => {
       questions.push(question);
-      const answer = answers.shift();
-      if (answer === undefined) throw new Error(`Unexpected prompt: ${question}`);
-      return answer;
+      return next(question);
+    },
+    choose: async (question: string, choices: string[], options?: { selected?: number }) => {
+      const selected = options?.selected ?? 0;
+      menus.push({ question, choices, selected });
+      const answer = next(question);
+      if (answer === 'Esc') throw new GoBack();
+      if (answer === '') return selected;
+      const index = choices.indexOf(answer);
+      if (index < 0) throw new Error(`No choice ${answer} in ${choices.join(', ')}`);
+      return index;
     },
     print: (text: string) => printed.push(text),
   };
@@ -119,26 +135,32 @@ test('choosing a clan opens an existing one, creates one, or reports no invitati
   });
   const connect = async () => new ClqnClient(f.url, token);
 
-  const pickExisting = scripted(['9', '1']);
+  const pickExisting = scripted(['Existing']);
   assert.deepEqual(await chooseClan({ connect, ...pickExisting }), existing);
-  assert.match(pickExisting.printed[0]!, /1\. Existing\n {2}2\. Create a clan\n {2}3\. Join a clan/);
-  assert.equal(pickExisting.questions.length, 2);
+  assert.deepEqual(pickExisting.menus, [
+    { question: 'Choose a clan', choices: ['Existing', 'Create a clan', 'View clan invites'], selected: 0 },
+  ]);
 
-  // Returning users get the same choices, and Enter reopens their last clan.
+  // Returning users get the same choices with their last clan selected, so Enter reopens it.
+  clans = [{ ...existing, id: randomUUID(), name: 'Other' }, existing];
   const returning = scripted(['']);
   assert.deepEqual(await chooseClan({ connect, current: existing.id, ...returning }), existing);
-  assert.match(returning.printed[0]!, /1\. Existing \(last used\)\n {2}2\. Create a clan\n {2}3\. Join a clan/);
-  assert.deepEqual(returning.questions, ['Enter a number: ']);
+  assert.deepEqual(returning.menus[0]!.choices.slice(0, 2), ['Other', 'Existing (last used)']);
+  assert.equal(returning.menus[0]!.selected, 1);
 
   assert.deepEqual(saved, []);
 
   // The leader of a new clan is a member too, and Enter picks full access.
   clans = [];
-  const create = scripted(['2', '1', '', '']);
+  const create = scripted(['View clan invites', 'Create a clan', '', '']);
   assert.deepEqual(await chooseClan({ connect, ...create }), created);
   assert.match(create.printed.join('\n'), /No pending invitations\. Ask a clan leader to invite me@example\.com\./);
-  assert.match(create.questions.at(-2)!, /^Clan name: $/);
-  assert.match(create.printed.join('\n'), /1\. Full access \(no limits\)\n {2}2\. Custom/);
+  assert.deepEqual(create.questions, ['Clan name: ']);
+  assert.deepEqual(create.menus.at(-1), {
+    question: 'Limits for agents on your machine',
+    choices: ['Full access (no limits)', 'Custom'],
+    selected: 0,
+  });
   assert.deepEqual(saved, [
     { approval: 'manual', tokenLimit: null, agentLimit: null, allowedModels: null, commands: 'sandboxed' },
   ]);
@@ -218,13 +240,16 @@ if (process.argv.includes('POST')) {
   });
   process.env.PATH = [bin, previousPath].filter(Boolean).join(delimiter);
   canStart = true;
-  const prompts = scripted(['y']);
+  const prompts = scripted(['Yes']);
   const linked = await setupChatRepository({ ...options, ...prompts });
   assert.deepEqual(linked, {
     sync: { repoPath: await realpath(project), repository: repository.slug, initialCursor: 17 },
   });
   assert.equal(linkRequests, 1);
-  assert.match(prompts.questions[0]!, /Link owner\/project/);
+  assert.match(prompts.menus[0]!.question, /Link owner\/project/);
+  // No is preselected, so Enter alone skips linking.
+  assert.deepEqual(prompts.menus[0]!.choices, ['Yes', 'No']);
+  assert.equal(prompts.menus[0]!.selected, 1);
   assert.ok(!JSON.stringify([linked, prompts.printed]).includes(secret));
   const webhook = JSON.parse(await readFile(installLog, 'utf8'));
   assert.deepEqual(webhook.events, ['push', 'pull_request']);
@@ -258,7 +283,7 @@ test('a skipped repository prompt stays skipped unless the clone gets linked', a
   });
   const project = gitClone(f.directory);
   const options = { api: new ClqnClient(f.url), clanId, project, server: f.url };
-  const skipped = await setupChatRepository({ ...options, ...scripted(['n']) });
+  const skipped = await setupChatRepository({ ...options, ...scripted(['']) });
   assert.match(skipped.notice!, /run clqn repo link/);
   assert.equal(skipped.sync, undefined);
   assert.deepEqual(await setupChatRepository({ ...options, ...scripted([]) }), skipped);
@@ -308,9 +333,9 @@ async function joinWithStaleSignIn(t: TestContext, refuseListing: boolean) {
   await writeConfig(f.url, { token: stale });
   const connect = async () => new ClqnClient(f.url, (await readConfig(f.url)).token);
   // Custom limits: invalid answers are asked again; blank models allow any.
-  const custom = ['2', '1.5', '5000', '', ' a, b ,c '];
+  const custom = ['Custom', '1.5', '5000', '', ' a, b ,c '];
   // After the fresh sign-in, the chosen invitation is accepted without picking it again.
-  const prompts = scripted(['2', '2', ...custom]);
+  const prompts = scripted(['View clan invites', 'Second', ...custom]);
   const reauthenticate = async (id: string) => {
     await signIn(f.url, id);
   };
@@ -318,8 +343,7 @@ async function joinWithStaleSignIn(t: TestContext, refuseListing: boolean) {
   assert.deepEqual(saved, [
     { approval: 'manual', tokenLimit: 5000, agentLimit: null, allowedModels: ['a', 'b', 'c'], commands: 'sandboxed' },
   ]);
-  assert.deepEqual(prompts.questions.slice(-5), [
-    'Enter a number (1): ',
+  assert.deepEqual(prompts.questions, [
     'Token limit (blank for none): ',
     'Token limit (blank for none): ',
     'Agent count (blank for none): ',
@@ -332,7 +356,7 @@ async function joinWithStaleSignIn(t: TestContext, refuseListing: boolean) {
     assert.deepEqual(lists, [`Bearer ${stale}`]);
     assert.deepEqual(accepts, [`Bearer ${stale}`, `Bearer ${token}`]);
   }
-  assert.match(prompts.printed.join('\n'), /1\. First\n {2}2\. Second/);
+  assert.deepEqual(prompts.menus[1], { question: 'Pending invitations', choices: ['First', 'Second'], selected: 0 });
   assert.equal((await readConfig(f.url)).token, token);
 }
 

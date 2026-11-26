@@ -88,6 +88,8 @@ interface SettingsView {
   agents?: { installed: Runtime[]; off: Runtime[] } | undefined;
   // The email being typed in the leader-only Invite row; undefined hides the row.
   inviteText?: string | undefined;
+  // The clan name being typed in the leader-only Delete clan row; undefined hides the row.
+  deleteText?: string | undefined;
   backupHosting?: boolean | undefined;
   field: number;
   action: string;
@@ -210,7 +212,8 @@ function agentsText(agents: SettingsView['agents']) {
 
 // The backup row can appear while settings are open. Give it a stable ID outside the other rows.
 export const backupHostingField = 9;
-export const settingsFields = (hasInvite: boolean, hasBackup: boolean) => [
+export const deleteClanField = 10;
+export const settingsFields = (hasInvite: boolean, hasBackup: boolean, hasDelete = false) => [
   0,
   1,
   2,
@@ -220,13 +223,14 @@ export const settingsFields = (hasInvite: boolean, hasBackup: boolean) => [
   ...(hasInvite ? [6] : []),
   ...(hasBackup ? [backupHostingField] : []),
   hasInvite ? 7 : 6,
+  ...(hasDelete ? [deleteClanField] : []),
   hasInvite ? 8 : 7,
 ];
 
-// Every setting row and the notice always fit; the hint, title, key help, and blank lines fill what room is left.
+// The selected setting row and the notice always fit; the hint, title, key help, and blank lines fill what room is left.
 export function settingsLines(settings: SettingsView, columns: number, paint: Paint, room: number, notice: string) {
   const hasInvite = settings.inviteText !== undefined;
-  const fields = settingsFields(hasInvite, settings.backupHosting !== undefined);
+  const fields = settingsFields(hasInvite, settings.backupHosting !== undefined, settings.deleteText !== undefined);
   const labels = [
     `Spawn approval   ${settings.value.approval === 'manual' ? 'Manual' : 'Automatic'}`,
     `Token limit      ${settings.tokenText || '∞'}`,
@@ -241,11 +245,18 @@ export function settingsLines(settings: SettingsView, columns: number, paint: Pa
   const hint =
     hasInvite && settings.field === 6
       ? 'Type a teammate’s email and press Enter to invite them to this clan.'
-      : settings.field === backupHostingField
-        ? 'Press Enter to allow or stop backup hosting on this device.'
-        : 'Enter a whole number or none for unlimited; models comma-separated, blank for any.';
+      : settings.field === deleteClanField
+        ? 'Type this clan’s name and press Enter to delete it for every member. This cannot be undone.'
+        : settings.field === backupHostingField
+          ? 'Press Enter to allow or stop backup hosting on this device.'
+          : 'Enter a whole number or none for unlimited; models comma-separated, blank for any.';
   const hintLines = wrap(hint, columns).map((line) => paint(line, 'muted'));
-  let spare = room - fields.length - (notice ? 1 : 0);
+  // In the smallest terminals, show the rows around the selected one when they do not all fit.
+  const shownRows = Math.max(1, Math.min(fields.length, room - (notice ? 1 : 0)));
+  const selected = Math.max(0, fields.indexOf(settings.field));
+  const first = Math.max(0, Math.min(selected - Math.floor(shownRows / 2), fields.length - shownRows));
+  const visible = fields.slice(first, first + shownRows);
+  let spare = room - visible.length - (notice ? 1 : 0);
   const fits = (lines: number) => {
     if (spare < lines) return false;
     spare -= lines;
@@ -262,9 +273,13 @@ export function settingsLines(settings: SettingsView, columns: number, paint: Pa
     ...(showTop ? [''] : []),
     ...(showTitle ? [paint('Session settings', 'bold')] : []),
     ...(showGap ? [''] : []),
-    ...fields.map((field) => {
+    ...visible.map((field) => {
       const label =
-        field === backupHostingField ? `Backup hosting   ${settings.backupHosting ? 'On' : 'Off'}` : labels[field]!;
+        field === backupHostingField
+          ? `Backup hosting   ${settings.backupHosting ? 'On' : 'Off'}`
+          : field === deleteClanField
+            ? `Delete clan      ${plain(settings.deleteText ?? '') || 'Type the clan name'}`
+            : labels[field]!;
       const line = clip(`${field === settings.field ? '›' : ' '} ${label}`, columns);
       return field === settings.field ? paint(line, 'accent') : line;
     }),

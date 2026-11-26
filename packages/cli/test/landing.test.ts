@@ -13,7 +13,7 @@ const view = (changes: Partial<LandingView> = {}): LandingView => ({
   user: 'ana@example.com',
   directory: '~/work/app',
   repository: 'acme/app',
-  log: ['', 'Choose a clan', '  1. Create a clan', '  2. Join a clan'],
+  log: ['', 'Choose a clan', '  1. Create a clan', '  2. View clan invites'],
   prompt: { question: 'Enter a number: ', answer: '1' },
   ...changes,
 });
@@ -136,4 +136,23 @@ test('the wordmark uses full blocks only, with its shadow only in color', () => 
   assert.ok(plain.every((line) => /^[█ ]*$/.test(line)));
   assert.ok(wordmarkLines(true).some((line) => line.includes('38;5;95m')));
   assert.ok(wordmarkLines(true).every((line) => !line.includes('48;5;')));
+});
+
+test('menus mark the selection, hide the cursor, and keep the selection in view', () => {
+  const menu = (choices: string[], selected: number, rows = 34) =>
+    landingFrame(
+      view({ rows, log: [], prompt: { question: 'Choose a clan', answer: '', back: false, choices, selected } }),
+    );
+  const frame = menu(['Team', 'Create a clan', 'View clan invites'], 1);
+  const lines = frame.lines.map(strip);
+  assert.ok(lines.some((line) => line.includes('  Team ')));
+  assert.ok(lines.some((line) => line.includes('› Create a clan')));
+  assert.ok(lines.some((line) => line.includes('↑↓ Move  ·  Enter Select  ·  Ctrl+C Quit')));
+  assert.equal(frame.cursor, undefined);
+  // A list taller than the screen scrolls to keep the selected clan visible.
+  const many = Array.from({ length: 40 }, (_, index) => `Clan ${index + 1}`);
+  const tall = menu(many, 37, 16).lines.map(strip);
+  assert.ok(tall.some((line) => line.includes('› Clan 38')));
+  assert.ok(!tall.some((line) => line.includes(' Clan 1 ')));
+  assert.ok(tall.length <= 16);
 });

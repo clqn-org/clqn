@@ -101,7 +101,16 @@ export interface LandingView {
   repository?: string | undefined;
   // What setup has printed so far, oldest first, and the question waiting for an answer.
   log: string[];
-  prompt?: { question: string; answer: string; back?: boolean | undefined } | undefined;
+  // With choices, the prompt is a menu: ↑↓ move the selection and Enter picks it.
+  prompt?:
+    | {
+        question: string;
+        answer: string;
+        back?: boolean | undefined;
+        choices?: string[] | undefined;
+        selected?: number | undefined;
+      }
+    | undefined;
   // The number of lines back from the latest output.
   scroll?: number;
   // Replaces the log and prompt, e.g. the session settings form, sized to the flow's columns and rows.
@@ -187,21 +196,39 @@ export function landingFrame(view: LandingView): LandingFrame {
   else flow.push(...view.log.flatMap((line) => wrap(line, pane)));
   const input: string[] = [];
   let promptRow = -1;
+  let hintRow = -1;
   if (view.prompt) {
     const question = plain(view.prompt.question);
     // A blank line separates the prompt from the text above it.
     if (view.log.some((line) => line.trim())) input.push('');
-    const answer = plain(view.prompt.answer);
-    if (width(question) + width(answer) < pane) input.push(tone(question, peach) + answer);
-    else {
-      const asked = wrap(question.trimEnd(), pane);
-      input.push(...asked.map((line) => tone(line, peach)), tail(answer, pane - 1));
+    const choices = view.prompt.choices;
+    const back = view.prompt.back === false ? '' : 'Esc Back  ·  ';
+    let keys = `${back}Ctrl+C Quit`;
+    if (choices) {
+      input.push(...wrap(question.trimEnd(), pane).map((line) => tone(line, peach)));
+      // Long menus show a window that keeps the selection in view.
+      const selected = Math.max(0, Math.min(choices.length - 1, view.prompt.selected ?? 0));
+      const room = Math.max(1, height - input.length - 3);
+      const start = Math.max(0, Math.min(selected - Math.floor(room / 2), choices.length - room));
+      choices.slice(start, start + room).forEach((choice, index) => {
+        const chosen = start + index === selected;
+        const line = clip(`${chosen ? '›' : ' '} ${plain(choice)}`, pane);
+        input.push(chosen ? tone(line, peach) : line);
+      });
+      keys = `↑↓ Move  ·  Enter Select  ·  ${keys}`;
+    } else {
+      const answer = plain(view.prompt.answer);
+      if (width(question) + width(answer) < pane) input.push(tone(question, peach) + answer);
+      else {
+        const asked = wrap(question.trimEnd(), pane);
+        input.push(...asked.map((line) => tone(line, peach)), tail(answer, pane - 1));
+      }
+      promptRow = input.length - 1;
     }
-    promptRow = input.length - 1;
-    const keys = view.prompt.back === false ? 'Ctrl+C Quit' : 'Esc Back  ·  Ctrl+C Quit';
+    hintRow = input.length;
     input.push('', ...wrap(keys, pane).map((line) => paint(line, 'muted')));
     if (flow.length + input.length > height && input.length < height) {
-      input[promptRow + 1] = paint('↑↓ PgUp PgDn Scroll', 'muted');
+      input[hintRow] = paint(choices ? 'PgUp PgDn Scroll' : '↑↓ PgUp PgDn Scroll', 'muted');
     }
   }
   const pageSize = Math.max(0, height - input.length);
@@ -219,7 +246,7 @@ export function landingFrame(view: LandingView): LandingFrame {
   lines.push(indent + tone(`└${'─'.repeat(inner - 2)}┘`, dim));
   const row = shown.length - input.length + promptRow;
   const cursor: Frame['cursor'] =
-    view.prompt && row >= 0
+    view.prompt && promptRow >= 0 && row >= 0
       ? {
           row: top + row,
           column: margin + 2 + (sidebar ? sidebar + gap : 0) + Math.min(width(stripped(input[promptRow]!)), pane - 1),
@@ -270,6 +297,8 @@ function center(line: string, size: number) {
 
 export interface Landing {
   ask(question: string, options?: { back?: boolean }): Promise<string>;
+  // A menu picked with ↑↓ and Enter; resolves with the chosen index.
+  choose(question: string, choices: string[], options?: { back?: boolean; selected?: number }): Promise<number>;
   print(text: string): void;
   update(details: { user?: string; repository?: string }): void;
   // Shows the GitHub device code in the flow until the returned function is called.
@@ -287,6 +316,8 @@ export function openLanding(details: { user?: string; directory: string; reposit
         question: string;
         answer: string;
         back?: boolean | undefined;
+        choices?: string[] | undefined;
+        selected?: number | undefined;
         resolve: (answer: string) => void;
         reject: (error: Error) => void;
       }
@@ -364,20 +395,27 @@ export function openLanding(details: { user?: string; directory: string; reposit
     if (readMouse(text, key.sequence)) return;
     if (key.ctrl && (key.name === 'c' || key.name === 'd')) return quit();
     if (terminalSizeNotice(stdout.columns || 80, stdout.rows || 24)) return;
+    if ((key.name === 'up' || key.name === 'down') && prompt?.choices) {
+      const count = prompt.choices.length;
+      prompt.selected = ((prompt.selected ?? 0) + (key.name === 'up' ? count - 1 : 1)) % count;
+      return draw();
+    }
     if (key.name === 'up' || key.name === 'down') return scrollBy(key.name === 'up' ? 1 : -1);
     if (key.name === 'pageup' || key.name === 'pagedown') return scrollBy(key.name === 'pageup' ? pageSize : -pageSize);
     if (key.name === 'end') return scrollBy(-scroll);
     if (prompt) {
       if (key.name === 'return' || key.name === 'enter') {
-        const { answer, resolve } = prompt;
+        const { answer, resolve, choices, selected } = prompt;
         prompt = undefined;
         answered = true;
-        resolve(answer);
+        resolve(choices ? String(selected ?? 0) : answer);
       } else if (key.name === 'escape' && prompt.back !== false) {
         const { reject } = prompt;
         prompt = undefined;
         answered = true;
         reject(new GoBack());
+      } else if (prompt.choices) {
+        // Menus take no typed text.
       } else if (key.name === 'backspace') prompt.answer = prompt.answer.slice(0, -1);
       else if (key.ctrl && key.name === 'u') prompt.answer = '';
       else if (text && !key.ctrl && !key.meta && !/[\x00-\x1f\x7f]/.test(text)) prompt.answer += text;
@@ -413,6 +451,20 @@ export function openLanding(details: { user?: string; directory: string; reposit
       new Promise((resolve, reject) => {
         scroll = 0;
         prompt = { question, answer: '', back: options?.back, resolve, reject };
+        draw();
+      }),
+    choose: (question, choices, options) =>
+      new Promise((resolve, reject) => {
+        scroll = 0;
+        prompt = {
+          question,
+          answer: '',
+          back: options?.back,
+          choices,
+          selected: options?.selected ?? 0,
+          resolve: (answer) => resolve(Number(answer)),
+          reject,
+        };
         draw();
       }),
     print(text) {
