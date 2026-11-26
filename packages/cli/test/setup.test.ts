@@ -120,7 +120,7 @@ test('choosing a clan opens an existing one, creates one, or reports no invitati
   const connect = async () => new ClqnClient(f.url, token);
 
   const pickExisting = scripted(['9', '1']);
-  assert.deepEqual(await chooseClan({ server: f.url, connect, canSignIn: true, ...pickExisting }), existing);
+  assert.deepEqual(await chooseClan({ connect, ...pickExisting }), existing);
   assert.match(pickExisting.printed[0]!, /1\. Existing\n {2}2\. Create a clan\n {2}3\. Join a clan/);
   assert.equal(pickExisting.questions.length, 2);
 
@@ -129,7 +129,7 @@ test('choosing a clan opens an existing one, creates one, or reports no invitati
   // The leader of a new clan is a member too, and Enter picks full access.
   clans = [];
   const create = scripted(['2', '1', '', '']);
-  assert.deepEqual(await chooseClan({ server: f.url, connect, canSignIn: true, ...create }), created);
+  assert.deepEqual(await chooseClan({ connect, ...create }), created);
   assert.match(create.printed.join('\n'), /No pending invitations\. Ask a clan leader to invite me@example\.com\./);
   assert.match(create.questions.at(-2)!, /^Clan name \(/);
   assert.match(create.printed.join('\n'), /1\. Full access \(no limits\)\n {2}2\. Custom/);
@@ -297,7 +297,7 @@ test('joining a clan accepts the chosen invitation and refreshes a stale GitHub 
   // Custom limits: invalid answers are asked again; blank models allow any.
   const custom = ['2', '1.5', '5000', '', ' a, b ,c '];
   const prompts = scripted(['2', '2', '2', '2', ...custom]);
-  assert.deepEqual(await chooseClan({ server: f.url, connect, canSignIn: true, ...prompts }), clan);
+  assert.deepEqual(await chooseClan({ connect, reauthenticate: (id) => signIn(f.url, id), ...prompts }), clan);
   assert.deepEqual(saved, [
     { approval: 'manual', tokenLimit: 5000, agentLimit: null, allowedModels: ['a', 'b', 'c'], commands: 'sandboxed' },
   ]);

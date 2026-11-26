@@ -431,11 +431,18 @@ async function openChat() {
   try {
     if (!clanId) {
       const clan = await chooseClan({
-        server: apiUrl(),
         connect: client,
         ask,
         print,
-        canSignIn: !environmentToken,
+        ...(environmentToken
+          ? {}
+          : {
+              reauthenticate: (userId: string) => {
+                prompt?.close();
+                prompt = undefined;
+                return signIn(apiUrl(), userId);
+              },
+            }),
       });
       clanId = clan.id;
       await selectClan(apiUrl(), clanId);

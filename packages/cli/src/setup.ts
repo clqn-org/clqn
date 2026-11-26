@@ -178,16 +178,14 @@ export async function chooseLimits(api: ClqnClient, clanId: string, ask: Ask, pr
 }
 
 interface ChooseClan {
-  server: string;
   connect: () => Promise<ClqnClient>;
   ask: Ask;
   print: Print;
-  // False when an environment token is in use, which a new GitHub sign-in would not replace.
-  canSignIn: boolean;
+  reauthenticate?: (userId: string) => Promise<unknown>;
 }
 
 // Offer the user's clans, creating a clan, or accepting a pending invitation.
-export async function chooseClan({ server, connect, ask, print, canSignIn }: ChooseClan): Promise<Clan> {
+export async function chooseClan({ connect, ask, print, reauthenticate }: ChooseClan): Promise<Clan> {
   const text = (value: string) => terminalText(value, false);
   for (;;) {
     const api = await connect();
@@ -225,10 +223,10 @@ export async function chooseClan({ server, connect, ask, print, canSignIn }: Cho
       await chooseLimits(api, clan.id, ask, print);
       return clan;
     } catch (error) {
-      if (!(error instanceof ApiError) || error.code !== 'INVITATION_LOGIN_REQUIRED' || !canSignIn) throw error;
+      if (!(error instanceof ApiError) || error.code !== 'INVITATION_LOGIN_REQUIRED' || !reauthenticate) throw error;
       const user = await api.whoami();
       print('Verify your GitHub email to see your invitations.');
-      await signIn(server, user.id);
+      await reauthenticate(user.id);
     }
   }
 }

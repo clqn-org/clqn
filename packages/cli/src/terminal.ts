@@ -6,6 +6,6 @@ export function terminalText(text: string, tty: boolean): string {
   return clean.replace(/https?:\/\/\S+/g, (url) => {
     const target = URL.parse(url);
     if (!target || target.username || target.password) return url;
-    return `\x1b]8;;${target.href}\x1b\\${url}\x1b]8;;\x1b\\`;
+    return `\x1b]8;;${target.href}\x1b\\\x1b[4m${url}\x1b[24m\x1b]8;;\x1b\\`;
   });
 }
