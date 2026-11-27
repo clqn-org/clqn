@@ -45,7 +45,7 @@ import {
   taskWorktreeLocation,
 } from './git.js';
 import { createOrchestration } from './orchestration.js';
-import { runWorkerSession } from './worker-session.js';
+import { runWorkerSession, type WorkerUpdates } from './worker-session.js';
 
 type Listed = Agent & { active?: boolean | undefined };
 // A running Claude Code orchestrator that takes one turn per queued message.
@@ -408,7 +408,7 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
       model?: string | null | undefined;
       commands?: WorkerCommands | undefined;
       orchestrator?: { instructions: string; resume?: string | undefined; turn: ActiveTurn; isolated?: boolean };
-      updates?: Parameters<typeof runWorkerSession>[0]['updates'] | undefined;
+      updates?: WorkerUpdates | undefined;
       // A worker's job can be stopped while the log opens.
       job?: { stopped: boolean; child?: ChildProcess };
     } = {},

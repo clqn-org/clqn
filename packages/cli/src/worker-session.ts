@@ -3,12 +3,13 @@ import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import type { Writable } from 'node:stream';
 import { ApiError, type WorkerCommands } from '@clqn/shared';
-import { agentOutput, type Runtime } from './agent-session.js';
+import { agentOutput, codexSandbox, type Runtime } from './agent-session.js';
 
 type Json = Record<string, unknown>;
 type Output = ReturnType<typeof agentOutput>;
 type Followup = { sequence: number; id: string; text: string };
 type Updates = { messages: Followup[]; next: number };
+export type WorkerUpdates = (after: number, signal: AbortSignal) => Promise<Updates>;
 type Write = (value: object) => void;
 type Failure = (message: string) => void;
 
@@ -16,7 +17,7 @@ interface WorkerSessionOptions {
   child: ChildProcess;
   runtime: Runtime;
   prompt: string;
-  updates: (after: number, signal: AbortSignal) => Promise<Updates>;
+  updates: WorkerUpdates;
   log: Writable;
   cwd?: string | undefined;
   commands?: WorkerCommands | undefined;
@@ -117,8 +118,7 @@ function codexSession(options: WorkerSessionOptions, write: Write, idle: () => v
   const { cwd, model, commands = 'sandboxed' } = options;
   const output: Output = { tokens: 0 };
   const requests = new Map<number, Rpc>();
-  const sandbox = { off: 'read-only', sandboxed: 'workspace-write', unrestricted: 'danger-full-access' }[commands];
-  const policy = { off: 'readOnly', sandboxed: 'workspaceWrite', unrestricted: 'dangerFullAccess' }[commands];
+  const { mode: sandbox, policy } = codexSandbox[commands];
   let requestId = 0;
   let privateRequestId: number | undefined;
   let threadId: string | undefined;
