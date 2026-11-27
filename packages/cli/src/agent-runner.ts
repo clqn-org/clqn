@@ -635,6 +635,7 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
         {
           api: grant.api,
           leaseId: grant.id,
+          plannerLimit: state.orchestration?.plannerLimit,
           active: stillHosting,
           generate: (name, instructions, prompt, signal) => generate(connection, name, instructions, prompt, signal),
         },

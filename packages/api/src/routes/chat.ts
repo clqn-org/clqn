@@ -1,9 +1,11 @@
 import {
   type Actor,
   ApiError,
+  type ChatSettings,
   chatApprovalSchema,
   chatBackupsInputSchema,
   chatDecisionRequestSchema,
+  chatJoinSettingsSchema,
   chatLeaseHeartbeatSchema,
   chatMetricsWindowSchema,
   chatRouteRequestSchema,
@@ -11,7 +13,7 @@ import {
   chatUsageSchema,
   sendChatSchema,
 } from '@clqn/shared';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { type Context, Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
@@ -50,9 +52,9 @@ function leaseQuery(c: Context) {
 }
 
 // Older clients omit allowedModels; keep the saved models instead of removing them.
-async function parseSettings(c: Context) {
+async function parseSettings<T extends ChatSettings>(c: Context, schema: z.ZodType<T>) {
   const body = await c.req.json().catch(() => null);
-  const parsed = chatSettingsSchema.safeParse(body);
+  const parsed = schema.safeParse(body);
   if (!parsed.success) throw new ApiError(400, 'INVALID_REQUEST', 'Invalid chat request');
   return { settings: parsed.data, keepModels: !(body && typeof body === 'object' && 'allowedModels' in body) };
 }
@@ -62,7 +64,7 @@ async function saveSettings(
   db: WorkspaceDb,
   clanId: string,
   userId: string,
-  { settings, keepModels }: Awaited<ReturnType<typeof parseSettings>>,
+  { settings, keepModels }: { settings: ChatSettings; keepModels: boolean },
 ) {
   const [saved] = await db
     .insert(chatMembers)
@@ -102,7 +104,7 @@ export function createChatRoutes(db: WorkspaceDb) {
     const actor = c.get('user');
     const clanId = c.req.param('clanId')!;
     requirePersonal(actor);
-    const settings = await parseSettings(c);
+    const settings = await parseSettings(c, chatSettingsSchema);
     return c.json(
       await db.transaction(async (tx) => {
         await requireClan(tx, actor, clanId, 'share');
@@ -114,14 +116,20 @@ export function createChatRoutes(db: WorkspaceDb) {
     const actor = c.get('user');
     const clanId = c.req.param('clanId')!;
     requirePersonal(actor);
-    const settings = await parseSettings(c);
+    const {
+      settings: { plannerLimit, ...settings },
+      keepModels,
+    } = await parseSettings(c, chatJoinSettingsSchema);
     return c.json(
       await db.transaction(async (tx) => {
         const membership = await requireClan(tx, actor, clanId, 'share');
+        if (plannerLimit !== undefined && membership.role !== 'leader')
+          throw new ApiError(403, 'FORBIDDEN', 'Only the clan leader can set the planner limit');
         if (membership.role === 'leader')
           await tx.insert(chats).values({ clanId, hostId: actor.id }).onConflictDoNothing();
         await requireChat(tx, clanId, true);
-        return saveSettings(tx, clanId, actor.id, settings);
+        if (plannerLimit !== undefined) await tx.update(chats).set({ plannerLimit }).where(eq(chats.clanId, clanId));
+        return saveSettings(tx, clanId, actor.id, { settings, keepModels });
       }),
     );
   });
@@ -147,6 +155,7 @@ export function createChatRoutes(db: WorkspaceDb) {
         backup: identity.nominatedUserId === actor.id,
         eligible: membership.role === 'leader' || identity.nominatedUserId === actor.id,
         activeHost: identity.activeHost,
+        plannerLimit: identity.plannerLimit,
       },
       settings: member.settings,
       ...history,

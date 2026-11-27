@@ -21,6 +21,7 @@ import {
 import { setAliasSchema } from './aliases.js';
 import {
   type ChatDecisionRequest,
+  type ChatJoinSettings,
   type ChatMetricsWindow,
   type ChatRouteRequest,
   type ChatSettings,
@@ -32,6 +33,7 @@ import {
   chatHistorySchema,
   chatInboxSchema,
   chatInfoSchema,
+  chatJoinSettingsSchema,
   chatLeaseHeartbeatSchema,
   chatLeaseInputSchema,
   chatLeaseSchema,
@@ -240,11 +242,11 @@ export class ClqnClient {
   chatInfo(clanId: string, signal?: AbortSignal) {
     return this.request(this.chatPath(clanId), chatInfoSchema, undefined, signal);
   }
-  joinChat(clanId: string, settings: ChatSettings, signal?: AbortSignal) {
+  joinChat(clanId: string, settings: ChatJoinSettings, signal?: AbortSignal) {
     return this.request(
       `${this.chatPath(clanId)}/join`,
       chatSettingsSchema,
-      chatSettingsSchema.parse(settings),
+      chatJoinSettingsSchema.parse(settings),
       signal,
     );
   }

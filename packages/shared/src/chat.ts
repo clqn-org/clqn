@@ -29,6 +29,9 @@ export const chatSettingsSchema = z
   })
   .strict();
 export type ChatSettings = z.infer<typeof chatSettingsSchema>;
+export const chatPlannerLimitSchema = z.number().int().min(1).max(2_147_483_647).nullable();
+export const chatJoinSettingsSchema = chatSettingsSchema.extend({ plannerLimit: chatPlannerLimitSchema.optional() });
+export type ChatJoinSettings = z.infer<typeof chatJoinSettingsSchema>;
 // Full access: no token, agent, or model limits. Each delegation still needs the member's approval.
 export const defaultChatSettings: ChatSettings = {
   approval: 'manual',
@@ -160,6 +163,7 @@ export const chatOrchestrationSchema = z.object({
   backup: z.boolean(),
   eligible: z.boolean(),
   activeHost: z.string().nullable(),
+  plannerLimit: chatPlannerLimitSchema.optional(),
 });
 export const chatSessionSchema = z.object({ host: z.string(), clan: z.string() });
 export const chatInfoSchema = z.object({

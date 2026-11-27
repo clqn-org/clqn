@@ -6,6 +6,7 @@ type Workers = Awaited<ReturnType<ClqnClient['listAgents']>>['agents'];
 interface Host {
   api: ClqnClient;
   leaseId: string;
+  plannerLimit?: number | null | undefined;
   active: () => boolean;
   generate: (name: string, instructions: string, prompt: string, signal: AbortSignal) => Promise<string>;
 }
@@ -194,7 +195,8 @@ export function createOrchestration(
       );
       // Reserve memory for planner turns whose child processes may still be starting. Keep one slot for progress
       // on small hosts or when the platform cannot report available memory.
-      const slots = Math.max(1, Math.floor((availableMemory() - hostMemoryReserve) / plannerMemoryAllowance));
+      const memorySlots = Math.max(1, Math.floor((availableMemory() - hostMemoryReserve) / plannerMemoryAllowance));
+      const slots = Math.min(memorySlots, host.plannerLimit ?? Infinity);
       let capacity = slots - turns.size + Number(Boolean(routing));
       for (const id of state.ready) {
         if (capacity <= 0) break;

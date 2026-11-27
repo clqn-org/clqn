@@ -20,7 +20,7 @@ One host routes messages for the clan. If a backup is already active, a returnin
 
 ## Send a message
 
-Type a task, question, or piece of project context (up to 4,000 characters) and press **Enter**. The orchestrator routes each message and can split a single request into independent tasks. Sub-orchestrators plan in parallel on the active host's machine and AI account. Available memory determines how many planners can start, and you can keep sending messages while they work.
+Type a task, question, or piece of project context (up to 4,000 characters) and press **Enter**. The orchestrator routes each message and can split a single request into independent tasks. Sub-orchestrators plan in parallel on the active host's machine and AI account. The clan's **Parallel planning** setting and available host memory determine how many can start. You can keep sending messages while they work.
 
 Refer to a task by name when you send a follow-up. With the updated clqn on the host and on the worker's machine, an active Codex or Claude Code worker receives that update in its current session at the next runtime opportunity.
 
@@ -73,6 +73,7 @@ Press **Ctrl+S**. Move with **↑ ↓** (or **Tab**), change a value with **← 
 | Spawn approval | **Manual** (default) asks before each agent starts. **Automatic** approves within your limits |
 | Token limit | Total tokens your agents can use in this clan, over all time. `none` for no limit |
 | Agent limit | How many of your agents can run at once. `none` for no limit |
+| Parallel planning | Clan leader only. Set the most sub-orchestrators that can plan at once. Leave blank or enter `Auto` to use available host memory. Backup hosts use the same setting |
 | Models | Comma-separated model IDs your agents may use. Blank allows any |
 | Worker commands | What your agents may run: **Off**, **Sandboxed** (default, inside the agent's sandbox), or **Unrestricted** |
 | Agents | Which installed agent CLIs (Claude Code, Codex) the orchestrator can use |

@@ -74,7 +74,13 @@ export function messageView(row: typeof chatMessages.$inferSelect): ChatMessage 
 export async function chatIdentity(db: WorkspaceDb, clanId: string, userId: string) {
   const activeUser = alias(users, 'active_host');
   const [identity] = await db
-    .select({ host: users.email, clan: clans.name, nominatedUserId: chatBackups.userId, activeHost: activeUser.email })
+    .select({
+      host: users.email,
+      clan: clans.name,
+      nominatedUserId: chatBackups.userId,
+      activeHost: activeUser.email,
+      plannerLimit: chats.plannerLimit,
+    })
     .from(clans)
     .leftJoin(chats, eq(chats.clanId, clans.id))
     .leftJoin(chatBackups, and(eq(chatBackups.clanId, chats.clanId), eq(chatBackups.userId, userId)))

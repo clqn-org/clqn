@@ -9,6 +9,7 @@ import {
   type ChatSettings,
   type ChatState,
   type ClqnClient,
+  chatPlannerLimitSchema,
   createInvitationSchema,
   type SendChat,
 } from '@clqn/shared';
@@ -24,6 +25,7 @@ import {
   messageLines,
   painter,
   plain,
+  plannerLimitField,
   type StopTarget,
   settingsFields,
   settingsLines,
@@ -50,17 +52,28 @@ const models = (text: string) => {
   if (!parsed.success) throw new Error('Models must be unique names without spaces, separated by commas');
   return parsed.data;
 };
+const parallelPlanning = (text: string) => {
+  if (!text || /^auto$/i.test(text)) return null;
+  const parsed = chatPlannerLimitSchema.safeParse(/^\d+$/.test(text) ? Number(text) : undefined);
+  if (!parsed.success) throw new Error('Parallel planning must be a positive whole number or Auto');
+  return parsed.data;
+};
 
 type Info = Awaited<ReturnType<ClqnClient['chatInfo']>>;
 export type ChatResult = 'quit' | 'sign-out' | 'back' | { deleted: string };
-type Setup = Omit<NonNullable<Parameters<typeof chatFrame>[0]['settings']>, 'action'>;
+type Setup = Omit<NonNullable<Parameters<typeof chatFrame>[0]['settings']>, 'action'> & {
+  originalPlannerLimit?: number | null;
+};
 // Leaders get an Invite row before the session action, which shifts the last two rows down.
-const setupFor = (settings: ChatSettings, leader: boolean): Setup => ({
+const setupFor = (settings: ChatSettings, leader: boolean, plannerLimit?: number | null): Setup => ({
   value: settings,
   tokenText: settings.tokenLimit?.toString() ?? '',
   agentText: settings.agentLimit?.toString() ?? '',
   modelText: settings.allowedModels?.join(', ') ?? '',
   ...(leader ? { inviteText: '', deleteText: '' } : {}),
+  ...(leader && plannerLimit !== undefined
+    ? { plannerText: plannerLimit?.toString() ?? '', originalPlannerLimit: plannerLimit }
+    : {}),
   field: leader ? 7 : 6,
 });
 const settingsRows = (setup: Setup) => (setup.inviteText === undefined ? 8 : 9);
@@ -391,7 +404,8 @@ export async function runChat(
           return;
         }
       }
-      const { value, tokenText, agentText, modelText } = setup;
+      const { value, tokenText, agentText, modelText, plannerText, originalPlannerLimit } = setup;
+      const plannerLimit = plannerText === undefined ? undefined : parallelPlanning(plannerText);
       await api.joinChat(
         clanId,
         {
@@ -399,6 +413,7 @@ export async function runChat(
           tokenLimit: numeric(tokenText),
           agentLimit: numeric(agentText),
           allowedModels: models(modelText),
+          ...(plannerLimit !== undefined && plannerLimit !== originalPlannerLimit ? { plannerLimit } : {}),
         },
         controller.signal,
       );
@@ -559,6 +574,12 @@ export async function runChat(
   function setupKey(text: string, key: Key) {
     if (!setup || busy) return;
     if (!state && options?.page && terminalSizeNotice(columns(), rows())) return;
+    const fields = settingsFields(
+      setup.inviteText !== undefined,
+      backupHosting() !== undefined,
+      setup.deleteText !== undefined,
+      setup.plannerText !== undefined,
+    );
     if (key.name === 'escape') {
       if (!state) {
         if (options?.page) result = 'back';
@@ -566,11 +587,6 @@ export async function runChat(
       } else setup = undefined;
     } else if (key.name === 'tab' || key.name === 'up' || key.name === 'down') {
       const change = key.name === 'up' || key.shift ? -1 : 1;
-      const fields = settingsFields(
-        setup.inviteText !== undefined,
-        backupHosting() !== undefined,
-        setup.deleteText !== undefined,
-      );
       const index = fields.indexOf(setup.field);
       setup.field = fields[(index + fields.length + change) % fields.length]!;
       replaceField = true;
@@ -607,17 +623,25 @@ export async function runChat(
         result = 'sign-out';
         stop();
       } else {
-        setup.field++;
+        setup.field = fields[(fields.indexOf(setup.field) + 1) % fields.length]!;
         replaceField = true;
       }
-    } else if (setup.field >= 1 && setup.field <= 3) {
-      const field = (['tokenText', 'agentText', 'modelText'] as const)[setup.field - 1]!;
-      const allowed = field === 'modelText' ? /^[^\x00-\x1f\x7f-\x9f]+$/ : /^[0-9none∞]+$/i;
+    } else if ((setup.field >= 1 && setup.field <= 3) || setup.field === plannerLimitField) {
+      const field =
+        setup.field === plannerLimitField
+          ? 'plannerText'
+          : (['tokenText', 'agentText', 'modelText'] as const)[setup.field - 1]!;
+      const allowed =
+        field === 'plannerText'
+          ? /^[0-9auto]+$/i
+          : field === 'modelText'
+            ? /^[^\x00-\x1f\x7f-\x9f]+$/
+            : /^[0-9none∞]+$/i;
       if (key.name === 'backspace') {
-        setup[field] = setup[field].slice(0, -1);
+        setup[field] = (setup[field] ?? '').slice(0, -1);
         replaceField = false;
       } else if (text && allowed.test(text) && !key.ctrl && !key.meta) {
-        setup[field] = ((replaceField ? '' : setup[field]) + text).slice(0, field === 'modelText' ? 1000 : 16);
+        setup[field] = ((replaceField ? '' : (setup[field] ?? '')) + text).slice(0, field === 'modelText' ? 1000 : 16);
         replaceField = false;
       }
     }
@@ -633,7 +657,7 @@ export async function runChat(
     if (key.name === 'f2' && state) {
       const hosting = state.orchestration;
       const leader = hosting ? hosting.eligible && !hosting.backup : info.canStart;
-      setup = { ...setupFor(state.settings, leader), agents: saved };
+      setup = { ...setupFor(state.settings, leader, hosting?.plannerLimit), agents: saved };
       void loadChoices();
       approvalFocused = false;
     } else if (key.name === 'f5') {

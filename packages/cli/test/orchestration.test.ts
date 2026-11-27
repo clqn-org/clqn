@@ -83,7 +83,7 @@ test('the router forwards a follow-up while more than five independent sub-orche
   assert.deepEqual(decisions.map(({ id }) => id).sort(), ready.sort());
 });
 
-test('more planning starts when the host has memory headroom', async () => {
+test('planning responds to host memory and the leader’s ceiling', async () => {
   const clanId = randomUUID();
   const ready = [randomUUID(), randomUUID(), randomUUID()];
   const models = new Map<string, (answer: string) => void>();
@@ -112,13 +112,20 @@ test('more planning starts when the host has memory headroom', async () => {
     generate: async (name: string) => new Promise<string>((resolve) => models.set(name, resolve)),
   };
 
-  coordinator.update({ pending: null, ready }, [], host, null);
-  coordinator.update({ pending: null, ready }, [], host, null);
+  coordinator.update({ pending: null, ready }, [], { ...host, plannerLimit: 8 }, null);
+  coordinator.update({ pending: null, ready }, [], { ...host, plannerLimit: 8 }, null);
   await new Promise((done) => setImmediate(done));
   assert.equal(models.size, 1);
 
   available = 2 * 1024 ** 3;
-  coordinator.update({ pending: null, ready }, [], host, null);
+  coordinator.update({ pending: null, ready }, [], { ...host, plannerLimit: 2 }, null);
+  await new Promise((done) => setImmediate(done));
+  assert.equal(models.size, 2);
+
+  coordinator.update({ pending: null, ready }, [], { ...host, plannerLimit: 1 }, null);
+  assert.equal(tasks.length, 2);
+
+  coordinator.update({ pending: null, ready }, [], { ...host, plannerLimit: null }, null);
   await new Promise((done) => setImmediate(done));
   assert.equal(models.size, ready.length);
   for (const finish of models.values()) finish(JSON.stringify({ action: 'reply', text: 'Planning complete' }));

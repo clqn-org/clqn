@@ -28,11 +28,13 @@ export const chats = pgTable(
     hostId: uuid('host_id')
       .notNull()
       .references(() => users.id),
+    plannerLimit: integer('planner_limit'),
     leaseAgentId: uuid('lease_agent_id').references(() => agents.id),
     leaseId: uuid('lease_id'),
     leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
   },
   (table) => [
+    check('chats_planner_limit_positive', sql`${table.plannerLimit} > 0`),
     check(
       'chats_host_lease_fields',
       sql`(${table.leaseAgentId} is null and ${table.leaseId} is null and ${table.leaseExpiresAt} is null)
