@@ -182,7 +182,6 @@ test('isolated model commands use low effort without exposing the clqn profile',
     const { args, env } = agentCommand(runtime, '/private/clqn-profile', {
       project: '/project',
       role: 'orchestrator',
-      isolated: true,
     });
     assert.ok(args.includes(runtime === 'codex' ? 'model_reasoning_effort="low"' : 'low'));
     assert.ok(args.every((arg) => !arg.includes('/private/clqn-profile')));

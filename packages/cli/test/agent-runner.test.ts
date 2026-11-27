@@ -118,17 +118,48 @@ const agent = (id: string, role: 'worker' | 'orchestrator', ownerId = userId) =>
   active: true,
 });
 
+function hostingState(pending: string | null, changes: Partial<ChatState> = {}) {
+  return chatState({
+    orchestration: { backup: false, eligible: true, activeHost: null },
+    work: { pending, ready: [] },
+    ...changes,
+  });
+}
+
+function memberMessage(text: string, sequence = 1) {
+  return {
+    id: randomUUID(),
+    sequence,
+    authorId: userId,
+    author: 'lead@example.com',
+    role: 'member',
+    createdAt,
+    text,
+    status: 'queued',
+    replyTo: null,
+  } as const;
+}
+
 for (const runtime of ['claude', 'codex'] as const) {
-  test(`${runtime} force send waits for the interrupted turn to close`, async (t) => {
+  test(`${runtime} force send waits for the interrupted router to close`, async (t) => {
     const f = await fixture(t);
     const api = {
       whoami: async () => ({ id: userId, email: 'lead@example.com' }),
       listAgents: async () => ({ agents: [] }),
-      members: async () => ({ members: [{ userId, email: 'lead@example.com', role: 'leader' }] }),
       registerAgent: async (_clan: string, name: string, role: 'worker' | 'orchestrator') => ({
         agent: { ...agent(randomUUID(), role), name },
         token: token(role === 'worker' ? 'w' : 'o'),
       }),
+    } as unknown as ClqnClient;
+    let next = memberMessage('Ordinary request');
+    const routed: string[] = [];
+    const hostApi = {
+      heartbeatChatLease: async () => ({ active: true }),
+      releaseChatLease: async () => ({ active: false }),
+      chatInbox: async () => ({ next, pickId: randomUUID(), messages: [], held: [] }),
+      routeChat: async (_clan: string, id: string) => {
+        routed.push(id);
+      },
     } as unknown as ClqnClient;
     const runner = startAgentRunner({
       api,
@@ -138,47 +169,80 @@ for (const runtime of ['claude', 'codex'] as const) {
       spawn: f.spawn,
       runtimes: async () => [runtime],
       now: f.now,
+      agentClient: () => hostApi,
     });
     t.after(() => runner.stop());
     let turns = 0;
     runner.listen(() => turns++);
+    const reply = JSON.stringify({ action: 'reply', text: 'Acknowledged' });
+    const result = JSON.stringify(
+      runtime === 'claude'
+        ? { type: 'result', result: reply }
+        : { type: 'item.completed', item: { type: 'agent_message', text: reply } },
+    );
 
-    runner.update(chatState({ queued: 1, forcePending: null }));
+    runner.update(hostingState(next.id));
     await until(() => f.spawned.length === 1);
     const interrupted = f.spawned[0]!.child;
+    await until(() => interrupted.input.includes('Ordinary request'));
     const kill = t.mock.method(interrupted, 'kill', () => true);
-    const forcePending = { id: randomUUID(), processing: false };
-    const pending = chatState({ queued: 2, forcePending });
+    next = memberMessage('Urgent request', 2);
+    const pending = hostingState(next.id, { forcePending: { id: next.id, processing: false } });
     runner.update(pending);
     assert.deepEqual(kill.mock.calls[0]?.arguments, ['SIGTERM']);
-    interrupted.stdout.write('{"type":"result","subtype":"success","is_error":false}\n');
+    interrupted.stdout.write(`${result}\n`);
     runner.update(pending);
-    assert.equal(turns, 0, 'a late result does not end the interrupted turn');
+    assert.equal(turns, 0, 'a late decision does not end the interrupted turn');
     assert.equal(f.spawned.length, 1);
 
-    interrupted.finish(null);
+    interrupted.finish(0);
     await until(() => turns === 1);
+    assert.deepEqual(routed, []);
     assert.doesNotMatch(runner.status() ?? '', /failed/);
     runner.update(pending);
     await until(() => f.spawned.length === 2);
     const forced = f.spawned[1]!.child;
-    runner.update(chatState({ queued: 3, forcePending: { id: randomUUID(), processing: false } }));
-    assert.equal(forced.killed, false, 'a later forced message waits its turn');
-    await runner.stop();
+    await until(() => forced.input.includes('Urgent request'));
+    // The oldest forced message remains first while it is processing.
+    runner.update({ ...pending, forcePending: { id: next.id, processing: true } });
+    assert.equal(forced.killed, false);
+    forced.finish(0, result);
+    await until(() => routed.length === 1);
+    assert.deepEqual(routed, [next.id]);
   });
 }
 
-test('the leader’s chat connects an orchestrator and runs it only while messages are queued', async (t) => {
+test('the leader hosts only when the API advertises parallel orchestration', async (t) => {
   const f = await fixture(t);
   const registered: { name: string; role: string; alias?: string | undefined }[] = [];
   const api = {
     whoami: async () => ({ id: userId, email: 'lead@example.com' }),
-    listAgents: async () => ({ agents: [] }),
-    members: async () => ({ members: [{ userId, email: 'lead@example.com', role: 'leader' }] }),
+    listAgents: async () => ({ agents: listed }),
     registerAgent: async (_clan: string, name: string, role: 'worker' | 'orchestrator', alias?: string) => {
       registered.push({ name, role, alias });
       const letter = role === 'worker' ? 'w' : 'o';
-      return { agent: { ...agent(randomUUID(), role), name, alias }, token: token(letter) };
+      const connected = { ...agent(randomUUID(), role), name, alias };
+      listed.push(connected);
+      return { agent: connected, token: token(letter) };
+    },
+  } as unknown as ClqnClient;
+  const listed: ReturnType<typeof agent>[] = [];
+  const message = memberMessage('Fix the links');
+  const pickId = randomUUID();
+  const leaseIds: string[] = [];
+  const routed: unknown[][] = [];
+  const hostApi = {
+    heartbeatChatLease: async (_clan: string, id: string) => {
+      leaseIds.push(id);
+      return { active: true };
+    },
+    releaseChatLease: async () => ({ active: false }),
+    chatInbox: async (_clan: string, id: string) => {
+      assert.equal(id, leaseIds[0]);
+      return { next: message, pickId, messages: [], held: [] };
+    },
+    routeChat: async (...args: unknown[]) => {
+      routed.push(args);
     },
   } as unknown as ClqnClient;
   const runner = startAgentRunner({
@@ -189,90 +253,49 @@ test('the leader’s chat connects an orchestrator and runs it only while messag
     spawn: f.spawn,
     runtimes: async () => ['claude'],
     now: f.now,
+    agentClient: () => hostApi,
   });
   t.after(() => runner.stop());
 
-  runner.update(chatState());
-  await until(() => registered.length === 2);
-  assert.deepEqual(registered, [
-    { name: 'Claude Code (lead)', role: 'worker', alias: 'claude-lead' },
-    { name: 'Orchestrator', role: 'orchestrator', alias: 'orchestrator' },
-  ]);
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  const { work: _work, ...preParallel } = hostingState(message.id, { queued: 1, messages: [message] });
+  runner.update(preParallel);
+  await until(() => registered.length === 1);
+  assert.deepEqual(registered, [{ name: 'Claude Code (lead)', role: 'worker', alias: 'claude-lead' }]);
+  assert.equal(leaseIds.length, 0);
   assert.equal(f.spawned.length, 0);
 
-  const message = {
-    id: randomUUID(),
-    sequence: 1,
-    authorId: randomUUID(),
-    author: 'ana@example.com',
-    role: 'member',
-    createdAt: new Date().toISOString(),
-    text: 'Fix the links',
-    status: 'queued',
-    replyTo: null,
-  } as const;
-  const queued = chatState({ queued: 1, messages: [message] });
-  let turns = 0;
-  runner.listen(() => turns++);
-  const result = '{"type":"result","subtype":"success","is_error":false,"result":""}\n';
-  const asked = (child: FakeChild) => child.input.split('\n').filter((line) => line.includes('next queued message'));
+  runner.update(chatState({ work: { pending: message.id, ready: [] } }));
+  assert.equal(leaseIds.length, 0, 'work alone does not enable hosting');
+  runner.update(hostingState(null));
+  await until(() => leaseIds.length === 1);
+  assert.deepEqual(registered.at(-1), { name: 'Orchestrator', role: 'orchestrator', alias: 'orchestrator' });
+  assert.equal(f.spawned.length, 0);
 
-  // Claude Code runs one session that stays open and gets one turn per queued message.
-  runner.update(queued);
+  runner.update(hostingState(message.id));
   await until(() => f.spawned.length === 1);
-  const [run] = f.spawned;
-  assert.equal(run!.command, 'claude');
-  assert.deepEqual(run!.args.slice(-4), ['--permission-mode', 'default', '--allowedTools', 'mcp__clqn']);
-  for (const flag of ['--strict-mcp-config', '--disable-slash-commands', '--verbose'])
-    assert.ok(run!.args.includes(flag));
-  assert.equal(run!.args[run!.args.indexOf('--input-format') + 1], 'stream-json');
-  assert.equal(run!.args[run!.args.indexOf('--tools') + 1], '');
-  assert.match(run!.args[run!.args.indexOf('--append-system-prompt') + 1]!, /clqn_chat_inbox.*clqn_chat_decide once/);
-  assert.ok(!run!.args.join(' ').includes('Fix the links'), 'chat text stays out of argv');
-  assert.equal(run!.env.CLQN_TOKEN, undefined);
-  assert.match(run!.env.CLQN_AGENT_PROFILE!, /agents/);
-  await until(() => asked(run!.child).length === 1);
-  assert.deepEqual(JSON.parse(asked(run!.child)[0]!).message, {
-    role: 'user',
-    content: 'Handle the next queued message.',
-  });
-  assert.equal(runner.status(), 'Orchestrator working');
-  runner.update(queued);
-  assert.equal(asked(run!.child).length, 1, 'one message at a time');
-
-  run!.child.stdout.write(result);
-  await until(() => turns === 1);
-  assert.equal(runner.status(), undefined);
-  assert.equal(run!.child.killed, false, 'the session stays open');
-  // The next message goes to the same session.
-  const next = { ...message, id: randomUUID(), sequence: 2 };
-  runner.update(chatState({ queued: 1, messages: [{ ...message, status: 'handled' }, next] }));
-  await until(() => asked(run!.child).length === 2);
+  const run = f.spawned[0]!;
+  await until(() => run.child.input.includes('Fix the links'));
+  assert.equal(run.command, 'claude');
+  assert.ok(run.args.includes('--strict-mcp-config'));
+  assert.ok(run.args.includes('--disable-slash-commands'));
+  assert.equal(run.args[run.args.indexOf('--tools') + 1], '');
+  assert.equal(run.args[run.args.indexOf('--output-format') + 1], 'json');
+  assert.ok(!run.args.includes('--mcp-config'));
+  assert.ok(!run.args.join(' ').includes('Fix the links'), 'chat text stays out of argv');
+  assert.equal(run.env.CLQN_TOKEN, undefined);
+  assert.equal(run.env.CLQN_AGENT_PROFILE, undefined);
+  assert.notEqual(run.cwd, f.directory, 'planning does not load the worktree configuration');
+  assert.equal(runner.status(), 'Routing message');
+  runner.update(hostingState(message.id));
   assert.equal(f.spawned.length, 1);
-  run!.child.stdout.write(result);
-  await until(() => turns === 2);
-  // The turn left the queue as it was, so wait before trying again.
-  const stuck = chatState({ queued: 1, messages: [next] });
-  runner.update(stuck);
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.equal(asked(run!.child).length, 2);
-
-  // A session that dies mid-turn fails that turn; the next one starts a new session.
-  f.advance(60_000);
-  runner.update(stuck);
-  await until(() => asked(run!.child).length === 3);
-  run!.child.finish(1);
-  await until(() => turns === 3);
-  assert.match(runner.status()!, /Orchestrator failed · The orchestrator session ended/);
-  f.advance(60_000);
-  runner.update(stuck);
-  await until(() => f.spawned.length === 2);
-  const log = await readFile(join(f.directory, 'logs', 'orchestrator.log'), 'utf8');
-  assert.match(log, /"type":"result"/);
-
-  await runner.stop();
-  assert.equal(f.spawned[1]!.child.killed, true);
+  run.child.finish(0, JSON.stringify({ result: JSON.stringify({ action: 'reply', text: 'Acknowledged' }) }));
+  await until(() => routed.length === 1);
+  assert.deepEqual(routed[0]?.slice(0, 4), [
+    clanId,
+    message.id,
+    { action: 'reply', text: 'Acknowledged', pickId },
+    leaseIds[0],
+  ]);
 });
 
 test('a backup opts in locally and fences lease loss, opt-out and revocation without killing workers', async (t) => {
@@ -298,6 +321,9 @@ test('a backup opts in locally and fences lease loss, opt-out and revocation wit
     },
   } as unknown as ClqnClient;
   const beats: Array<{ id: string; renew: boolean; send: (active: boolean) => void }> = [];
+  const pending = memberMessage('Plan the work');
+  const inboxLeases: string[] = [];
+  const routed: string[] = [];
   const released: string[] = [];
   const hostApi = {
     whoami: async () => ({ agentId: hostId }),
@@ -307,6 +333,13 @@ test('a backup opts in locally and fences lease loss, opt-out and revocation wit
       released.push(id);
       return { active: false };
     },
+    chatInbox: async (_clan: string, id: string) => {
+      inboxLeases.push(id);
+      return { next: pending, pickId: randomUUID(), messages: [], held: [] };
+    },
+    routeChat: async (_clan: string, id: string) => {
+      routed.push(id);
+    },
   } as unknown as ClqnClient;
   const transitions: string[] = [];
   const workerApi = {
@@ -314,6 +347,7 @@ test('a backup opts in locally and fences lease loss, opt-out and revocation wit
       transitions.push(action);
     },
     task: async () => ({ description: 'Work on the project' }),
+    chatFollowups: async () => ({ messages: [], next: 0 }),
   } as unknown as ClqnClient;
   const runner = startAgentRunner({
     api,
@@ -328,7 +362,7 @@ test('a backup opts in locally and fences lease loss, opt-out and revocation wit
   });
   t.after(() => runner.stop());
 
-  const state = chatState({
+  const state = hostingState(pending.id, {
     queued: 1,
     orchestration: { backup: true, eligible: true, activeHost: 'lead@example.com' },
     runs: [
@@ -344,12 +378,6 @@ test('a backup opts in locally and fences lease loss, opt-out and revocation wit
       },
     ],
   });
-  const leaseArgument = (spawned: (typeof f.spawned)[number]) => {
-    const config = JSON.parse(spawned.args[spawned.args.indexOf('--mcp-config') + 1]!);
-    const args: string[] = config.mcpServers.clqn.args;
-    const leaseFlag = args.indexOf('--lease');
-    return leaseFlag < 0 ? undefined : args[leaseFlag + 1];
-  };
   runner.update(state);
   await until(() => f.spawned.length === 1);
   assert.equal(beats.length, 0);
@@ -361,7 +389,7 @@ test('a backup opts in locally and fences lease loss, opt-out and revocation wit
   assert.deepEqual(registered, ['orchestrator']);
   assert.equal(beats[0]?.renew, false);
   assert.equal(await readBackupHosting(server, clanId, userId), true);
-  assert.equal(leaseArgument(f.spawned[0]!), undefined);
+  assert.ok(f.spawned[0]!.args.includes('--mcp-config'), 'approved workers keep their clqn tools');
   assert.match(runner.status() ?? '', /Backup host on standby/);
   beats[0]!.send(false);
   await Promise.resolve();
@@ -371,7 +399,8 @@ test('a backup opts in locally and fences lease loss, opt-out and revocation wit
   beats[1]!.send(true);
   await until(() => f.spawned.length === 2);
   const firstHost = f.spawned[1]!;
-  assert.equal(leaseArgument(firstHost), beats[1]!.id);
+  assert.deepEqual(inboxLeases, [beats[1]!.id]);
+  assert.equal(firstHost.env.CLQN_AGENT_PROFILE, undefined);
 
   f.advance(10_000);
   runner.update(state);
@@ -392,7 +421,7 @@ test('a backup opts in locally and fences lease loss, opt-out and revocation wit
 
   beats[3]!.send(true);
   await until(() => f.spawned.length === 3);
-  assert.equal(leaseArgument(f.spawned[2]!), beats[3]!.id);
+  assert.deepEqual(inboxLeases, [beats[1]!.id, beats[3]!.id]);
   const optOut = runner.setBackupHosting(false);
   assert.equal(f.spawned[2]!.child.killed, true);
   assert.equal(f.spawned[0]!.child.killed, false);
@@ -411,9 +440,12 @@ test('a backup opts in locally and fences lease loss, opt-out and revocation wit
   await until(() => released.length === 3);
   assert.equal(released.at(-1), beats[4]!.id);
 
-  f.spawned[0]!.child.finish(0);
+  const worker = f.spawned[0]!.child;
+  worker.stdin.once('finish', () => worker.finish(0));
+  worker.stdout.write('{"type":"result","result":""}\n');
   await until(() => transitions.includes('complete'));
   assert.deepEqual(transitions, ['claim', 'complete']);
+  assert.deepEqual(routed, []);
   await runner.stop();
 });
 
@@ -430,6 +462,7 @@ test('a nominated member only hosts with explicit opt-in and an enabled runtime'
   const workerApi = {
     transitionTask: async () => undefined,
     task: async () => ({ description: 'Work on the project' }),
+    chatFollowups: async () => ({ messages: [], next: 0 }),
   } as unknown as ClqnClient;
   const connect = () =>
     startAgentRunner({
@@ -443,7 +476,7 @@ test('a nominated member only hosts with explicit opt-in and an enabled runtime'
       now: f.now,
       agentClient: () => workerApi,
     });
-  const state = chatState({
+  const state = hostingState(null, {
     queued: 1,
     orchestration: { backup: true, eligible: true, activeHost: null },
     runs: [
@@ -476,65 +509,6 @@ test('a nominated member only hosts with explicit opt-in and an enabled runtime'
   disabled.update(state);
   await until(() => disabled.status() === 'Enable an agent for backup hosting');
   assert.equal(f.spawned.length, 1);
-});
-
-test('a Codex orchestrator resumes one session, a run per message, and starts fresh after a failure', async (t) => {
-  const f = await fixture(t);
-  const api = {
-    whoami: async () => ({ id: userId, email: 'lead@example.com' }),
-    listAgents: async () => ({ agents: [] }),
-    members: async () => ({ members: [{ userId, email: 'lead@example.com', role: 'leader' }] }),
-    registerAgent: async (_clan: string, name: string, role: 'worker' | 'orchestrator') => ({
-      agent: { ...agent(randomUUID(), role), name },
-      token: token(role === 'worker' ? 'w' : 'o'),
-    }),
-  } as unknown as ClqnClient;
-  const runner = startAgentRunner({
-    api,
-    server,
-    clanId,
-    project: f.directory,
-    spawn: f.spawn,
-    runtimes: async () => ['codex'],
-    now: f.now,
-  });
-  t.after(() => runner.stop());
-  const thread = randomUUID();
-  const queued = (n: number) => {
-    const message = {
-      id: randomUUID(),
-      sequence: n,
-      authorId: userId,
-      author: 'lead@example.com',
-      role: 'member' as const,
-    };
-    return chatState({ queued: 1, messages: [{ ...message, createdAt, text: 'Hi', status: 'queued', replyTo: null }] });
-  };
-  const runOnce = async (n: number, code: number, output = '') => {
-    runner.update(queued(n));
-    await until(() => f.spawned.length === n);
-    const run = f.spawned[n - 1]!;
-    await until(() => run.child.input === 'Handle the next queued message.');
-    run.child.finish(code, output);
-    await until(() => runner.status() === undefined || /failed/.test(runner.status() ?? ''));
-    return run.args;
-  };
-
-  const first = await runOnce(1, 0, `{"type":"thread.started","thread_id":"${thread}"}\n`);
-  assert.equal(f.spawned[0]!.command, 'codex');
-  assert.deepEqual(first.slice(0, 2), ['exec', '--json']);
-  assert.equal(first[first.indexOf('--sandbox') + 1], 'read-only');
-  assert.match(first.join(' '), /developer_instructions="You are the clqn orchestrator/);
-  // The next message continues the same session, still read-only.
-  const second = await runOnce(2, 0);
-  assert.deepEqual(second.slice(0, 2), ['exec', 'resume']);
-  assert.deepEqual(second.slice(-2), [thread, '-']);
-  assert.ok(second.includes('sandbox_mode="read-only"'));
-  assert.ok(!second.includes('--sandbox'));
-  // That run reported no session, so it failed to continue; the next starts fresh.
-  f.advance(60_000);
-  const third = await runOnce(3, 0);
-  assert.ok(!third.includes('resume'));
 });
 
 test('approved runs start this member’s worker with its model, report usage, and respect the agent limit', async (t) => {
@@ -1151,7 +1125,8 @@ test('workers run commands as the member allows: off, sandboxed by default, or u
     agentCommand('codex', '/profile.json', { project: '/work/task', role, commands }).args;
   assert.ok(codex('worker').includes('--ignore-user-config'));
   // Codex exec cannot ask for approval, so clqn tools are approved up front.
-  assert.match(codex('orchestrator').join(' '), /mcp_servers\.clqn=\{.*default_tools_approval_mode="approve"\}/);
+  assert.match(codex('worker').join(' '), /mcp_servers\.clqn=\{.*default_tools_approval_mode="approve"\}/);
+  assert.doesNotMatch(codex('orchestrator').join(' '), /mcp_servers\.clqn/);
   assert.equal(codex('worker')[codex('worker').indexOf('--sandbox') + 1], 'workspace-write');
   assert.equal(codex('worker', 'off')[codex('worker', 'off').indexOf('--sandbox') + 1], 'read-only');
   assert.equal(codex('orchestrator')[codex('orchestrator').indexOf('--sandbox') + 1], 'read-only');

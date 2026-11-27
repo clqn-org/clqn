@@ -137,16 +137,10 @@ interface AgentCommandOptions {
   role: 'orchestrator' | 'worker';
   model?: string | null | undefined;
   commands?: WorkerCommands | undefined;
-  // Claude Code only: keep running and read one JSON user message per line from stdin, each a turn.
-  session?: boolean | undefined;
   // Workers with live follow-ups use a bidirectional runtime session.
   live?: boolean | undefined;
-  isolated?: boolean | undefined;
   // Rules added to the system (Claude Code) or developer (Codex) instructions, so they hold for every turn.
   instructions?: string | undefined;
-  // Codex only: continue this earlier session, so the agent remembers it.
-  resume?: string | undefined;
-  leaseId?: string | undefined;
 }
 
 interface McpCommand {
@@ -154,6 +148,8 @@ interface McpCommand {
   args: string[];
   profilePath: string;
 }
+
+const codexDisabled = ['--disable', 'hooks', '--disable', 'plugins', '--disable', 'apps'];
 
 function codexMcpArgs(mcp: McpCommand | undefined) {
   if (!mcp) return [];
@@ -179,31 +175,24 @@ function codexLiveArgs(commands: WorkerCommands, mcp: McpCommand | undefined) {
     'sandbox_workspace_write.network_access=false',
     '-c',
     'sandbox_workspace_write.writable_roots=[]',
-    '--disable',
-    'hooks',
-    '--disable',
-    'plugins',
-    '--disable',
-    'apps',
+    ...codexDisabled,
     ...codexMcpArgs(mcp),
   ];
 }
 
 function codexExecArgs(options: AgentCommandOptions, commands: WorkerCommands, mcp: McpCommand | undefined) {
-  let sandboxArgs: string[];
-  if (commands === 'unrestricted') sandboxArgs = ['--dangerously-bypass-approvals-and-sandbox'];
-  // Resuming has no --sandbox flag.
-  else if (options.resume) sandboxArgs = ['-c', `sandbox_mode="${codexSandbox[commands].mode}"`];
-  else sandboxArgs = ['--sandbox', codexSandbox[commands].mode];
+  const sandboxArgs =
+    commands === 'unrestricted'
+      ? ['--dangerously-bypass-approvals-and-sandbox']
+      : ['--sandbox', codexSandbox[commands].mode];
 
   return [
     'exec',
-    ...(options.resume ? ['resume'] : []),
     '--json',
     '--skip-git-repo-check',
     // Skip the member's own Codex config: it adds context to every turn. Sign-in still works.
     '--ignore-user-config',
-    ...(options.isolated
+    ...(options.role === 'orchestrator'
       ? [
           '-c',
           'model_reasoning_effort="low"',
@@ -211,19 +200,13 @@ function codexExecArgs(options: AgentCommandOptions, commands: WorkerCommands, m
           'project_doc_max_bytes=0',
           '--disable',
           'shell_tool',
-          '--disable',
-          'hooks',
-          '--disable',
-          'plugins',
-          '--disable',
-          'apps',
+          ...codexDisabled,
         ]
       : []),
     ...sandboxArgs,
     ...(options.model ? ['-m', options.model] : []),
     ...(options.instructions ? ['-c', `developer_instructions=${JSON.stringify(options.instructions)}`] : []),
     ...codexMcpArgs(mcp),
-    ...(options.resume ? [options.resume] : []),
     '-',
   ];
 }
@@ -235,13 +218,14 @@ function claudeArgs(
   npmCache: string,
   mcp: McpCommand | undefined,
 ) {
+  const orchestrator = options.role === 'orchestrator';
   return [
     '--print',
-    ...(options.session || live
+    ...(live
       ? ['--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose']
       : ['--output-format', 'json']),
     ...(options.instructions ? ['--append-system-prompt', options.instructions] : []),
-    ...(options.isolated ? ['--effort', 'low'] : []),
+    ...(orchestrator ? ['--effort', 'low'] : []),
     ...(options.model ? ['--model', options.model] : []),
     '--strict-mcp-config',
     ...(mcp
@@ -250,40 +234,43 @@ function claudeArgs(
           JSON.stringify({ mcpServers: { clqn: { type: 'stdio', command: mcp.command, args: mcp.args } } }),
         ]
       : []),
-    // Skip the member's user settings and plugins: they add context to every turn. Workers keep the repo's
-    // skills, as if a member had started them there; the orchestrator only needs clqn tools.
+    // Workers keep the repo's skills. Planning turns get only their supplied instructions and chat context.
     '--setting-sources',
-    options.isolated ? '' : 'project,local',
-    // The orchestrator gets no built-in tools, so its clqn tools load up front instead of through a search.
-    ...(options.role === 'orchestrator' ? ['--disable-slash-commands', '--tools', ''] : []),
+    orchestrator ? '' : 'project,local',
+    ...(orchestrator ? ['--disable-slash-commands', '--tools', ''] : []),
     // Sandboxed workers run commands without prompts inside Claude Code's OS sandbox: writes stay in the
     // worktree (git metadata included, hooks and config excluded) and the network is limited to the npm
     // registry. npm's cache moves out of ~/.npm, which the sandbox blocks, into a directory it may write.
     ...(commands === 'sandboxed' ? ['--settings', JSON.stringify(workerSandbox), '--add-dir', npmCache] : []),
     '--permission-mode',
-    commands === 'unrestricted' ? 'bypassPermissions' : options.role === 'worker' ? 'acceptEdits' : 'default',
+    commands === 'unrestricted' ? 'bypassPermissions' : orchestrator ? 'default' : 'acceptEdits',
     ...(mcp ? ['--allowedTools', 'mcp__clqn'] : []),
   ];
 }
 
-// A non-interactive runtime run with the agent's clqn MCP server. The prompt goes to stdin, so chat text never
-// appears in argv. The orchestrator may only use clqn tools; workers may also edit files in their workspace and run
-// commands as the member's setting allows. Codex cannot edit without running commands, so `off` makes it read-only.
+// Prompts go to stdin. Planning turns run without clqn credentials or action tools. Workers use their clqn MCP
+// server and run commands as the member's settings allow. Codex cannot edit without commands, so `off` is read-only.
 export function agentCommand(runtime: Runtime, profilePath: string, options: AgentCommandOptions): AgentCommand {
   const commands = options.role === 'worker' ? (options.commands ?? 'sandboxed') : 'off';
   const live = options.role === 'worker' && options.live === true;
   const npmCache = join(configDirectory(), 'npm-cache');
-  // The parent chat already watches the project, even while no agent is running.
-  const args = [resolve(process.argv[1]!), 'mcp', '--profile', profilePath, '--path', options.project, '--no-sync'];
-  if (options.role === 'orchestrator' && options.leaseId) args.push('--lease', options.leaseId);
-  const mcp = options.isolated ? undefined : { command: process.execPath, args, profilePath };
+  const mcp =
+    options.role === 'worker'
+      ? {
+          command: process.execPath,
+          // The parent chat already watches the project.
+          args: [resolve(process.argv[1]!), 'mcp', '--profile', profilePath, '--path', options.project, '--no-sync'],
+          profilePath,
+        }
+      : undefined;
   let runtimeArgs: string[];
   if (runtime === 'claude') runtimeArgs = claudeArgs(options, commands, live, npmCache, mcp);
   else if (live) runtimeArgs = codexLiveArgs(commands, mcp);
   else runtimeArgs = codexExecArgs(options, commands, mcp);
 
-  const env: NodeJS.ProcessEnv = { ...process.env, CLQN_AGENT_PROFILE: profilePath };
-  if (options.isolated) delete env.CLQN_AGENT_PROFILE;
+  const env = { ...process.env };
+  if (mcp) env.CLQN_AGENT_PROFILE = profilePath;
+  else delete env.CLQN_AGENT_PROFILE;
   if (runtime === 'claude' && commands === 'sandboxed') {
     mkdirSync(npmCache, { recursive: true, mode: 0o700 });
     env.npm_config_cache = npmCache;
@@ -298,15 +285,11 @@ const object = (value: unknown): Json => (value && typeof value === 'object' ? (
 const count = (...values: unknown[]) =>
   values.reduce<number>((sum, value) => sum + (typeof value === 'number' && value > 0 ? value : 0), 0);
 
-// Total input and output tokens, the final message, and Codex's session ID from a finished run's stdout.
-export function agentOutput(
-  runtime: Runtime,
-  stdout: string,
-): { tokens: number; text?: string; error?: string; session?: string } {
+// Total input and output tokens and the final message from a finished run's stdout.
+export function agentOutput(runtime: Runtime, stdout: string): { tokens: number; text?: string; error?: string } {
   let tokens = 0;
   let text: string | undefined;
   let error: string | undefined;
-  let session: string | undefined;
   for (const line of runtime === 'codex' ? stdout.split('\n') : [stdout]) {
     let event: Json;
     try {
@@ -322,8 +305,6 @@ export function agentOutput(
       tokens = count(usage.input_tokens, usage.cache_creation_input_tokens, usage.output_tokens);
       if (typeof event.result === 'string') text = event.result;
       if (event.is_error === true) error = text ?? 'Claude Code reported an error';
-    } else if (event.type === 'thread.started') {
-      if (typeof event.thread_id === 'string') session = event.thread_id;
     } else if (event.type === 'turn.completed') {
       // Codex input tokens include cached input.
       const usage = object(event.usage);
@@ -340,7 +321,6 @@ export function agentOutput(
     tokens: Math.min(tokens, Number.MAX_SAFE_INTEGER),
     ...(text?.trim() ? { text: text.trim() } : {}),
     ...(error ? { error: plainError(error) } : {}),
-    ...(session ? { session } : {}),
   };
 }
 
