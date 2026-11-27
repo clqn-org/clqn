@@ -51,9 +51,24 @@ test('PostgreSQL: multiple chat backups share one lease and recover queued work'
     assert.equal((await request(token, '/chat/join', defaultChatSettings)).status, 200);
   }
   assert.deepEqual(await (await backups()).json(), { userIds: requested });
-  assert.deepEqual((await state()).orchestration, { backup: false, eligible: true, activeHost: null });
-  assert.deepEqual((await state(backup.token)).orchestration, { backup: true, eligible: true, activeHost: null });
-  assert.deepEqual((await state(member.token)).orchestration, { backup: true, eligible: true, activeHost: null });
+  assert.deepEqual((await state()).orchestration, {
+    backup: false,
+    eligible: true,
+    activeHost: null,
+    plannerLimit: null,
+  });
+  assert.deepEqual((await state(backup.token)).orchestration, {
+    backup: true,
+    eligible: true,
+    activeHost: null,
+    plannerLimit: null,
+  });
+  assert.deepEqual((await state(member.token)).orchestration, {
+    backup: true,
+    eligible: true,
+    activeHost: null,
+    plannerLimit: null,
+  });
   const standby = await connection.store.registerAgent(backup.user, clan.id, 'First backup', 'orchestrator');
   const second = await connection.store.registerAgent(member.user, clan.id, 'Second backup', 'orchestrator');
   assert.equal((await register(backup.token, 'Duplicate backup')).status, 409);
@@ -118,6 +133,7 @@ test('PostgreSQL: multiple chat backups share one lease and recover queued work'
     backup: false,
     eligible: true,
     activeHost: member.user.email,
+    plannerLimit: null,
   });
   assert.equal((await inbox(primary.token, heldLease)).status, 403);
   assert.equal((await reply(second.token, secondLease, next.id, 'Second recovery')).status, 200);
@@ -136,7 +152,83 @@ test('PostgreSQL: multiple chat backups share one lease and recover queued work'
   // Removing the remaining active backup from membership fences its lease and restores legacy leader access.
   assert.equal((await request(member.token, '/leave', {})).status, 200);
   assert.deepEqual(await (await backups(backup.token)).json(), { userIds: [] });
-  assert.deepEqual((await state(backup.token)).orchestration, { backup: false, eligible: true, activeHost: null });
+  assert.deepEqual((await state(backup.token)).orchestration, {
+    backup: false,
+    eligible: true,
+    activeHost: null,
+    plannerLimit: null,
+  });
   assert.equal((await inbox(second.token, finalLease)).status, 401);
   assert.equal((await inbox(standby.token)).status, 200);
+});
+
+test('PostgreSQL: only the leader changes the clan planner limit independently of personal settings', {
+  skip,
+}, async (t) => {
+  const { connection, sql, user } = await database(t);
+  const [leader, backup, member] = await Promise.all([user(), user(), user()]);
+  const clan = await connection.store.createClan(leader.user.id, 'Planner limit');
+  await sql`insert into memberships (clan_id, user_id) values (${clan.id}, ${backup.user.id}), (${clan.id}, ${member.user.id})`;
+  const host = await connection.store.registerAgent(leader.user, clan.id, 'Orchestrator', 'orchestrator');
+  const app = createApp(connection.store, connection.db);
+  const request = (token: string, path: string, body?: object) =>
+    app.request(`/v1/clans/${clan.id}/chat${path}`, {
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}),
+    });
+  const setLimit = (token: string, plannerLimit: number | null) => request(token, '/planner-limit', { plannerLimit });
+  async function state(token = leader.token) {
+    const response = await request(token, '/state');
+    assert.equal(response.status, 200, await response.clone().text());
+    return chatStateSchema.parse(await response.json());
+  }
+  assert.equal((await setLimit(leader.token, 2)).status, 404);
+  for (const { token } of [leader, backup, member])
+    assert.equal((await request(token, '/join', defaultChatSettings)).status, 200);
+  assert.equal((await request(leader.token, '/host/backups', { userIds: [backup.user.id] })).status, 200);
+  assert.equal((await state()).orchestration?.plannerLimit, null);
+
+  const limit = 2_147_483_647;
+  const saved = await setLimit(leader.token, limit);
+  assert.equal(saved.status, 200);
+  assert.deepEqual(await saved.json(), { plannerLimit: limit });
+  assert.equal((await state(backup.token)).orchestration?.backup, true);
+  assert.equal((await state(backup.token)).orchestration?.plannerLimit, limit);
+  assert.equal((await state(member.token)).orchestration?.plannerLimit, limit);
+
+  assert.equal((await setLimit(member.token, 2)).status, 403);
+  assert.equal((await setLimit(backup.token, null)).status, 403);
+  assert.equal((await setLimit(host.token, 2)).status, 403);
+  assert.equal((await setLimit(leader.token, 0)).status, 400);
+  assert.equal((await setLimit(leader.token, limit + 1)).status, 400);
+  assert.equal((await request(leader.token, '/planner-limit', {})).status, 400);
+  for (const path of ['/settings', '/join'])
+    assert.equal((await request(leader.token, path, { ...defaultChatSettings, plannerLimit: null })).status, 400);
+
+  const custom = { ...defaultChatSettings, tokenLimit: 35, allowedModels: ['test-model'] };
+  assert.equal((await request(leader.token, '/settings', custom)).status, 200);
+  const { allowedModels: _omitted, ...olderClient } = custom;
+  const rejoined = await request(leader.token, '/join', olderClient);
+  assert.equal(rejoined.status, 200);
+  assert.deepEqual(await rejoined.json(), custom);
+  assert.equal((await state()).orchestration?.plannerLimit, limit);
+
+  const updatedSettings = { ...custom, agentLimit: 4 };
+  const [first, second, personal] = await Promise.all([
+    setLimit(leader.token, 1),
+    setLimit(leader.token, 6),
+    request(leader.token, '/settings', updatedSettings),
+  ]);
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  assert.equal(personal.status, 200);
+  assert.deepEqual(await first.json(), { plannerLimit: 1 });
+  assert.deepEqual(await second.json(), { plannerLimit: 6 });
+  const edited = await state();
+  assert.ok(edited.orchestration?.plannerLimit === 1 || edited.orchestration?.plannerLimit === 6);
+  assert.deepEqual(edited.settings, updatedSettings);
+  const cleared = await setLimit(leader.token, null);
+  assert.equal(cleared.status, 200);
+  assert.deepEqual(await cleared.json(), { plannerLimit: null });
+  assert.equal((await state(backup.token)).orchestration?.plannerLimit, null);
 });

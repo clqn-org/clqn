@@ -6,7 +6,22 @@ import {
   type ChatSettings,
   defaultChatSettings,
 } from '@clqn/shared';
-import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  ne,
+  or,
+  type SQLWrapper,
+  sql,
+} from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { WorkspaceDb } from '../lib/access.js';
 import { chatBackups, chatMembers, chatMessages, chats } from './chat.js';
@@ -15,8 +30,25 @@ import { agents, clans, linkedRepositories, users } from './schema.js';
 import { tasks } from './tasks.js';
 
 export const messageScope = (clanId: string) => eq(chatMessages.clanId, clanId);
+export const workScope = (workId?: string | null) =>
+  workId ? eq(chatMessages.workId, workId) : isNull(chatMessages.workId);
 export const memberScope = (clanId: string, userId: string) =>
   and(eq(chatMembers.clanId, clanId), eq(chatMembers.userId, userId));
+
+export function pendingContinuation(db: WorkspaceDb, clanId: string, taskId: string | SQLWrapper) {
+  const pending = alias(chatMessages, 'pending_continuation');
+  return db
+    .select({ id: pending.id })
+    .from(pending)
+    .where(
+      and(
+        eq(pending.clanId, clanId),
+        eq(pending.status, 'approval'),
+        sql`${pending.proposal}->>'taskId' = ${taskId}::text`,
+      ),
+    )
+    .limit(1);
+}
 
 // A picked message stops showing as processing after this long, for example when the leader closes the chat mid-turn.
 const processingFor = 5 * 60_000;
@@ -42,7 +74,13 @@ export function messageView(row: typeof chatMessages.$inferSelect): ChatMessage 
 export async function chatIdentity(db: WorkspaceDb, clanId: string, userId: string) {
   const activeUser = alias(users, 'active_host');
   const [identity] = await db
-    .select({ host: users.email, clan: clans.name, nominatedUserId: chatBackups.userId, activeHost: activeUser.email })
+    .select({
+      host: users.email,
+      clan: clans.name,
+      nominatedUserId: chatBackups.userId,
+      activeHost: activeUser.email,
+      plannerLimit: chats.plannerLimit,
+    })
     .from(clans)
     .leftJoin(chats, eq(chats.clanId, clans.id))
     .leftJoin(chatBackups, and(eq(chatBackups.clanId, chats.clanId), eq(chatBackups.userId, userId)))
@@ -68,11 +106,17 @@ export async function chatInfo(
   return { clan, session: host === null ? null : { clan, host }, canStart, settings: member?.settings ?? defaults };
 }
 
-export async function chatHistory(db: WorkspaceDb, clanId: string, before?: number, size = 60) {
+export async function chatHistory(db: WorkspaceDb, clanId: string, before?: number, size = 60, workId?: string) {
   const rows = await db
     .select()
     .from(chatMessages)
-    .where(and(messageScope(clanId), before ? lt(chatMessages.sequence, before) : undefined))
+    .where(
+      and(
+        messageScope(clanId),
+        before ? lt(chatMessages.sequence, before) : undefined,
+        workId ? workScope(workId) : undefined,
+      ),
+    )
     .orderBy(desc(chatMessages.sequence))
     .limit(size + 1);
   const page = rows.slice(0, size);
@@ -82,12 +126,12 @@ export async function chatHistory(db: WorkspaceDb, clanId: string, before?: numb
   };
 }
 
-export async function chatQueue(db: WorkspaceDb, clanId: string, status: 'queued' | 'clarification') {
+export async function chatQueue(db: WorkspaceDb, clanId: string, status: 'queued' | 'clarification', workId?: string) {
   return (
     await db
       .select()
       .from(chatMessages)
-      .where(and(messageScope(clanId), eq(chatMessages.status, status)))
+      .where(and(messageScope(clanId), workScope(workId), eq(chatMessages.status, status)))
       .orderBy(asc(chatMessages.sequence))
       .limit(60)
   ).map(messageView);
@@ -97,7 +141,7 @@ export async function forcePending(db: WorkspaceDb, clanId: string) {
   const [row] = await db
     .select({ id: chatMessages.id, pickedAt: chatMessages.pickedAt })
     .from(chatMessages)
-    .where(and(messageScope(clanId), eq(chatMessages.status, 'queued'), eq(chatMessages.force, true)))
+    .where(and(messageScope(clanId), workScope(), eq(chatMessages.status, 'queued'), eq(chatMessages.force, true)))
     .orderBy(asc(chatMessages.sequence))
     .limit(1);
   return row
@@ -105,19 +149,28 @@ export async function forcePending(db: WorkspaceDb, clanId: string) {
     : null;
 }
 
-// Called with the chat locked. Forced messages go first, and each priority is FIFO.
-export async function pickNext(db: WorkspaceDb, clanId: string) {
-  const [next] = await db
+export function nextQueued(db: WorkspaceDb, clanId: string, workId?: string) {
+  return db
     .select({ id: chatMessages.id })
     .from(chatMessages)
-    .where(and(messageScope(clanId), eq(chatMessages.status, 'queued')))
+    .where(and(messageScope(clanId), workScope(workId), eq(chatMessages.status, 'queued')))
     .orderBy(desc(chatMessages.force), asc(chatMessages.sequence))
     .limit(1);
+}
+
+// Called with the chat locked. Forced messages go first, and each priority is FIFO within one inbox.
+export async function pickNext(db: WorkspaceDb, clanId: string, workId?: string) {
+  const [next] = await nextQueued(db, clanId, workId);
   await db
     .update(chatMessages)
     .set({ pickedAt: null, pickId: null })
     .where(
-      and(messageScope(clanId), isNotNull(chatMessages.pickedAt), next ? ne(chatMessages.id, next.id) : undefined),
+      and(
+        messageScope(clanId),
+        workScope(workId),
+        isNotNull(chatMessages.pickedAt),
+        next ? ne(chatMessages.id, next.id) : undefined,
+      ),
     );
   if (!next) return { next: null, pickId: null };
   const pickId = randomUUID();

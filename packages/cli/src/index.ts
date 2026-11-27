@@ -6,7 +6,6 @@ import {
   ApiError,
   type Clan,
   ClqnClient,
-  chatLeaseInputSchema,
   registerAgentSchema,
   repositorySlugSchema,
   resourceAliasSchema,
@@ -411,8 +410,7 @@ program
   .option('--path <directory>', 'project clone or worktree (defaults to current directory)', '.')
   .addOption(new Option('--profile <path>').hideHelp())
   .addOption(new Option('--no-sync').hideHelp())
-  .addOption(new Option('--lease <id>').hideHelp())
-  .action(async (options: { path: string; sync: boolean; lease?: string }) => {
+  .action(async (options: { path: string; sync: boolean }) => {
     const api = await client();
     const config = sessionProfile ? {} : await readConfig(apiUrl());
     const actor = sessionProfile || process.env.CLQN_TOKEN || config.token ? await api.whoami() : undefined;
@@ -421,10 +419,7 @@ program
     const clanId = sessionProfile?.clanId ?? process.env.CLQN_CLAN_ID ?? actor?.clanId ?? config.clanId;
     const controller = new AbortController();
     const stop = () => controller.abort();
-    const leaseId =
-      options.lease === undefined ? undefined : chatLeaseInputSchema.parse({ leaseId: options.lease }).leaseId;
-    if (leaseId && (!sessionProfile || !actor?.agentId)) throw new Error('An agent profile is required to host chat');
-    const server = await serveMcp(api, clanId, stop, leaseId);
+    const server = await serveMcp(api, clanId, stop);
     const shutdown = () => {
       stop();
       void server.close();

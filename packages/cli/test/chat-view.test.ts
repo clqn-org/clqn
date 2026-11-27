@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { ChatMessage, ChatState } from '@clqn/shared';
-import { chatFrame, messageLines, painter, threaded } from '../src/chat-view.js';
+import { type ChatMessage, type ChatState, defaultChatSettings } from '@clqn/shared';
+import {
+  chatFrame,
+  messageLines,
+  painter,
+  plannerLimitField,
+  settingsFields,
+  settingsLines,
+  threaded,
+} from '../src/chat-view.js';
 
 const message: ChatMessage = {
   id: '00000000-0000-4000-8000-000000000001',
@@ -18,8 +26,8 @@ const message: ChatMessage = {
 test('queued and processing messages shimmer until the orchestrator answers', () => {
   const paint = painter(true);
   const queued = messageLines(message, 60, 'me', paint, 3)[0]!;
-  assert.match(queued.replace(/\x1b\[\d+m/g, ''), /Queued$/);
-  assert.match(queued, /\x1b\[97mQ/);
+  assert.match(queued.replace(/\x1b\[\d+m/g, ''), /Pending$/);
+  assert.match(queued, /\x1b\[97mP/);
   const processing = { ...message, processing: true };
   assert.match(messageLines(processing, 60, 'me', paint)[0]!.replace(/\x1b\[\d+m/g, ''), /Processing$/);
   const bright = (frame: number) =>
@@ -29,6 +37,29 @@ test('queued and processing messages shimmer until the orchestrator answers', ()
   assert.notDeepEqual(bright(5), bright(6));
   // Handled messages never shimmer or show Processing.
   assert.doesNotMatch(messageLines({ ...processing, status: 'handled' }, 60, 'me', paint, 3)[0]!, /\x1b\[97m/);
+});
+
+test('parallel planning is editable above Save settings and displays Auto for a blank value', () => {
+  const settings = {
+    value: defaultChatSettings,
+    tokenText: '',
+    agentText: '',
+    modelText: '',
+    inviteText: '',
+    deleteText: '',
+    field: plannerLimitField,
+    action: 'Save settings',
+  };
+  assert.deepEqual(settingsFields(true, false, true, true).slice(-4), [plannerLimitField, 7, 10, 8]);
+  assert.doesNotMatch(settingsLines(settings, 60, painter(false), 12, '').join('\n'), /Planners/);
+  for (const [input, label] of [
+    ['', 'Auto'],
+    ['7', '7'],
+  ] as const) {
+    const lines = settingsLines({ ...settings, plannerText: input }, 60, painter(false), 10, '');
+    assert.ok(lines.length <= 10);
+    assert.ok(lines.includes(`› Planners         ${label}`));
+  }
 });
 
 test('answers sit right below the message they answer', () => {

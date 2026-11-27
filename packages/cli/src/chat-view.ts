@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatSettings, ChatState } from '@clqn/shared';
+import { type ChatMessage, type ChatSettings, type ChatState, defaultPlannerLimit } from '@clqn/shared';
 
 import { type Runtime, runtimeNames } from './agent-session.js';
 import { markdownLines } from './markdown.js';
@@ -51,7 +51,7 @@ export const limit = (value: number | null) => (value === null ? '∞' : number(
 const time = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 
 const statuses = {
-  queued: ['◌', 'Queued', 'muted'],
+  queued: ['◌', 'Pending', 'muted'],
   handled: ['✓', 'Handled', 'active'],
   clarification: ['?', 'Needs clarification', 'warning'],
   approval: ['◆', 'Awaiting approval', 'warning'],
@@ -84,6 +84,8 @@ interface SettingsView {
   tokenText: string;
   agentText: string;
   modelText: string;
+  // The leader's draft for the clan's parallel planning limit; undefined hides the row.
+  plannerText?: string | undefined;
   // Agent CLIs on this machine; undefined until they are found.
   agents?: { installed: Runtime[]; off: Runtime[] } | undefined;
   // The email being typed in the leader-only Invite row; undefined hides the row.
@@ -213,7 +215,8 @@ function agentsText(agents: SettingsView['agents']) {
 // The backup row can appear while settings are open. Give it a stable ID outside the other rows.
 export const backupHostingField = 9;
 export const deleteClanField = 10;
-export const settingsFields = (hasInvite: boolean, hasBackup: boolean, hasDelete = false) => [
+export const plannerLimitField = 11;
+export const settingsFields = (hasInvite: boolean, hasBackup: boolean, hasDelete = false, hasPlanner = false) => [
   0,
   1,
   2,
@@ -221,6 +224,7 @@ export const settingsFields = (hasInvite: boolean, hasBackup: boolean, hasDelete
   4,
   5,
   ...(hasInvite ? [6] : []),
+  ...(hasPlanner ? [plannerLimitField] : []),
   ...(hasBackup ? [backupHostingField] : []),
   hasInvite ? 7 : 6,
   ...(hasDelete ? [deleteClanField] : []),
@@ -230,7 +234,12 @@ export const settingsFields = (hasInvite: boolean, hasBackup: boolean, hasDelete
 // The selected setting row and the notice always fit; the hint, title, key help, and blank lines fill what room is left.
 export function settingsLines(settings: SettingsView, columns: number, paint: Paint, room: number, notice: string) {
   const hasInvite = settings.inviteText !== undefined;
-  const fields = settingsFields(hasInvite, settings.backupHosting !== undefined, settings.deleteText !== undefined);
+  const fields = settingsFields(
+    hasInvite,
+    settings.backupHosting !== undefined,
+    settings.deleteText !== undefined,
+    settings.plannerText !== undefined,
+  );
   const labels = [
     `Spawn approval   ${settings.value.approval === 'manual' ? 'Manual' : 'Automatic'}`,
     `Token limit      ${settings.tokenText || '∞'}`,
@@ -249,7 +258,9 @@ export function settingsLines(settings: SettingsView, columns: number, paint: Pa
         ? 'Type this clan’s name and press Enter to delete it for every member. This cannot be undone.'
         : settings.field === backupHostingField
           ? 'Press Enter to allow or stop backup hosting on this device.'
-          : 'Enter a whole number or none for unlimited; models comma-separated, blank for any.';
+          : settings.field === plannerLimitField
+            ? `Enter a maximum for the clan. Auto allows up to ${defaultPlannerLimit}, depending on available memory.`
+            : 'Enter a whole number or none for unlimited; models comma-separated, blank for any.';
   const hintLines = wrap(hint, columns).map((line) => paint(line, 'muted'));
   // In the smallest terminals, show the rows around the selected one when they do not all fit.
   const shownRows = Math.max(1, Math.min(fields.length, room - (notice ? 1 : 0)));
@@ -279,7 +290,9 @@ export function settingsLines(settings: SettingsView, columns: number, paint: Pa
           ? `Backup hosting   ${settings.backupHosting ? 'On' : 'Off'}`
           : field === deleteClanField
             ? `Delete clan      ${plain(settings.deleteText ?? '') || 'Type the clan name'}`
-            : labels[field]!;
+            : field === plannerLimitField
+              ? `Planners         ${plain(settings.plannerText ?? '') || 'Auto'}`
+              : labels[field]!;
       const line = clip(`${field === settings.field ? '›' : ' '} ${label}`, columns);
       return field === settings.field ? paint(line, 'accent') : line;
     }),
@@ -325,9 +338,9 @@ export function chatFrame(view: View): ChatFrame {
       'muted',
     );
   const runLabel = `Agents · ${state?.running ?? 0} running`;
-  const queued = `Orchestrator · ${state?.queued ?? 0} queued`;
+  const orchestrator = state?.work ? 'Orchestrator' : `Orchestrator · ${state?.queued ?? 0} queued`;
   const sep = paint(' │ ', 'muted');
-  lines.push(heading(queued, left) + (right ? sep + heading(runLabel, right) : ''));
+  lines.push(heading(orchestrator, left) + (right ? sep + heading(runLabel, right) : ''));
 
   const transcript = view.messages.length
     ? view.messages.flatMap((message) => messageLines(message, left, view.userId, paint, view.frame))

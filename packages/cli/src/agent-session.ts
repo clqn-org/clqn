@@ -126,84 +126,151 @@ const workerSandbox = {
   },
 };
 
-// A non-interactive runtime run with the agent's clqn MCP server. The prompt goes to stdin, so chat text never
-// appears in argv. The orchestrator may only use clqn tools; workers may also edit files in their workspace and run
-// commands as the member's setting allows. Codex cannot edit without running commands, so `off` makes it read-only.
-export function agentCommand(
-  runtime: Runtime,
-  profilePath: string,
-  options: {
-    project: string;
-    role: 'orchestrator' | 'worker';
-    model?: string | null | undefined;
-    commands?: WorkerCommands | undefined;
-    // Claude Code only: keep running and read one JSON user message per line from stdin, each a turn.
-    session?: boolean | undefined;
-    // Rules added to the system (Claude Code) or developer (Codex) instructions, so they hold for every turn.
-    instructions?: string | undefined;
-    // Codex only: continue this earlier session, so the agent remembers it.
-    resume?: string | undefined;
-    leaseId?: string | undefined;
-  },
-): AgentCommand {
-  const commands = options.role === 'worker' ? (options.commands ?? 'sandboxed') : 'off';
-  const command = process.execPath;
-  const npmCache = join(configDirectory(), 'npm-cache');
-  // The parent chat already watches the project, even while no agent is running.
-  const args = [resolve(process.argv[1]!), 'mcp', '--profile', profilePath, '--path', options.project, '--no-sync'];
-  if (options.role === 'orchestrator' && options.leaseId) args.push('--lease', options.leaseId);
-  const model = options.model ? (runtime === 'codex' ? ['-m', options.model] : ['--model', options.model]) : [];
-  const runtimeArgs =
-    runtime === 'codex'
+export const codexSandbox = {
+  off: { mode: 'read-only', policy: 'readOnly' },
+  sandboxed: { mode: 'workspace-write', policy: 'workspaceWrite' },
+  unrestricted: { mode: 'danger-full-access', policy: 'dangerFullAccess' },
+} as const satisfies Record<WorkerCommands, { mode: string; policy: string }>;
+
+interface AgentCommandOptions {
+  project: string;
+  role: 'orchestrator' | 'worker';
+  model?: string | null | undefined;
+  commands?: WorkerCommands | undefined;
+  // Workers with live follow-ups use a bidirectional runtime session.
+  live?: boolean | undefined;
+  // Rules added to the system (Claude Code) or developer (Codex) instructions, so they hold for every turn.
+  instructions?: string | undefined;
+}
+
+interface McpCommand {
+  command: string;
+  args: string[];
+  profilePath: string;
+}
+
+const codexDisabled = ['--disable', 'hooks', '--disable', 'plugins', '--disable', 'apps'];
+
+function codexMcpArgs(mcp: McpCommand | undefined) {
+  if (!mcp) return [];
+  return [
+    '-c',
+    // Codex cannot ask for approval in clqn chat, so approve clqn tool calls at runtime.
+    `mcp_servers.clqn={command=${JSON.stringify(mcp.command)},args=${JSON.stringify(mcp.args)},default_tools_approval_mode="approve"}`,
+    '-c',
+    `shell_environment_policy.set.CLQN_AGENT_PROFILE=${JSON.stringify(mcp.profilePath)}`,
+  ];
+}
+
+function codexLiveArgs(commands: WorkerCommands, mcp: McpCommand | undefined) {
+  return [
+    'app-server',
+    '--listen',
+    'stdio://',
+    '-c',
+    'approval_policy="never"',
+    '-c',
+    `sandbox_mode="${codexSandbox[commands].mode}"`,
+    '-c',
+    'sandbox_workspace_write.network_access=false',
+    '-c',
+    'sandbox_workspace_write.writable_roots=[]',
+    ...codexDisabled,
+    ...codexMcpArgs(mcp),
+  ];
+}
+
+function codexExecArgs(options: AgentCommandOptions, commands: WorkerCommands, mcp: McpCommand | undefined) {
+  const sandboxArgs =
+    commands === 'unrestricted'
+      ? ['--dangerously-bypass-approvals-and-sandbox']
+      : ['--sandbox', codexSandbox[commands].mode];
+
+  return [
+    'exec',
+    '--json',
+    '--skip-git-repo-check',
+    // Skip the member's own Codex config: it adds context to every turn. Sign-in still works.
+    '--ignore-user-config',
+    ...(options.role === 'orchestrator'
       ? [
-          'exec',
-          ...(options.resume ? ['resume'] : []),
-          '--json',
-          '--skip-git-repo-check',
-          // Skip the member's own Codex config: it adds context to every turn. Sign-in still works.
-          '--ignore-user-config',
-          ...(commands === 'unrestricted'
-            ? ['--dangerously-bypass-approvals-and-sandbox']
-            : options.resume
-              ? // Resuming has no --sandbox flag.
-                ['-c', `sandbox_mode="${commands === 'sandboxed' ? 'workspace-write' : 'read-only'}"`]
-              : ['--sandbox', commands === 'sandboxed' ? 'workspace-write' : 'read-only']),
-          ...model,
-          ...(options.instructions ? ['-c', `developer_instructions=${JSON.stringify(options.instructions)}`] : []),
           '-c',
-          // Codex exec cannot ask for approval, so clqn tools that write would otherwise always be refused.
-          `mcp_servers.clqn={command=${JSON.stringify(command)},args=${JSON.stringify(args)},default_tools_approval_mode="approve"}`,
+          'model_reasoning_effort="low"',
           '-c',
-          `shell_environment_policy.set.CLQN_AGENT_PROFILE=${JSON.stringify(profilePath)}`,
-          ...(options.resume ? [options.resume] : []),
-          '-',
+          'project_doc_max_bytes=0',
+          '--disable',
+          'shell_tool',
+          ...codexDisabled,
         ]
-      : [
-          '--print',
-          ...(options.session
-            ? ['--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose']
-            : ['--output-format', 'json']),
-          ...(options.instructions ? ['--append-system-prompt', options.instructions] : []),
-          ...model,
-          '--strict-mcp-config',
+      : []),
+    ...sandboxArgs,
+    ...(options.model ? ['-m', options.model] : []),
+    ...(options.instructions ? ['-c', `developer_instructions=${JSON.stringify(options.instructions)}`] : []),
+    ...codexMcpArgs(mcp),
+    '-',
+  ];
+}
+
+function claudeArgs(
+  options: AgentCommandOptions,
+  commands: WorkerCommands,
+  live: boolean,
+  npmCache: string,
+  mcp: McpCommand | undefined,
+) {
+  const orchestrator = options.role === 'orchestrator';
+  return [
+    '--print',
+    ...(live
+      ? ['--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose']
+      : ['--output-format', 'json']),
+    ...(options.instructions ? ['--append-system-prompt', options.instructions] : []),
+    ...(orchestrator ? ['--effort', 'low'] : []),
+    ...(options.model ? ['--model', options.model] : []),
+    '--strict-mcp-config',
+    ...(mcp
+      ? [
           '--mcp-config',
-          JSON.stringify({ mcpServers: { clqn: { type: 'stdio', command, args } } }),
-          // Skip the member's user settings and plugins: they add context to every turn. Workers keep the repo's
-          // skills, as if a member had started them there; the orchestrator only needs clqn tools.
-          '--setting-sources',
-          'project,local',
-          // The orchestrator gets no built-in tools, so its clqn tools load up front instead of through a search.
-          ...(options.role === 'orchestrator' ? ['--disable-slash-commands', '--tools', ''] : []),
-          // Sandboxed workers run commands without prompts inside Claude Code's OS sandbox: writes stay in the
-          // worktree (git metadata included, hooks and config excluded) and the network is limited to the npm
-          // registry. npm's cache moves out of ~/.npm, which the sandbox blocks, into a directory it may write.
-          ...(commands === 'sandboxed' ? ['--settings', JSON.stringify(workerSandbox), '--add-dir', npmCache] : []),
-          '--permission-mode',
-          commands === 'unrestricted' ? 'bypassPermissions' : options.role === 'worker' ? 'acceptEdits' : 'default',
-          '--allowedTools',
-          'mcp__clqn',
-        ];
-  const env: NodeJS.ProcessEnv = { ...process.env, CLQN_AGENT_PROFILE: profilePath };
+          JSON.stringify({ mcpServers: { clqn: { type: 'stdio', command: mcp.command, args: mcp.args } } }),
+        ]
+      : []),
+    // Workers keep the repo's skills. Planning turns get only their supplied instructions and chat context.
+    '--setting-sources',
+    orchestrator ? '' : 'project,local',
+    ...(orchestrator ? ['--disable-slash-commands', '--tools', ''] : []),
+    // Sandboxed workers run commands without prompts inside Claude Code's OS sandbox: writes stay in the
+    // worktree (git metadata included, hooks and config excluded) and the network is limited to the npm
+    // registry. npm's cache moves out of ~/.npm, which the sandbox blocks, into a directory it may write.
+    ...(commands === 'sandboxed' ? ['--settings', JSON.stringify(workerSandbox), '--add-dir', npmCache] : []),
+    '--permission-mode',
+    commands === 'unrestricted' ? 'bypassPermissions' : orchestrator ? 'default' : 'acceptEdits',
+    ...(mcp ? ['--allowedTools', 'mcp__clqn'] : []),
+  ];
+}
+
+// Prompts go to stdin. Planning turns run without clqn credentials or action tools. Workers use their clqn MCP
+// server and run commands as the member's settings allow. Codex cannot edit without commands, so `off` is read-only.
+export function agentCommand(runtime: Runtime, profilePath: string, options: AgentCommandOptions): AgentCommand {
+  const commands = options.role === 'worker' ? (options.commands ?? 'sandboxed') : 'off';
+  const live = options.role === 'worker' && options.live === true;
+  const npmCache = join(configDirectory(), 'npm-cache');
+  const mcp =
+    options.role === 'worker'
+      ? {
+          command: process.execPath,
+          // The parent chat already watches the project.
+          args: [resolve(process.argv[1]!), 'mcp', '--profile', profilePath, '--path', options.project, '--no-sync'],
+          profilePath,
+        }
+      : undefined;
+  let runtimeArgs: string[];
+  if (runtime === 'claude') runtimeArgs = claudeArgs(options, commands, live, npmCache, mcp);
+  else if (live) runtimeArgs = codexLiveArgs(commands, mcp);
+  else runtimeArgs = codexExecArgs(options, commands, mcp);
+
+  const env = { ...process.env };
+  if (mcp) env.CLQN_AGENT_PROFILE = profilePath;
+  else delete env.CLQN_AGENT_PROFILE;
   if (runtime === 'claude' && commands === 'sandboxed') {
     mkdirSync(npmCache, { recursive: true, mode: 0o700 });
     env.npm_config_cache = npmCache;
@@ -218,15 +285,11 @@ const object = (value: unknown): Json => (value && typeof value === 'object' ? (
 const count = (...values: unknown[]) =>
   values.reduce<number>((sum, value) => sum + (typeof value === 'number' && value > 0 ? value : 0), 0);
 
-// Total input and output tokens, the final message, and Codex's session ID from a finished run's stdout.
-export function agentOutput(
-  runtime: Runtime,
-  stdout: string,
-): { tokens: number; text?: string; error?: string; session?: string } {
+// Total input and output tokens and the final message from a finished run's stdout.
+export function agentOutput(runtime: Runtime, stdout: string): { tokens: number; text?: string; error?: string } {
   let tokens = 0;
   let text: string | undefined;
   let error: string | undefined;
-  let session: string | undefined;
   for (const line of runtime === 'codex' ? stdout.split('\n') : [stdout]) {
     let event: Json;
     try {
@@ -242,8 +305,6 @@ export function agentOutput(
       tokens = count(usage.input_tokens, usage.cache_creation_input_tokens, usage.output_tokens);
       if (typeof event.result === 'string') text = event.result;
       if (event.is_error === true) error = text ?? 'Claude Code reported an error';
-    } else if (event.type === 'thread.started') {
-      if (typeof event.thread_id === 'string') session = event.thread_id;
     } else if (event.type === 'turn.completed') {
       // Codex input tokens include cached input.
       const usage = object(event.usage);
@@ -260,7 +321,6 @@ export function agentOutput(
     tokens: Math.min(tokens, Number.MAX_SAFE_INTEGER),
     ...(text?.trim() ? { text: text.trim() } : {}),
     ...(error ? { error: plainError(error) } : {}),
-    ...(session ? { session } : {}),
   };
 }
 

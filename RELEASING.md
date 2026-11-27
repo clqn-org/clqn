@@ -36,7 +36,7 @@ git tag v0.1.1 origin/main
 git push origin refs/tags/v0.1.1
 ```
 
-The tag runs the full CI matrix. The release job checks main ancestry, the packed version, and the committed formula's URL and checksum. It uploads and verifies the GitHub draft asset, publishes the same bytes to npm with provenance, then makes the release public.
+The tag runs the full CI matrix. CLI publication waits for the database migrations and API deployment to succeed, so hosts can use the parallel orchestration API when they upgrade. The release job checks main ancestry, the packed version, and the committed formula's URL and checksum. It uploads and verifies the GitHub draft asset, publishes the same bytes to npm with provenance, then makes the release public.
 
 Rerun failed jobs for the original tag after an interruption. After the seven-day artifact retention period, rerun all jobs for the tag. A retry compares the archive with any published npm version and GitHub asset. A checksum conflict stops publication.
 
