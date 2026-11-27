@@ -34,8 +34,6 @@ When the orchestrator wants to start an agent on your machine, you see a **Spawn
 
 To approve automatically, set **Spawn approval** to **Automatic** in settings. Your [limits](policies.md) apply either way.
 
-Workers with a supported CLI advertise the models their runtime reports. The planner chooses from those options within the worker owner's **Models** setting. It aims for lighter models on quick reviews and simple edits, balanced models on routine work and tests, and stronger models on complex tasks. Mention a specific model in chat to request it. If a worker's runtime cannot report models, clqn can use the owner's model list or the runtime default.
-
 The **Agents** panel on the right lists each task with its worker, status, and tokens. A tilde (`~40k`) marks an estimate until the worker reports real usage.
 
 ## Stop and continue agents

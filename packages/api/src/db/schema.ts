@@ -1,4 +1,3 @@
-import type { WorkerModel } from '@clqn/shared';
 import { sql } from 'drizzle-orm';
 import {
   bigint,
@@ -7,7 +6,6 @@ import {
   check,
   index,
   integer,
-  jsonb,
   pgEnum,
   pgTable,
   primaryKey,
@@ -68,7 +66,6 @@ export const agents = pgTable(
       .references(() => users.id),
     name: text('name').notNull(),
     role: text('role').$type<'worker' | 'orchestrator'>().notNull().default('worker'),
-    availableModels: jsonb('available_models').$type<WorkerModel[]>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

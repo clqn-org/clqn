@@ -111,30 +111,12 @@ async function getWorker(db: WorkspaceDb, clanId: string, id: string) {
     .select({
       id: agents.id,
       ownerId: agents.ownerId,
-      availableModels: agents.availableModels,
+      active: sql<boolean>`exists (select 1 from ${credentials} where credentials.agent_id = agents.id)`,
     })
     .from(agents)
-    .where(and(eq(agents.clanId, clanId), eq(agents.id, id), eq(agents.role, 'worker')))
-    .for('share');
+    .where(and(eq(agents.clanId, clanId), eq(agents.id, id), eq(agents.role, 'worker')));
   if (!worker) throw missing('Worker');
-  // A concurrent report or credential reset must settle before selecting and approving a model.
-  const [credential] = await db
-    .select({ id: credentials.id })
-    .from(credentials)
-    .where(eq(credentials.agentId, worker.id))
-    .limit(1);
-  return { ...worker, active: !!credential };
-}
-
-type Worker = Awaited<ReturnType<typeof getWorker>>;
-
-function supportsModel(worker: Worker, model: string) {
-  return worker.availableModels?.some(({ id }) => id === model) ?? true;
-}
-
-function requireWorkerModel(worker: Worker, model: string | null | undefined) {
-  if (model && !supportsModel(worker, model))
-    throw new ApiError(409, 'MODEL_NOT_AVAILABLE', `Model ${model} is not available on this worker`);
+  return worker;
 }
 
 // The share lock waits for, and then blocks, a concurrent edit of the owner's limits until commit.
@@ -143,7 +125,12 @@ async function ownerSettings(db: WorkspaceDb, clanId: string, ownerId: string) {
   return owner?.settings;
 }
 
-async function admission(db: WorkspaceDb, clanId: string, worker: Worker, proposal: ChatProposal) {
+async function admission(
+  db: WorkspaceDb,
+  clanId: string,
+  worker: Awaited<ReturnType<typeof getWorker>>,
+  proposal: ChatProposal,
+) {
   if (!worker.active) return 'The worker no longer has an active credential';
   const settings = await ownerSettings(db, clanId, worker.ownerId);
   if (!settings) return 'The worker owner must join the chat first';
@@ -300,20 +287,13 @@ export async function decideChat(
     if (!worker.active) throw conflict('Choose a worker with an active credential');
     const owner = await ownerSettings(db, clanId, worker.ownerId);
     const models = owner?.allowedModels ?? null;
-    const model = body.model ?? models?.find((id) => supportsModel(worker, id)) ?? null;
-    if (models && model === null)
-      throw new ApiError(
-        409,
-        'MODEL_NOT_AVAILABLE',
-        'None of the models allowed by the worker owner are available on this worker',
-      );
+    const model = body.model ?? models?.[0] ?? null;
     if (models && !models.includes(model!))
       throw new ApiError(
         409,
         'MODEL_NOT_ALLOWED',
         `The worker's owner allows only these models: ${models.join(', ')}. Choose one of them or another worker.`,
       );
-    requireWorkerModel(worker, model);
     let workId = message.workId;
     if (body.taskId) {
       const current = await continuableTask(db, clanId, body.taskId, worker.id);
@@ -404,7 +384,6 @@ export async function approveChat(db: WorkspaceDb, actor: Actor, clanId: string,
     return chatAcknowledged;
   if (message.status !== 'approval') throw conflict('This proposal is no longer awaiting approval');
   if (approve) {
-    if (worker.active) requireWorkerModel(worker, message.proposal.model);
     const reason = await admission(db, clanId, worker, message.proposal);
     if (reason) throw new ApiError(409, 'LIMIT_REACHED', reason);
     await assignChatTask(db, actor, clanId, id, worker.id, message.proposal);

@@ -149,7 +149,7 @@ interface McpCommand {
   profilePath: string;
 }
 
-export const codexDisabled = ['--disable', 'hooks', '--disable', 'plugins', '--disable', 'apps'];
+const codexDisabled = ['--disable', 'hooks', '--disable', 'plugins', '--disable', 'apps'];
 
 function codexMcpArgs(mcp: McpCommand | undefined) {
   if (!mcp) return [];

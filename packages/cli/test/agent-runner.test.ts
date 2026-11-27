@@ -16,7 +16,6 @@ import type {
   RepositoryInput,
   RepositoryReport,
   TaskRepository,
-  WorkerModel,
 } from '@clqn/shared';
 import { startAgentRunner } from '../src/agent-runner.js';
 import {
@@ -126,53 +125,6 @@ function hostingState(pending: string | null, changes: Partial<ChatState> = {}) 
     ...changes,
   });
 }
-
-test('the worker advertises runtime models when the server supports discovery', async (t) => {
-  const f = await fixture(t);
-  const workerId = randomUUID();
-  await saveAgentProfile({ agentId: workerId, clanId, server, token: token('w'), runtime: 'codex' });
-  const api = {
-    whoami: async () => ({ id: userId, email: 'member@example.com' }),
-    listAgents: async () => ({ agents: [agent(workerId, 'worker')] }),
-    registerAgent: async () => assert.fail('the saved worker should be reused'),
-  } as unknown as ClqnClient;
-  const models = [{ id: 'example-mini', description: 'Option for small jobs' }];
-  const reports: WorkerModel[][] = [];
-  const runtimes: string[] = [];
-  const runner = startAgentRunner({
-    api,
-    server,
-    clanId,
-    project: f.directory,
-    spawn: f.spawn,
-    runtimes: async () => ['codex'],
-    now: f.now,
-    discoverModels: async (runtime, { signal }) => {
-      assert.equal(signal.aborted, false);
-      runtimes.push(runtime);
-      return models;
-    },
-    agentClient: ({ agentId }) => {
-      assert.equal(agentId, workerId);
-      return {
-        reportWorkerModels: async (available: WorkerModel[]) => reports.push(available),
-      } as unknown as ClqnClient;
-    },
-  });
-  t.after(() => runner.stop());
-  runner.update(chatState());
-  const supported = chatState({ workerModelDiscovery: true });
-  runner.update(supported);
-  await until(() => reports.length === 1);
-  runner.update(supported);
-  assert.equal(reports.length, 1);
-  assert.equal(f.spawned.length, 0);
-  f.advance(10 * 60_000);
-  runner.update(supported);
-  await until(() => reports.length === 2);
-  assert.deepEqual(reports, [models, models]);
-  assert.deepEqual(runtimes, ['codex', 'codex']);
-});
 
 function memberMessage(text: string, sequence = 1) {
   return {

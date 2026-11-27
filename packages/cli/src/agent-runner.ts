@@ -16,7 +16,6 @@ import {
   repositoryInputSchema,
   type Task,
   type WorkerCommands,
-  type WorkerModel,
 } from '@clqn/shared';
 import {
   type AgentProfile,
@@ -46,7 +45,6 @@ import {
   taskWorktreeLocation,
 } from './git.js';
 import { createOrchestration } from './orchestration.js';
-import { discoverWorkerModels } from './worker-models.js';
 import { runWorkerSession, type WorkerUpdates } from './worker-session.js';
 
 type Listed = Agent & { active?: boolean | undefined };
@@ -72,7 +70,6 @@ export interface AgentRunnerOptions {
   spawn?: typeof nodeSpawn;
   // The agent CLIs installed on this machine.
   runtimes?: () => Promise<Runtime[]>;
-  discoverModels?: typeof discoverWorkerModels;
   workspace?: (taskId: string) => Promise<string>;
   now?: () => number;
   // Connects as one of this member's agents.
@@ -102,7 +99,6 @@ export interface AgentRunner {
 const retryAfter = 60_000;
 const heartbeatInterval = 10_000;
 const leaseDuration = 45_000;
-const modelRefreshInterval = 10 * 60_000;
 const outputLimit = 4 * 1024 * 1024;
 const message = (error: unknown) => (error instanceof Error ? error.message : 'Request failed');
 const agentClient = (options: AgentRunnerOptions, profile: AgentProfile) =>
@@ -322,9 +318,6 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
   const workers = new Map<string, { since: number; child?: ChildProcess; stopped: boolean }>();
   const publicationRetry = new Map<string, number>();
   const publicationAbort = new AbortController();
-  const modelDiscoveryAbort = new AbortController();
-  let modelDiscoveryAt = -Infinity;
-  let discoveringModels = false;
   let connections: Awaited<ReturnType<typeof prepare>> | undefined;
   let latest: ChatState | undefined;
   let generation = 0;
@@ -346,7 +339,6 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
   let stopped = false;
   let orchestrationDirectory: Promise<string> | undefined;
   const killAll = () => {
-    modelDiscoveryAbort.abort();
     for (const child of children) if (!child.killed) child.kill('SIGTERM');
   };
   process.once('exit', killAll);
@@ -775,33 +767,6 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
     return `Stopping ${title}…`;
   }
 
-  function refreshWorkerModels(state: ChatState, local: Map<string, Connection>) {
-    if (!state.workerModelDiscovery || !local.size || discoveringModels || now() < modelDiscoveryAt) return;
-    discoveringModels = true;
-    modelDiscoveryAt = now() + modelRefreshInterval;
-    const current = generation;
-    const { signal } = modelDiscoveryAbort;
-    const discover = options.discoverModels ?? discoverWorkerModels;
-    const catalogs = new Map<Runtime, Promise<WorkerModel[] | undefined>>();
-    track(
-      Promise.allSettled(
-        [...local.values()].map(async ({ runtime, profile }) => {
-          let pending = catalogs.get(runtime);
-          if (!pending) {
-            // Catalog probes inspect the local runtime account without loading the task repository.
-            pending = discover(runtime, { cwd: tmpdir(), signal, spawn });
-            catalogs.set(runtime, pending);
-          }
-          const models = await pending;
-          if (models?.length && !stopped && generation === current)
-            await agentClient(options, profile).reportWorkerModels(models, signal);
-        }),
-      ).then(() => {
-        discoveringModels = false;
-      }),
-    );
-  }
-
   function update(state: ChatState) {
     if (stopped) return;
     latest = state;
@@ -831,7 +796,6 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
           // Choices changed while connecting: connect again with the new ones.
           if (current !== generation) return update(latest!);
           connections = prepared;
-          modelDiscoveryAt = -Infinity;
           if (lease && !prepared.orchestrator) stopHosting();
           problem = undefined;
           update(latest!);
@@ -845,7 +809,6 @@ export function startAgentRunner(options: AgentRunnerOptions): AgentRunner {
       );
       return;
     }
-    refreshWorkerModels(state, connections.workers);
     if (connections.orchestrator) {
       const grant = followLease(connections.orchestrator);
       if (grant) orchestrate(state, grant);

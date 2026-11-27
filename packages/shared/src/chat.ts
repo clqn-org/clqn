@@ -192,7 +192,6 @@ export const chatStateSchema = chatHistorySchema.extend({
   runs: z.array(chatRunSchema),
   mergeQueue: z.array(chatMergeRequestSchema).optional(),
   orchestration: chatOrchestrationSchema.optional(),
-  workerModelDiscovery: z.boolean().optional(),
   queued: z.number().int().nonnegative(),
   forcePending: z.object({ id: z.uuid(), processing: z.boolean() }).nullable().optional(),
   work: z.object({ pending: z.uuid().nullable(), ready: z.array(z.uuid()) }).optional(),

@@ -133,7 +133,7 @@ export function createMcpServer(client: ClqnClient, defaultClanId?: string) {
   );
   tool(
     'clqn_list_agents',
-    'List registered agents in this clan, their advertised availableModels, and their owner’s allowedModels. A model must satisfy both when given.',
+    'List registered agents in this clan with their aliases, UUIDs, roles and allowedModels (the owner’s model limits; null allows any).',
     clanInput,
     true,
     async (input) => client.listAgents(await clan(input)),
