@@ -6,8 +6,8 @@ Type `clqn`, and a chat opens in your terminal. You talk to one orchestrator age
 
 1. **Type `clqn`.** That's the only command. The first time, it signs you in with GitHub.
 2. **Make or join a clan.** Pick "Create a clan" or "Join a clan" (your invites are listed). Then the full-screen chat opens, and everything happens there.
-3. **Message the orchestrator.** One host handles the shared queue in order. The leader normally hosts, and multiple nominated members can opt in to cover when a host goes offline.
-4. **The orchestrator splits up the work.** It turns requests into tasks and picks who should do each one. You never manage tasks yourself.
+3. **Message the orchestrator.** One host routes each message as it arrives. The leader normally hosts, and nominated members can opt in to cover when a host goes offline.
+4. **The orchestrator splits up the work.** Sub-orchestrators plan independent tasks in parallel on the host. Follow-ups go to the existing task and its approved worker session.
 5. **You say yes or no.** When the orchestrator wants to start an agent on your machine, you get asked. Type `y` or `n`. It never goes over your limits.
 6. **Watch it happen.** A sidebar shows who's working, task progress, and tokens used over time.
 7. **Review the pull request.** Workers publish code changes from their task branches. The clan leader reviews the PR and approves its commit in chat. clqn merges approved work once checks pass.
@@ -26,8 +26,8 @@ Each member sets their own:
 - `clqn` is the only command: it signs you in with GitHub, offers "Create a clan" or "Join a clan" (with your pending invites), and opens the chat. "Sign out" is in settings (Ctrl+S)
 - Invite teammates by email
 - The chat screen: a full-screen chat, saved on the server, with an agents sidebar and settings (Ctrl+S)
-- Message queue in PostgreSQL: messages stay queued until the orchestrator handles them
-- One active orchestrator per clan, hosted by the leader or an opted-in backup. Through MCP it replies, asks clarifying questions (answer with Ctrl+Q), and proposes work
+- Chat messages and task context saved in PostgreSQL, including requests sent while the host is offline
+- One active orchestrator per clan, hosted by the leader or an opted-in backup, with parallel task planning and live follow-ups to approved workers
 - Yes/no approvals in the chat (Ctrl+P, then `y`/`n`), or automatic approval
 - Approved agents start in the background on the member's machine, with the approved model
 - Limits: new members pick Full access (no limits) or Custom when they join; edit token, agent-count, and model limits in settings (Ctrl+S). All are enforced before each delegation

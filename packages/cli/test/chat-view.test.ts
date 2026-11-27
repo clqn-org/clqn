@@ -18,8 +18,8 @@ const message: ChatMessage = {
 test('queued and processing messages shimmer until the orchestrator answers', () => {
   const paint = painter(true);
   const queued = messageLines(message, 60, 'me', paint, 3)[0]!;
-  assert.match(queued.replace(/\x1b\[\d+m/g, ''), /Queued$/);
-  assert.match(queued, /\x1b\[97mQ/);
+  assert.match(queued.replace(/\x1b\[\d+m/g, ''), /Pending$/);
+  assert.match(queued, /\x1b\[97mP/);
   const processing = { ...message, processing: true };
   assert.match(messageLines(processing, 60, 'me', paint)[0]!.replace(/\x1b\[\d+m/g, ''), /Processing$/);
   const bright = (frame: number) =>

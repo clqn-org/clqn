@@ -19,7 +19,7 @@
 
 When several people each run several agents on one repository, context drifts, branches collide, and nobody is sure who owns what. `clqn` is a shared, lightweight TUI for coordinating work across your team and its agents.
 
-- **One chat.** Everyone's prompts go to the same orchestrator agent, in order.
+- **One chat.** The orchestrator routes each prompt so independent tasks can progress in parallel.
 - **Your machine, your call.** Agents run on their owners' compute and only with their approval.
 - **Limits you set.** Cap your tokens, how many agents run at once, and which models they use.
 - **No plumbing.** Tasks, branches, and worktrees are handled for you. Your `main` is automatically synced.

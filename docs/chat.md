@@ -16,15 +16,15 @@ Each nominated member opens ordinary `clqn` and enables **Backup hosting** in ch
 
 When the active host exits normally, an opted-in backup with chat open can take over on its next check. After a disconnect, the last heartbeat expires within 45 seconds. The next host uses shared chat history and picks up unfinished requests.
 
-Only one host processes the queue at a time. If a backup is already active, a returning leader or another backup waits its turn. Messages stay queued when every eligible host is offline.
+One host routes messages for the clan. If a backup is already active, a returning leader or another backup waits its turn. Messages stay saved when every eligible host is offline.
 
 ## Send a message
 
-Type a task, question, or piece of project context and press **Enter**. Messages wait in a queue. The orchestrator handles one at a time, oldest first, and shows the one it's working on as **Processing**. Its answer appears right below your message.
+Type a task, question, or piece of project context and press **Enter**. The orchestrator routes each message and can split a single request into independent tasks. Up to five task sub-orchestrators can plan in parallel on the active host's machine and AI account. You can keep sending messages while they work.
 
-Press **Ctrl+F** to force-send your draft. The orchestrator interrupts its current turn and handles the new message next. An unfinished message returns to the queue. Force-sent messages are handled in the order they arrive.
+Refer to a task by name when you send a follow-up. The orchestrator sends it to that task and makes it available to its approved worker. An active Codex or Claude Code worker receives the update in its current session at the next runtime opportunity.
 
-The orchestrator remembers the conversation for 20 messages, then starts a fresh session.
+Press **Ctrl+F** to give a draft priority in routing. Task planning and approved workers can continue while the host routes it.
 
 If the orchestrator needs more detail, a question appears above the composer. Press **Ctrl+Q**, type your answer, and press **Enter**.
 

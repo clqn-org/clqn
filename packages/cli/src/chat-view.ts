@@ -51,7 +51,7 @@ export const limit = (value: number | null) => (value === null ? '∞' : number(
 const time = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 
 const statuses = {
-  queued: ['◌', 'Queued', 'muted'],
+  queued: ['◌', 'Pending', 'muted'],
   handled: ['✓', 'Handled', 'active'],
   clarification: ['?', 'Needs clarification', 'warning'],
   approval: ['◆', 'Awaiting approval', 'warning'],
@@ -291,9 +291,9 @@ export function chatFrame(view: View): ChatFrame {
       'muted',
     );
   const runLabel = `Agents · ${state?.running ?? 0} running`;
-  const queued = `Orchestrator · ${state?.queued ?? 0} queued`;
+  const orchestrator = state?.work ? 'Orchestrator' : `Orchestrator · ${state?.queued ?? 0} queued`;
   const sep = paint(' │ ', 'muted');
-  lines.push(heading(queued, left) + (right ? sep + heading(runLabel, right) : ''));
+  lines.push(heading(orchestrator, left) + (right ? sep + heading(runLabel, right) : ''));
 
   const transcript = view.messages.length
     ? view.messages.flatMap((message) => messageLines(message, left, view.userId, paint, view.frame))

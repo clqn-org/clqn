@@ -645,6 +645,90 @@ test('approved runs start this member’s worker with its model, report usage, a
   await runner.stop();
 });
 
+test('an approved worker receives a follow-up in its current process before completing', async (t) => {
+  const f = await fixture(t);
+  const workerId = randomUUID();
+  const taskId = randomUUID();
+  const updateId = randomUUID();
+  await saveAgentProfile({ agentId: workerId, clanId, server, token: token('w'), runtime: 'claude' });
+  const transitions: string[] = [];
+  const reports: ChatUsage[] = [];
+  let checkedForUpdates = false;
+  let followupSent = false;
+  const api = {
+    whoami: async () => ({ id: userId, email: 'member@example.com' }),
+    listAgents: async () => ({ agents: [agent(workerId, 'worker')] }),
+  } as unknown as ClqnClient;
+  const workerApi = {
+    transitionTask: async (_clan: string, _id: string, action: string) => transitions.push(action),
+    task: async () => ({ id: taskId, description: 'Implement the original task' }),
+    reportChatUsage: async (_clan: string, _id: string, usage: ChatUsage) => reports.push(usage),
+    chatFollowups: async (_clan: string, id: string, after: number) => {
+      assert.equal(id, taskId);
+      assert.deepEqual(transitions, ['claim']);
+      checkedForUpdates = true;
+      return followupSent && !after
+        ? { messages: [{ sequence: 1, id: updateId, text: 'Keep support for the older runtime' }], next: 1 }
+        : { messages: [], next: after };
+    },
+  } as unknown as ClqnClient;
+  const runner = startAgentRunner({
+    api,
+    server,
+    clanId,
+    project: f.directory,
+    spawn: f.spawn,
+    runtimes: async () => ['claude'],
+    agentClient: () => workerApi,
+    workspace: async () => f.directory,
+  });
+  t.after(() => runner.stop());
+  runner.update(
+    chatState({
+      orchestration: { activeHost: 'leader@example.com', backup: false, eligible: false },
+      work: { pending: null, ready: [] },
+      runs: [
+        {
+          messageId: randomUUID(),
+          title: 'Runtime change',
+          worker: 'Claude Code',
+          workerId,
+          estimatedTokens: 500,
+          taskId,
+          status: 'queued',
+          tokens: null,
+        },
+      ],
+    }),
+  );
+  await until(() => checkedForUpdates);
+  const { child, args } = f.spawned[0]!;
+  assert.ok(args.includes('stream-json'));
+  assert.match(child.input, /Implement the original task/);
+  child.stdin.once('end', () => child.finish(0));
+  followupSent = true;
+  await until(() => child.input.includes('Keep support for the older runtime'));
+  const inputs = child.input
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.equal(inputs[1].uuid, updateId);
+  assert.equal(inputs[1].priority, 'next');
+  child.stdout.write(
+    `${JSON.stringify({
+      type: 'result',
+      result: 'Added support for the older runtime',
+      user_message_uuids: [inputs[0].uuid, updateId],
+      usage: { input_tokens: 25, output_tokens: 15 },
+    })}\n`,
+  );
+  await until(() => transitions.length === 2);
+  assert.deepEqual(transitions, ['claim', 'complete']);
+  assert.equal(f.spawned.length, 1);
+  assert.equal(reports[0]?.tokens, 40);
+  assert.equal(reports[0]?.result?.text, 'Added support for the older runtime');
+});
+
 test('a finished worker publishes its exact commit and reuses the PR after a failed API report and chat restart', async (t) => {
   const f = await fixture(t);
   const workerId = randomUUID();

@@ -165,7 +165,7 @@ export async function runChat(
     const pullRequests = chatPullRequests(state);
     const background = [
       agents?.status(),
-      orchestration && !host && state?.queued ? 'Orchestrator offline · messages queued' : undefined,
+      orchestration && !host && state?.queued ? 'Orchestrator offline · messages saved' : undefined,
       options?.repositoryStatus?.(),
     ]
       .filter(Boolean)
