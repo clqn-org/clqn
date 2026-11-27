@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { type Actor, ApiError, type ChatRouteRequest } from '@clqn/shared';
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, exists, gt, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { WorkspaceDb } from '../lib/access.js';
 import { chatMessages } from './chat.js';
@@ -36,9 +36,31 @@ export async function chatWorkState(db: WorkspaceDb, clanId: string) {
 // Existing proposals keep their original task and approval. The first routed follow-up opts them in.
 const isWork = or(
   isNotNull(chatMessages.workTitle),
-  and(isNull(chatMessages.workId), isNotNull(chatMessages.proposal)),
+  and(
+    isNull(chatMessages.workId),
+    isNotNull(chatMessages.proposal),
+    or(inArray(chatMessages.status, ['approval', 'clarification']), isNotNull(chatMessages.taskId)),
+  ),
 );
 const workRequest = alias(chatMessages, 'work_request');
+const currentDelegation = alias(chatMessages, 'current_delegation');
+const currentWorker = sql<string | null>`coalesce(${currentDelegation.workerId}, ${chatMessages.workerId})`;
+
+function pendingContinuation(db: WorkspaceDb) {
+  const pending = alias(chatMessages, 'pending_continuation');
+  return exists(
+    db
+      .select({ id: pending.id })
+      .from(pending)
+      .where(
+        and(
+          eq(pending.clanId, chatMessages.clanId),
+          eq(pending.status, 'approval'),
+          sql`${pending.proposal}->>'taskId' = ${tasks.id}::text`,
+        ),
+      ),
+  );
+}
 
 function queryWork(db: WorkspaceDb, clanId: string, workId?: string) {
   return db
@@ -49,13 +71,23 @@ function queryWork(db: WorkspaceDb, clanId: string, workId?: string) {
       requestId: workRequest.id,
       position: chatMessages.workPosition,
       status: chatMessages.status,
-      workerId: chatMessages.workerId,
+      workerId: currentWorker,
+      taskId: tasks.id,
       taskStatus: tasks.status,
       assigned: tasks.assignedAgentId,
-      inReview: isNotNull(tasks.repository),
+      inReview: sql<boolean>`coalesce(${tasks.repository}->>'state' in ('open', 'pushed'), false)`,
+      pending: pendingContinuation(db),
     })
     .from(chatMessages)
-    .leftJoin(tasks, eq(tasks.id, chatMessages.taskId))
+    .leftJoin(
+      currentDelegation,
+      and(
+        eq(currentDelegation.clanId, chatMessages.clanId),
+        eq(currentDelegation.workId, chatMessages.id),
+        isNotNull(currentDelegation.taskId),
+      ),
+    )
+    .leftJoin(tasks, eq(tasks.id, sql`coalesce(${currentDelegation.taskId}, ${chatMessages.taskId})`))
     .leftJoin(
       workRequest,
       and(
@@ -69,12 +101,12 @@ function queryWork(db: WorkspaceDb, clanId: string, workId?: string) {
 
 type Work = Awaited<ReturnType<typeof queryWork>>[number];
 
-function workView({ id, title, status, requestId, position, taskStatus, assigned, workerId, inReview }: Work) {
+function workView({ id, title, status, requestId, position, taskStatus, assigned, workerId, inReview, pending }: Work) {
   const run = taskStatus && workerId && status === 'handled' ? runStatus({ taskStatus, assigned, workerId }) : status;
   return {
     id,
     title,
-    status: run === 'running' && inReview ? 'review' : run,
+    status: pending ? 'approval' : run === 'running' && inReview ? 'review' : run,
     ...(requestId && position ? { requestId, position } : {}),
   };
 }
@@ -88,7 +120,8 @@ async function chatWork(db: WorkspaceDb, clanId: string, workId: string) {
 async function recentWork(db: WorkspaceDb, clanId: string) {
   const outstanding = or(
     inArray(chatMessages.status, ['approval', 'clarification', 'queued']),
-    and(inArray(tasks.status, ['open', 'claimed']), eq(tasks.assignedAgentId, chatMessages.workerId)),
+    and(inArray(tasks.status, ['open', 'claimed']), eq(tasks.assignedAgentId, currentWorker)),
+    pendingContinuation(db),
   );
   const rows = await queryWork(db, clanId)
     .orderBy(
@@ -109,7 +142,14 @@ export async function chatWorkInbox(db: WorkspaceDb, clanId: string, workId?: st
   }
   const held = await chatQueue(db, clanId, 'clarification', workId);
   const work = root
-    ? { workItem: { ...workView(root), hasTask: root.workerId !== null } }
+    ? {
+        workItem: {
+          ...workView(root),
+          hasTask: root.workerId !== null,
+          ...(root.taskId ? { taskId: root.taskId } : {}),
+          ...(root.workerId ? { workerId: root.workerId } : {}),
+        },
+      }
     : { work: await recentWork(db, clanId) };
   return { ...history, ...picked, held, ...work };
 }
@@ -183,6 +223,7 @@ export async function chatWorkerFollowups(
   const [work] = await db
     .select({
       workId: chatMessages.workId,
+      workOrder: chatMessages.workOrder,
       workerId: chatMessages.workerId,
       assigned: tasks.assignedAgentId,
       owner: tasks.ownerId,
@@ -203,12 +244,14 @@ export async function chatWorkerFollowups(
   )
     throw forbidden();
   if (!work.workId) return { messages: [], next: after };
+  // The continuation proposal gives the worker its new scope, including the update that triggered it.
+  const cursor = Math.max(after, work.workOrder ?? 0);
   const rows = await db
     .select({ sequence: chatMessages.workOrder, id: chatMessages.id, text: chatMessages.text })
     .from(chatMessages)
-    .where(and(messageScope(clanId), workScope(work.workId), gt(chatMessages.workOrder, after)))
+    .where(and(messageScope(clanId), workScope(work.workId), gt(chatMessages.workOrder, cursor)))
     .orderBy(asc(chatMessages.workOrder))
     .limit(60);
   const messages = rows.map(({ sequence, ...message }) => ({ ...message, sequence: sequence! }));
-  return { messages, next: messages.at(-1)?.sequence ?? after };
+  return { messages, next: messages.at(-1)?.sequence ?? cursor };
 }

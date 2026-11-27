@@ -150,6 +150,10 @@ export const membersSchema = z.object({
 });
 export const removedMemberSchema = z.object({ removed: z.literal(true) });
 export const leftClanSchema = z.object({ left: z.literal(true) });
+export const deletedClanSchema = z.object({
+  deleted: z.literal(true),
+  repositories: z.array(z.object({ id: z.uuid(), slug: z.string() })),
+});
 export const transferLeadershipSchema = z.object({ userId: z.uuid() }).strict();
 export const leaderSchema = z.object({ leaderId: z.uuid() });
 export const errorSchema = z.object({ error: z.object({ code: z.string(), message: z.string() }) });
@@ -377,6 +381,9 @@ export class ClqnClient {
   }
   leaveClan(clanId: string) {
     return this.request(`/v1/clans/${encodeURIComponent(clanId)}/leave`, leftClanSchema, {});
+  }
+  deleteClan(clanId: string) {
+    return this.request(`/v1/clans/${encodeURIComponent(clanId)}/delete`, deletedClanSchema, {});
   }
   transferLeadership(clanId: string, userId: string) {
     return this.request(

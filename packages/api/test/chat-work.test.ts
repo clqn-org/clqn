@@ -187,6 +187,54 @@ test('PostgreSQL: independent chat work, clarification, and follow-ups to the ac
     earlierDelivery.messages.map(({ id }) => id),
     [earlier.id],
   );
+  for (const id of [urgent.id, earlier.id]) {
+    const picked = await inbox(first);
+    assert.equal(picked.next?.id, id);
+    assert.equal((await decide(id, { action: 'reply', text: 'Updated the worker.' }, picked.pickId)).status, 200);
+  }
+
+  assert.equal((await request(worker.token, `/tasks/${run.taskId}/release`, {})).status, 200);
+  const continuation = await send('Resume task one and keep the two-second timeout.');
+  await followup(continuation.id);
+  const stopped = await inbox(first);
+  assert.equal(stopped.next?.id, continuation.id);
+  assert.equal(stopped.workItem?.status, 'released');
+  assert.equal(stopped.workItem?.taskId, run.taskId);
+  assert.equal(stopped.workItem?.workerId, worker.agent.id);
+  const resume = { ...delegate, taskId: run.taskId, description: 'Resume and keep the two-second timeout.' };
+  assert.equal(
+    (await decide(continuation.id, { ...resume, workerId: otherWorker.agent.id }, stopped.pickId)).status,
+    409,
+  );
+
+  const differentWork = await send('For task two, add a version field.', { replyTo: answer.id });
+  const differentPick = await inbox(second);
+  assert.equal(differentPick.next?.id, differentWork.id);
+  assert.equal((await decide(differentWork.id, resume, differentPick.pickId)).status, 409);
+  assert.equal((await decide(continuation.id, resume, stopped.pickId)).status, 200);
+  assert.equal((await state()).approvals[0]?.messageId, continuation.id);
+
+  // The continued session receives follow-ups after the approved continuation, including updates while awaiting yes.
+  const later = await send('On task one, document the timeout default too.');
+  await followup(later.id);
+  const stillWaiting = await inbox(first);
+  assert.equal(stillWaiting.workItem?.status, 'approval');
+  assert.equal(stillWaiting.next?.id, later.id);
+  assert.equal((await decide(later.id, resume, stillWaiting.pickId)).status, 409);
+  assert.equal((await chat(member.token, `/messages/${continuation.id}/approval`, { approve: true })).status, 200);
+  const continued = (await state()).runs.find(({ taskId }) => taskId === run.taskId);
+  assert.equal(continued?.messageId, continuation.id);
+  assert.equal(continued?.workerId, worker.agent.id);
+  assert.equal((await request(worker.token, `/tasks/${run.taskId}/claim`, {})).status, 200);
+  const afterContinuation = await updates(0);
+  assert.deepEqual(
+    afterContinuation.messages.map(({ id }) => id),
+    [later.id],
+  );
+  const resumed = await inbox(first);
+  assert.equal(resumed.workItem?.id, first);
+  assert.equal(resumed.workItem?.taskId, run.taskId);
+  assert.equal(resumed.workItem?.status, 'running');
   assert.equal((await request(worker.token, `/tasks/${run.taskId}/complete`, {})).status, 200);
   assert.equal((await chat(worker.token, updatesPath)).status, 403);
 

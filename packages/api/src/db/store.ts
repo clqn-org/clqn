@@ -8,7 +8,9 @@ import { resourceFilter, rethrowAliasConflict } from '../lib/aliases.js';
 import { limitReached, limits } from '../lib/limits.js';
 import { chats } from './chat.js';
 import { isChatBackup, removeChatBackup, transferChatHost } from './chat-host.js';
+import { contextEntries, contextRevisions } from './context.js';
 import * as schema from './schema.js';
+import { tasks } from './tasks.js';
 
 export const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
 export type Member = { userId: string; email: string; role: 'leader' | 'member'; createdAt: string };
@@ -47,6 +49,7 @@ export interface WorkspaceStore {
   members(userId: string, clanId: string, page?: PageQuery): Promise<Member[] | undefined>;
   removeMember(actor: Actor, clanId: string, userId: string): Promise<void>;
   transferLeadership(actor: Actor, clanId: string, userId: string): Promise<void>;
+  deleteClan(actor: Actor, clanId: string): Promise<{ id: string; slug: string }[]>;
 }
 
 const pendingFor = (email: string) =>
@@ -398,6 +401,37 @@ export function createStore(url: string, poolSize = 10) {
           type: leaving ? 'member.left' : 'member.removed',
           resourceId: userId,
         });
+      });
+    },
+    // Deletes the clan and everything scoped to it. Returns the linked repositories so the caller can remove webhooks.
+    async deleteClan(actor, clanId) {
+      requirePersonal(actor);
+      return db.transaction(async (tx) => {
+        const membership = await requireClan(tx, actor, clanId, 'update');
+        if (membership.role !== 'leader')
+          throw new ApiError(403, 'FORBIDDEN', 'Only the clan leader can delete the clan');
+        // Lock every membership so agent registration and token rotation wait, then the clan row so
+        // concurrent inserts that reference it wait and fail once it is gone.
+        await tx.select().from(schema.memberships).where(eq(schema.memberships.clanId, clanId)).for('update');
+        await tx.select({ id: schema.clans.id }).from(schema.clans).where(eq(schema.clans.id, clanId)).for('update');
+        await lockClan(tx, clanId);
+        const agents = tx.select({ id: schema.agents.id }).from(schema.agents).where(eq(schema.agents.clanId, clanId));
+        // Chats cascade to backups, messages, and token hours; memberships cascade to chat members.
+        await tx.delete(chats).where(eq(chats.clanId, clanId));
+        await tx.delete(tasks).where(eq(tasks.clanId, clanId));
+        await tx.delete(schema.credentials).where(inArray(schema.credentials.agentId, agents));
+        await tx.delete(schema.events).where(eq(schema.events.clanId, clanId));
+        await tx.delete(schema.agents).where(eq(schema.agents.clanId, clanId));
+        await tx.delete(schema.invitations).where(eq(schema.invitations.clanId, clanId));
+        const repositories = await tx
+          .delete(schema.linkedRepositories)
+          .where(eq(schema.linkedRepositories.clanId, clanId))
+          .returning({ id: schema.linkedRepositories.id, slug: schema.linkedRepositories.slug });
+        await tx.delete(contextRevisions).where(eq(contextRevisions.clanId, clanId));
+        await tx.delete(contextEntries).where(eq(contextEntries.clanId, clanId));
+        await tx.delete(schema.memberships).where(eq(schema.memberships.clanId, clanId));
+        await tx.delete(schema.clans).where(eq(schema.clans.id, clanId));
+        return repositories;
       });
     },
     async transferLeadership(actor, clanId, userId) {

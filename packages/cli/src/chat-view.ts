@@ -68,8 +68,16 @@ export interface Frame {
   lines: string[];
   cursor?: { row: number; column: number };
 }
+// A clickable Stop label in the agents sidebar, by 0-based frame row and column.
+export interface StopTarget {
+  row: number;
+  column: number;
+  width: number;
+  taskId: string;
+}
 interface ChatFrame extends Frame {
   history?: { offset: number; max: number };
+  stops?: StopTarget[];
 }
 interface SettingsView {
   value: ChatSettings;
@@ -80,6 +88,8 @@ interface SettingsView {
   agents?: { installed: Runtime[]; off: Runtime[] } | undefined;
   // The email being typed in the leader-only Invite row; undefined hides the row.
   inviteText?: string | undefined;
+  // The clan name being typed in the leader-only Delete clan row; undefined hides the row.
+  deleteText?: string | undefined;
   backupHosting?: boolean | undefined;
   field: number;
   action: string;
@@ -105,7 +115,18 @@ interface View {
   hasPullRequests?: boolean;
   reply?: ChatMessage | undefined;
   notice?: string | undefined;
+  // Running tasks this member can stop, with when this machine started each.
+  stoppable?: Map<string, number | undefined> | undefined;
+  // The task whose stop waits for y/n.
+  stopping?: string | undefined;
+  now?: number | undefined;
 }
+
+export const elapsed = (ms: number) => {
+  const minutes = Math.max(0, Math.floor(ms / 60_000));
+  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+};
+const stopLabel = '■ Stop';
 
 // A bright band sweeps across muted text, like Claude Code's working status.
 export function shimmer(text: string, frame: number, paint: Paint) {
@@ -191,7 +212,8 @@ function agentsText(agents: SettingsView['agents']) {
 
 // The backup row can appear while settings are open. Give it a stable ID outside the other rows.
 export const backupHostingField = 9;
-export const settingsFields = (hasInvite: boolean, hasBackup: boolean) => [
+export const deleteClanField = 10;
+export const settingsFields = (hasInvite: boolean, hasBackup: boolean, hasDelete = false) => [
   0,
   1,
   2,
@@ -201,13 +223,14 @@ export const settingsFields = (hasInvite: boolean, hasBackup: boolean) => [
   ...(hasInvite ? [6] : []),
   ...(hasBackup ? [backupHostingField] : []),
   hasInvite ? 7 : 6,
+  ...(hasDelete ? [deleteClanField] : []),
   hasInvite ? 8 : 7,
 ];
 
-// Every setting row and the notice always fit; the hint, title, key help, and blank lines fill what room is left.
+// The selected setting row and the notice always fit; the hint, title, key help, and blank lines fill what room is left.
 export function settingsLines(settings: SettingsView, columns: number, paint: Paint, room: number, notice: string) {
   const hasInvite = settings.inviteText !== undefined;
-  const fields = settingsFields(hasInvite, settings.backupHosting !== undefined);
+  const fields = settingsFields(hasInvite, settings.backupHosting !== undefined, settings.deleteText !== undefined);
   const labels = [
     `Spawn approval   ${settings.value.approval === 'manual' ? 'Manual' : 'Automatic'}`,
     `Token limit      ${settings.tokenText || '∞'}`,
@@ -222,11 +245,18 @@ export function settingsLines(settings: SettingsView, columns: number, paint: Pa
   const hint =
     hasInvite && settings.field === 6
       ? 'Type a teammate’s email and press Enter to invite them to this clan.'
-      : settings.field === backupHostingField
-        ? 'Press Enter to allow or stop backup hosting on this device.'
-        : 'Enter a whole number or none for unlimited; models comma-separated, blank for any.';
+      : settings.field === deleteClanField
+        ? 'Type this clan’s name and press Enter to delete it for every member. This cannot be undone.'
+        : settings.field === backupHostingField
+          ? 'Press Enter to allow or stop backup hosting on this device.'
+          : 'Enter a whole number or none for unlimited; models comma-separated, blank for any.';
   const hintLines = wrap(hint, columns).map((line) => paint(line, 'muted'));
-  let spare = room - fields.length - (notice ? 1 : 0);
+  // In the smallest terminals, show the rows around the selected one when they do not all fit.
+  const shownRows = Math.max(1, Math.min(fields.length, room - (notice ? 1 : 0)));
+  const selected = Math.max(0, fields.indexOf(settings.field));
+  const first = Math.max(0, Math.min(selected - Math.floor(shownRows / 2), fields.length - shownRows));
+  const visible = fields.slice(first, first + shownRows);
+  let spare = room - visible.length - (notice ? 1 : 0);
   const fits = (lines: number) => {
     if (spare < lines) return false;
     spare -= lines;
@@ -243,9 +273,13 @@ export function settingsLines(settings: SettingsView, columns: number, paint: Pa
     ...(showTop ? [''] : []),
     ...(showTitle ? [paint('Session settings', 'bold')] : []),
     ...(showGap ? [''] : []),
-    ...fields.map((field) => {
+    ...visible.map((field) => {
       const label =
-        field === backupHostingField ? `Backup hosting   ${settings.backupHosting ? 'On' : 'Off'}` : labels[field]!;
+        field === backupHostingField
+          ? `Backup hosting   ${settings.backupHosting ? 'On' : 'Off'}`
+          : field === deleteClanField
+            ? `Delete clan      ${plain(settings.deleteText ?? '') || 'Type the clan name'}`
+            : labels[field]!;
       const line = clip(`${field === settings.field ? '›' : ' '} ${label}`, columns);
       return field === settings.field ? paint(line, 'accent') : line;
     }),
@@ -299,21 +333,33 @@ export function chatFrame(view: View): ChatFrame {
     ? view.messages.flatMap((message) => messageLines(message, left, view.userId, paint, view.frame))
     : wrap('Send a task, question, or context to the orchestrator.', left).map((line) => paint(line, 'muted'));
   const runs = state?.runs ?? [];
+  // The task each sidebar row can stop, if any.
+  const activityStops: (string | undefined)[] = [];
+  const canStop = (taskId: string, status: string) => status === 'running' && view.stoppable?.has(taskId) === true;
   const activity = right
     ? runs.flatMap((run) => {
         const [glyph, label, tone] = runStatuses[run.status];
         const repository = run.repository;
+        const stop = canStop(run.taskId, run.status);
+        const since = stop ? view.stoppable?.get(run.taskId) : undefined;
+        const time = since === undefined ? '' : ` · ${elapsed((view.now ?? Date.now()) - since)}`;
         const detail = repository?.prNumber
           ? `PR #${repository.prNumber} · ${repository.state === 'merged' ? 'Merged' : name(run.worker)}`
-          : `${name(run.worker)} · ${repository ? 'Publishing' : label}`;
+          : `${name(run.worker)} · ${repository ? 'Publishing' : label}${time}`;
         const amount = run.tokens === null ? `~${number(run.estimatedTokens)}` : number(run.tokens);
         const labelWidth = Math.max(1, right - width(amount) - 1);
+        activityStops.push(undefined, stop ? run.taskId : undefined);
+        const info = stop
+          ? `${paint(pad(clip(`  ${detail}`, right - stopLabel.length - 1), right - stopLabel.length - 1), 'muted')} ${paint(stopLabel, view.stopping === run.taskId ? 'warning' : 'accent')}`
+          : paint(clip(`  ${detail}`, right), 'muted');
         return [
           `${paint(glyph, tone)}${pad(clip(` ${plain(run.title)}`, Math.max(1, labelWidth - 1)), labelWidth - 1)} ${paint(amount, 'muted')}`,
-          paint(clip(`  ${detail}`, right), 'muted'),
+          info,
         ];
       })
     : [];
+  const stops: StopTarget[] = [];
+  const stopping = runs.find((run) => run.taskId === view.stopping && canStop(run.taskId, run.status));
   const pending = state?.approvals[view.approval];
   const question = view.reply ?? state?.questions[0];
   const count = state?.approvals.length ?? 0;
@@ -323,6 +369,12 @@ export function chatFrame(view: View): ChatFrame {
     ? `${pending.model ? ` · ${plain(pending.model)}` : ''} · ${number(pending.estimatedTokens)} est.${count > 1 ? `  (${view.approval + 1}/${count})` : ''}`
     : '';
   const attention = [
+    stopping
+      ? paint(
+          clip(`■ Stop ${plain(stopping.title)}? Its work stays for a follow-up · Y Stop  N Keep`, content),
+          'warning',
+        )
+      : '',
     pending
       ? paint(
           clip(
@@ -354,6 +406,14 @@ export function chatFrame(view: View): ChatFrame {
     } else {
       // Only the trusted styles generated here have ANSI sequences.
       const visibleWidth = width(line.replace(/\x1b\[[\d;]*m/g, ''));
+      const taskId = activityStops[i];
+      if (taskId)
+        stops.push({
+          row: lines.length,
+          column: margin + left + 3 + right - stopLabel.length,
+          width: stopLabel.length,
+          taskId,
+        });
       lines.push(line + ' '.repeat(Math.max(0, left - visibleWidth)) + sep + (activity[i] ?? ''));
     }
   }
@@ -388,6 +448,7 @@ export function chatFrame(view: View): ChatFrame {
     );
   } else lines.push('');
   const actions = [
+    stopping ? 'Y Stop  N Keep running' : view.stoppable?.size ? 'Ctrl+X Stop agent' : '',
     state?.forcePending !== undefined && !view.approvalFocused ? 'Ctrl+F Force send' : '',
     view.hasPullRequests ? 'Ctrl+L Pull requests' : '',
     'Ctrl+S Settings',
@@ -399,7 +460,8 @@ export function chatFrame(view: View): ChatFrame {
   ].filter(Boolean);
   lines.push(paint(clip(actions.join('  ·  '), content), 'muted'));
   return {
-    ...finish(view.approvalFocused ? undefined : { row: composerRow, column: composer.column }),
+    ...finish(view.approvalFocused || stopping ? undefined : { row: composerRow, column: composer.column }),
     history: { offset, max },
+    stops: stops.filter(({ row }) => row < rows),
   };
 }

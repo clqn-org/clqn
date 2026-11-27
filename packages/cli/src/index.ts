@@ -4,6 +4,7 @@ import { serveMcp } from '@clqn/mcp';
 import {
   type Agent,
   ApiError,
+  type Clan,
   ClqnClient,
   chatLeaseInputSchema,
   registerAgentSchema,
@@ -29,6 +30,7 @@ import { landingFrame, openLanding } from './landing.js';
 import { runMcpSync } from './mcp-sync.js';
 import {
   chooseClan,
+  deleteClan,
   GoBack,
   linkGithubRepository,
   savedClan,
@@ -167,18 +169,21 @@ program
     );
   });
 
+const findClan = (clans: Clan[], name: string) => {
+  const byId = clans.find((clan) => clan.id === name);
+  const matches = clans.filter((clan) => clan.name.toLowerCase() === name.toLowerCase());
+  if (!byId && matches.length > 1)
+    throw new Error('Several clans have that name. Run clqn clans --json and select one by ID.');
+  const clan = byId ?? matches[0];
+  if (!clan) throw new Error('Clan not found. Run clqn clans to see your clans.');
+  return clan;
+};
 program
   .command('use <clan>')
   .description('Select one of your clans by name')
   .action(async (name: string) => {
     const config = await readConfig(apiUrl());
-    const { clans } = await (await client()).listClans();
-    const byId = clans.find((clan) => clan.id === name);
-    const matches = clans.filter((clan) => clan.name.toLowerCase() === name.toLowerCase());
-    if (!byId && matches.length > 1)
-      throw new Error('Several clans have that name. Run clqn clans --json and select one by ID.');
-    const clan = byId ?? matches[0];
-    if (!clan) throw new Error('Clan not found. Run clqn clans to see your clans.');
+    const clan = findClan((await (await client()).listClans()).clans, name);
     await writeConfig(apiUrl(), { ...config, clanId: clan.id });
     output(clan, `Using ${clan.name}.`);
   });
@@ -197,7 +202,7 @@ program
         `Invitation for ${invitation.email}: ${code}\nExpires ${invitation.expiresAt}. Share the code privately with the intended member.`,
       );
     } else {
-      output(invitation, `Invited ${invitation.email}. Ask them to run clqn and choose Join a clan.`);
+      output(invitation, `Invited ${invitation.email}. Ask them to run clqn and choose View clan invites.`);
     }
   });
 
@@ -271,6 +276,24 @@ program
     // Clear the selection when it points at the clan just left.
     if (config.clanId === clanId) await writeConfig(apiUrl(), config.token ? { token: config.token } : {});
     output(result, `Left clan ${clanId}`);
+  });
+
+program
+  .command('delete <clan>')
+  .description('Delete a clan by name with its chat, tasks, agents, and repository links (leader only)')
+  .action(async (name: string) => {
+    const api = await client();
+    const clan = findClan((await api.listClans()).clans, name);
+    const result = await deleteClan(api, apiUrl(), clan.id);
+    const config = await readConfig(apiUrl());
+    if (config.clanId === clan.id) await writeConfig(apiUrl(), config.token ? { token: config.token } : {});
+    output(
+      result,
+      `Deleted ${clan.name}.` +
+        (result.webhooksLeft.length
+          ? `\nRemove its old webhooks in GitHub repository settings: ${result.webhooksLeft.join(', ')}`
+          : ''),
+    );
   });
 
 const selectedClan = async (options: { clan?: string } = {}) => {
@@ -476,13 +499,14 @@ async function openChat() {
   const setup = async () => {
     for (;;) {
       try {
-        const { ask, print } = landing;
+        const { ask, choose, print } = landing;
         let clanId = process.env.CLQN_CLAN_ID;
         // Returning users see the same picker as new ones, with Enter reopening their last clan.
         if (!clanId) {
           const clan = await chooseClan({
             connect: client,
             ask,
+            choose,
             print,
             ...(environmentToken ? {} : { reauthenticate }),
             current: await savedClan(apiUrl(), await client()),
@@ -491,7 +515,7 @@ async function openChat() {
           await selectClan(apiUrl(), clanId);
         }
         const api = await client();
-        const repository = await setupChatRepository({ api, server: apiUrl(), clanId, project, ask, print });
+        const repository = await setupChatRepository({ api, server: apiUrl(), clanId, project, choose, print });
         return { clanId, api, repository };
       } catch (error) {
         if (!(error instanceof GoBack)) throw error;
@@ -542,14 +566,17 @@ async function openChat() {
       result = await runChat(api, clanId, agents, {
         repositoryStatus: () => repository.notice ?? repositoryStatus,
         page: (view) => landingFrame({ ...view, links: process.env.TERM !== 'dumb', ...details, log: [] }),
+        deleteClan: () => deleteClan(api, apiUrl(), clanId),
       });
     } finally {
       syncController.abort();
       await Promise.all([agents.stop(), sync]);
     }
     if (result === 'sign-out') console.log(await signOut(apiUrl()));
-    if (result !== 'back') return;
+    // A deleted clan returns to the clan picker, unless the environment pins that clan.
+    if (result !== 'back' && (typeof result !== 'object' || process.env.CLQN_CLAN_ID)) return;
     landing = openLanding(details);
+    if (typeof result === 'object') landing.print(result.deleted);
   }
 }
 

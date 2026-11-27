@@ -67,6 +67,9 @@ export const chatDecisionSchema = z.discriminatedUnion('action', [
       estimatedTokens: tokenCount.min(1),
       // Must be one of the worker owner's allowed models. Defaults to their first allowed model, or none if any is allowed.
       model: modelIdSchema.optional(),
+      // Continue an earlier delegation's task on its branch: retry a stopped run or follow up on its pull request.
+      // The task's previous worker must run it, since its worktree is on that worker's machine.
+      taskId: z.uuid().optional(),
     })
     .strict(),
 ]);
@@ -195,8 +198,12 @@ export const chatInboxSchema = chatHistorySchema.extend({
   next: chatMessageSchema.nullable(),
   pickId: z.uuid().nullish(),
   held: z.array(chatMessageSchema),
+  // Recent delegations for hosts that route and decide in a single turn.
+  runs: z.array(chatRunSchema).optional(),
   work: z.array(chatWorkSchema).optional(),
-  workItem: chatWorkSchema.extend({ hasTask: z.boolean() }).optional(),
+  workItem: chatWorkSchema
+    .extend({ hasTask: z.boolean(), taskId: z.uuid().optional(), workerId: z.uuid().optional() })
+    .optional(),
 });
 export const chatFollowupsSchema = z.object({
   messages: z.array(z.object({ sequence: z.number().int().positive(), id: z.uuid(), text: chatText })),

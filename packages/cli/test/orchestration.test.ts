@@ -118,3 +118,64 @@ test('losing the host lease cancels all turns before they can submit decisions',
   await Promise.all(tasks);
   assert.deepEqual(coordinator.status(), []);
 });
+
+test('a continuation keeps the task and previous worker', async () => {
+  const clanId = randomUUID();
+  const workId = randomUUID();
+  const workerId = randomUUID();
+  const taskId = randomUUID();
+  const next = message(randomUUID(), 'Continue the stopped feature');
+  const tasks: Promise<void>[] = [];
+  const submitted: ChatDecisionRequest[] = [];
+  const coordinator = createOrchestration(
+    clanId,
+    () => 0,
+    () => {},
+    (task) => tasks.push(task),
+  );
+  const api = {
+    chatInbox: async () => ({
+      next,
+      pickId: randomUUID(),
+      messages: [],
+      workItem: { id: workId, title: 'Feature', taskId, workerId, status: 'released', hasTask: true },
+    }),
+    listAgents: async () => ({
+      agents: [
+        { id: workerId, name: 'Previous worker', role: 'worker' },
+        { id: randomUUID(), name: 'Other worker', role: 'worker' },
+      ],
+    }),
+    decideChat: async (_clan: string, _id: string, decision: ChatDecisionRequest) => submitted.push(decision),
+  } as unknown as ClqnClient;
+  coordinator.update(
+    { pending: null, ready: [workId] },
+    [],
+    {
+      api,
+      leaseId: randomUUID(),
+      active: () => true,
+      generate: async (_name, _rules, prompt) => {
+        const modelInput = JSON.parse(prompt);
+        assert.deepEqual(modelInput.continuation, { taskId, workerId });
+        assert.deepEqual(
+          modelInput.workers.map(({ id }: { id: string }) => id),
+          [workerId],
+        );
+        return JSON.stringify({
+          action: 'delegate',
+          taskId,
+          workerId,
+          title: 'Feature',
+          description: next.text,
+          estimatedTokens: 5000,
+        });
+      },
+    },
+    null,
+  );
+  await Promise.all(tasks);
+  assert.equal(submitted[0]?.action, 'delegate');
+  assert.equal(submitted[0]?.taskId, taskId);
+  assert.equal(submitted[0]?.workerId, workerId);
+});

@@ -6,7 +6,7 @@ import {
   type ChatSettings,
   defaultChatSettings,
 } from '@clqn/shared';
-import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { WorkspaceDb } from '../lib/access.js';
 import { chatBackups, chatMembers, chatMessages, chats } from './chat.js';
@@ -146,10 +146,15 @@ export async function pickNext(db: WorkspaceDb, clanId: string, workId?: string)
   return { next: messageView(picked!), pickId };
 }
 
+// A queued or running delegation. A continued task keeps its published repository, marked pending again until
+// the worker reports its new head; a first publication is pending without a head and no longer counts as running.
 export const activeRun = and(
   eq(tasks.assignedAgentId, chatMessages.workerId),
   inArray(tasks.status, ['open', 'claimed']),
-  isNull(tasks.repository),
+  or(
+    isNull(tasks.repository),
+    sql`${tasks.repository}->>'state' = 'pending' and ${tasks.repository}->>'headSha' is not null`,
+  ),
 );
 
 export async function chatUsage(db: WorkspaceDb, clanId: string, userId: string) {

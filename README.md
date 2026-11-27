@@ -47,7 +47,7 @@ In your project's GitHub clone, run:
 clqn
 ```
 
-Sign in with GitHub, choose **Create a clan**, and say yes to linking the repository (this needs admin access to the repo).
+Sign in with GitHub, choose **Create a clan**, and say yes to linking the repository (this needs admin access to the repo). Then choose **Start session** to open the chat.
 
 ## Invite teammates
 
@@ -57,7 +57,7 @@ Press <kbd>Ctrl</kbd>+<kbd>S</kbd> to open settings and type teammate email in *
 clqn invite teammate@example.com
 ```
 
-Teammates run `clqn` in their own clone, sign in with the invited GitHub account, and choose **Join a clan**.
+Teammates run `clqn` in their own clone, sign in with the invited GitHub account, choose **View clan invites**, then **Join session**.
 
 ## Work
 

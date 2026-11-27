@@ -93,6 +93,8 @@ async function workspaceFixture(t: TestContext) {
       response.end(JSON.stringify({ removed: true }));
     else if (request.url === `/v1/clans/${clan.id}/leave` && request.method === 'POST')
       response.end(JSON.stringify({ left: true }));
+    else if (request.url === `/v1/clans/${clan.id}/delete` && request.method === 'POST')
+      response.end(JSON.stringify({ deleted: true, repositories: [] }));
     else if (request.url === `/v1/clans/${clan.id}/leader` && request.method === 'POST') {
       let body = '';
       for await (const chunk of request) body += chunk;
@@ -183,7 +185,7 @@ test('CLI invitations normalize email and support an explicit clan', async (t) =
   );
   const human = (await f.call(['invite', f.invitation.email, '--clan', f.clan.id])).stdout;
   assert.doesNotMatch(human, /clqn_inv_/);
-  assert.match(human, /run clqn and choose Join a clan/);
+  assert.match(human, /run clqn and choose View clan invites/);
   assert.deepEqual(
     JSON.parse((await f.call(['invite', f.invitation.email, '--clan', f.clan.id, '--code', '--json'])).stdout),
     { code, ...invitation },
@@ -201,6 +203,20 @@ test('CLI removes members and transfers leadership by email, and leaving clears 
   const transferred = await f.call(['members', 'transfer', 'alice@example.com', '--clan', f.clan.id, '--json']);
   assert.deepEqual(JSON.parse(transferred.stdout), { leaderId: f.user.id });
   assert.deepEqual(JSON.parse((await f.call(['leave', '--json'])).stdout), { left: true });
+  await assert.rejects(f.call(['members', '--json']), (thrown) => {
+    assert.equal(JSON.parse((thrown as ExecError).stderr).error.code, 'COMMAND_FAILED');
+    return true;
+  });
+});
+
+test('CLI deletes a clan by name and clears the selected clan', async (t) => {
+  const f = await workspaceFixture(t);
+  await f.signIn();
+  await f.call(['use', f.clan.name]);
+  await assert.rejects(f.call(['delete', 'Other clan', '--json']));
+  const deleted = await f.call(['delete', f.clan.name.toUpperCase(), '--json']);
+  assert.deepEqual(JSON.parse(deleted.stdout), { deleted: true, repositories: [], webhooksLeft: [] });
+  assert.equal(f.requests.at(-1)?.path, `/v1/clans/${f.clan.id}/delete`);
   await assert.rejects(f.call(['members', '--json']), (thrown) => {
     assert.equal(JSON.parse((thrown as ExecError).stderr).error.code, 'COMMAND_FAILED');
     return true;

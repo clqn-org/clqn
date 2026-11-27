@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { ChatMetrics, ChatState } from '@clqn/shared';
-import { backupHostingField, chatFrame, width } from '../src/chat-view.js';
+import { backupHostingField, chatFrame, deleteClanField, width } from '../src/chat-view.js';
 import { areaChart, metricsFrame } from '../src/metrics-view.js';
 
 const metrics: ChatMetrics = {
@@ -148,7 +148,23 @@ test('chat screen offers Ctrl+G metrics, drops the token graph, and settings fit
   }).lines.join('\n');
   assert.match(leader, /› Invite {11}pal@example\.com\n\s+Save settings\n\s+Sign out/);
   assert.match(leader, /press Enter to invite them/);
-  assert.doesNotMatch(any, /Invite/);
+  assert.doesNotMatch(any, /Invite|Delete clan/);
+  // Leaders also get a Delete clan row above Sign out, confirmed by typing the clan name.
+  const deleting = chatFrame({
+    ...base,
+    settings: {
+      value: state.settings,
+      tokenText: '',
+      agentText: '',
+      modelText: '',
+      inviteText: '',
+      deleteText: 'My cl',
+      field: deleteClanField,
+      action: 'Save settings',
+    },
+  }).lines.join('\n');
+  assert.match(deleting, /Save settings\n\s+› Delete clan {6}My cl\n\s+Sign out/);
+  assert.match(deleting, /delete it for every member\. This cannot be undone\./);
 
   // At the smallest size, every row and the notice still fit; the title and hints make room.
   for (const rows of [12, 14]) {
@@ -162,6 +178,7 @@ test('chat screen offers Ctrl+G metrics, drops the token graph, and settings fit
         agentText: '',
         modelText: '',
         inviteText: '',
+        deleteText: '',
         field: 8,
         action: 'Save settings',
       },
@@ -170,6 +187,24 @@ test('chat screen offers Ctrl+G metrics, drops the token graph, and settings fit
     assert.match(compact.join('\n'), /› Sign out\n/);
     assert.match(compact.at(-1)!, /main up to date/);
   }
+  // When a leader's rows do not all fit, the rows around the selection stay visible.
+  const top = chatFrame({
+    ...base,
+    rows: 12,
+    notice: 'main up to date',
+    settings: {
+      value: state.settings,
+      tokenText: '',
+      agentText: '',
+      modelText: '',
+      inviteText: '',
+      deleteText: '',
+      field: 0,
+      action: 'Save settings',
+    },
+  }).lines.join('\n');
+  assert.match(top, /› Spawn approval/);
+  assert.doesNotMatch(top, /Sign out/);
   const backup = chatFrame({
     ...base,
     rows: 12,
