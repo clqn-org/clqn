@@ -16,12 +16,12 @@ const message = (id: string, text: string): ChatMessage => ({
   status: 'queued',
 });
 
-test('the router forwards a follow-up while five independent sub-orchestrators are planning', async () => {
+test('the router forwards a follow-up while more than five independent sub-orchestrators are planning', async () => {
   const clanId = randomUUID();
   const leaseId = randomUUID();
-  const first = message(randomUUID(), 'Build three features and fix two bugs');
+  const first = message(randomUUID(), 'Build four features and fix three bugs');
   const followup = message(randomUUID(), 'For task two, keep compatibility with older clients');
-  const titles = ['Feature one', 'Feature two', 'Feature three', 'Bug one', 'Bug two'];
+  const titles = ['Feature one', 'Feature two', 'Feature three', 'Feature four', 'Bug one', 'Bug two', 'Bug three'];
   const work = titles.map((title, index) => ({ id: randomUUID(), title, status: 'queued', position: index + 1 }));
   const [target] = work.slice(1);
   const routes: ChatRouteRequest[] = [];
@@ -33,6 +33,7 @@ test('the router forwards a follow-up while five independent sub-orchestrators a
     () => 0,
     () => {},
     (task) => tasks.push(task),
+    () => 4 * 1024 ** 3,
   );
   const api = {
     chatInbox: async (_clan: string, _lease: string, workId?: string) => {
@@ -70,7 +71,7 @@ test('the router forwards a follow-up while five independent sub-orchestrators a
   const ready = work.map(({ id }) => id);
   coordinator.update({ pending: null, ready }, [], host, null);
   await new Promise((done) => setImmediate(done));
-  assert.equal(models.size, 5);
+  assert.equal(models.size, titles.length);
 
   coordinator.update({ pending: followup.id, ready }, [], host, null);
   await tasks.at(-1);
@@ -80,6 +81,48 @@ test('the router forwards a follow-up while five independent sub-orchestrators a
   for (const finish of models.values()) finish(JSON.stringify({ action: 'reply', text: 'Planning complete' }));
   await Promise.all(tasks);
   assert.deepEqual(decisions.map(({ id }) => id).sort(), ready.sort());
+});
+
+test('more planning starts when the host has memory headroom', async () => {
+  const clanId = randomUUID();
+  const ready = [randomUUID(), randomUUID(), randomUUID()];
+  const models = new Map<string, (answer: string) => void>();
+  const tasks: Promise<void>[] = [];
+  let available = 256 * 1024 ** 2;
+  const coordinator = createOrchestration(
+    clanId,
+    Date.now,
+    () => {},
+    (task) => tasks.push(task),
+    () => available,
+  );
+  const host = {
+    api: {
+      chatInbox: async (_clan: string, _lease: string, id: string) => ({
+        next: message(id, 'Plan the task'),
+        pickId: randomUUID(),
+        messages: [],
+        workItem: { id, title: 'Task', status: 'queued', hasTask: false },
+      }),
+      listAgents: async () => ({ agents: [] }),
+      decideChat: async () => ({}),
+    } as unknown as ClqnClient,
+    leaseId: randomUUID(),
+    active: () => true,
+    generate: async (name: string) => new Promise<string>((resolve) => models.set(name, resolve)),
+  };
+
+  coordinator.update({ pending: null, ready }, [], host, null);
+  coordinator.update({ pending: null, ready }, [], host, null);
+  await new Promise((done) => setImmediate(done));
+  assert.equal(models.size, 1);
+
+  available = 2 * 1024 ** 3;
+  coordinator.update({ pending: null, ready }, [], host, null);
+  await new Promise((done) => setImmediate(done));
+  assert.equal(models.size, ready.length);
+  for (const finish of models.values()) finish(JSON.stringify({ action: 'reply', text: 'Planning complete' }));
+  await Promise.all(tasks);
 });
 
 test('losing the host lease cancels all turns before they can submit decisions', async () => {

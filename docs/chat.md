@@ -20,7 +20,7 @@ One host routes messages for the clan. If a backup is already active, a returnin
 
 ## Send a message
 
-Type a task, question, or piece of project context (up to 4,000 characters) and press **Enter**. The orchestrator routes each message and can split a single request into independent tasks. Up to five task sub-orchestrators can plan in parallel on the active host's machine and AI account. You can keep sending messages while they work.
+Type a task, question, or piece of project context (up to 4,000 characters) and press **Enter**. The orchestrator routes each message and can split a single request into independent tasks. Sub-orchestrators plan in parallel on the active host's machine and AI account. Available memory determines how many planners can start, and you can keep sending messages while they work.
 
 Refer to a task by name when you send a follow-up. With the updated clqn on the host and on the worker's machine, an active Codex or Claude Code worker receives that update in its current session at the next runtime opportunity.
 
