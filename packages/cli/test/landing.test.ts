@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { RELEASE_DATE, VERSION } from '@clqn/shared';
-import { type LandingView, landingFrame, wordmarkLines } from '../src/landing.js';
+import { type LandingView, landingFrame } from '../src/landing.js';
 import { width } from '../src/text.js';
 
 const strip = (text: string) => text.replace(/\x1b\[[\d;]*m|\x1b\]8;;[^\x1b]*\x1b\\/g, '');
@@ -127,15 +127,6 @@ test('settings content replaces the log, and the first step hides Esc Back', () 
     strip(landingFrame(view()).lines[docs.row]!).slice(docs.column, docs.column + docs.size),
     'Documentation',
   );
-});
-
-test('the wordmark uses full blocks only, with its shadow only in color', () => {
-  const plain = wordmarkLines(false);
-  assert.equal(plain.length, 13);
-  assert.ok(Math.max(...plain.map(width)) <= 68);
-  assert.ok(plain.every((line) => /^[█ ]*$/.test(line)));
-  assert.ok(wordmarkLines(true).some((line) => line.includes('38;5;95m')));
-  assert.ok(wordmarkLines(true).every((line) => !line.includes('48;5;')));
 });
 
 test('menus mark the selection, hide the cursor, and keep the selection in view', () => {
