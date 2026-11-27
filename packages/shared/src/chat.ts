@@ -82,7 +82,10 @@ export type ChatDecisionRequest = z.infer<typeof chatDecisionRequestSchema>;
 const startWork = z
   .object({
     action: z.literal('start'),
-    work: z.array(z.object({ title: workTitle, description: chatText }).strict()).min(1).max(8),
+    work: z
+      .array(z.object({ title: workTitle, description: chatText }).strict())
+      .min(1)
+      .max(8),
   })
   .strict();
 const followUp = z.object({ action: z.literal('followup'), workId: z.uuid() }).strict();

@@ -11,6 +11,7 @@ import {
   memberScope,
   messageScope,
   workerBusy,
+  workScope,
 } from './chat-read.js';
 import { agents, credentials } from './schema.js';
 import { tasks } from './tasks.js';
@@ -36,7 +37,7 @@ export async function requireChatMember(db: WorkspaceDb, clanId: string, userId:
   return member;
 }
 
-async function getMessage(db: WorkspaceDb, clanId: string, id: string) {
+export async function getMessage(db: WorkspaceDb, clanId: string, id: string) {
   const [message] = await db
     .select()
     .from(chatMessages)
@@ -45,9 +46,16 @@ async function getMessage(db: WorkspaceDb, clanId: string, id: string) {
   return message;
 }
 
+// Receipt of a routed update can be out of order relative to chat history (for example, force send).
+export const nextWorkOrder = sql<number>`nextval(pg_get_serial_sequence('chat_messages', 'sequence'))`;
+
 // Client-generated IDs make retries safe even if an HTTP response was lost after commit.
 export async function addChatMessage(db: WorkspaceDb, message: typeof chatMessages.$inferInsert) {
-  const [inserted] = await db.insert(chatMessages).values(message).onConflictDoNothing().returning();
+  const [inserted] = await db
+    .insert(chatMessages)
+    .values({ ...message, workOrder: message.role === 'member' && message.workId ? nextWorkOrder : undefined })
+    .onConflictDoNothing()
+    .returning();
   if (inserted) return inserted;
   const existing = await getMessage(db, message.clanId, message.id);
   if (
@@ -63,9 +71,12 @@ export async function addChatMessage(db: WorkspaceDb, message: typeof chatMessag
 
 export async function sendChat(db: WorkspaceDb, actor: Actor, clanId: string, body: SendChat) {
   await requireChatMember(db, clanId, actor.id);
+  let workId: string | null = null;
   if (body.replyTo) {
     const target = await getMessage(db, clanId, body.replyTo);
-    if (target.role !== 'member') throw conflict('Choose a member message to reply to');
+    const workQuestion = target.workId === target.id && target.status === 'clarification';
+    if (target.role !== 'member' && !workQuestion) throw conflict('Choose a message awaiting clarification');
+    workId = target.workId;
   }
   const message = await addChatMessage(db, {
     ...body,
@@ -74,8 +85,9 @@ export async function sendChat(db: WorkspaceDb, actor: Actor, clanId: string, bo
     role: 'member',
     clanId,
     status: 'queued',
+    workId,
   });
-  if (message.force && message.status === 'queued') {
+  if (message.force && message.status === 'queued' && !message.workId) {
     // Invalidate the current ordinary turn's decision before the host sees the forced message.
     await db
       .update(chatMessages)
@@ -83,6 +95,7 @@ export async function sendChat(db: WorkspaceDb, actor: Actor, clanId: string, bo
       .where(
         and(
           messageScope(clanId),
+          workScope(),
           eq(chatMessages.status, 'queued'),
           eq(chatMessages.force, false),
           isNotNull(chatMessages.pickedAt),
@@ -135,12 +148,12 @@ async function admission(
   return null;
 }
 
-async function setStatus(db: WorkspaceDb, id: string, status: typeof chatMessages.$inferSelect.status) {
+export async function setStatus(db: WorkspaceDb, id: string, status: typeof chatMessages.$inferSelect.status) {
   await db.update(chatMessages).set({ status }).where(eq(chatMessages.id, id));
 }
 
 // Records when a message first left the queue, for queue wait metrics.
-async function markDecided(db: WorkspaceDb, id: string) {
+export async function markDecided(db: WorkspaceDb, id: string) {
   await db
     .update(chatMessages)
     .set({ decidedAt: sql`coalesce(${chatMessages.decidedAt}, clock_timestamp())` })
@@ -165,16 +178,31 @@ async function assignChatTask(
   }
 }
 
-export async function decideChat(db: WorkspaceDb, actor: Actor, clanId: string, id: string, body: ChatDecisionRequest) {
+export async function decideChat(
+  db: WorkspaceDb,
+  actor: Actor,
+  clanId: string,
+  id: string,
+  body: ChatDecisionRequest,
+  leaseId?: string,
+) {
   const message = await getMessage(db, clanId, id);
+  if (message.workId && !leaseId)
+    throw new ApiError(409, 'CHAT_LEASE_LOST', 'This orchestrator no longer holds the active chat lease');
   if (message.status !== 'queued') throw conflict('This message has already been handled');
-  if (body.pickId ? body.pickId !== message.pickId : !message.force && (await forcePending(db, clanId)))
+  if (
+    body.pickId
+      ? body.pickId !== message.pickId
+      : message.workId || (!message.force && (await forcePending(db, clanId)))
+  )
     throw conflict('Take the next message from the inbox before deciding');
   await markDecided(db, id);
   const related = message.replyTo ? await getMessage(db, clanId, message.replyTo) : undefined;
-  const held = related?.status === 'clarification' ? related : undefined;
+  const held = related?.status === 'clarification' && related.workId === message.workId ? related : undefined;
   if (body.action === 'delegate') {
-    if (related && !held) throw conflict('That clarification has already been resolved');
+    if (related && !held && !message.workId) throw conflict('That clarification has already been resolved');
+    const root = message.workId && message.workId !== id ? await getMessage(db, clanId, message.workId) : message;
+    if (message.workId && (root.taskId || root.proposal)) throw conflict('This work already has a worker proposal');
     const worker = await getWorker(db, clanId, body.workerId);
     if (!worker.active) throw conflict('Choose a worker with an active credential');
     const owner = await ownerSettings(db, clanId, worker.ownerId);
@@ -195,10 +223,14 @@ export async function decideChat(db: WorkspaceDb, actor: Actor, clanId: string, 
     await db
       .update(chatMessages)
       .set({ status: 'approval', workerId: worker.id, proposal })
-      .where(eq(chatMessages.id, id));
-    if (held) await setStatus(db, held.id, 'handled');
+      .where(eq(chatMessages.id, root.id));
+    if (root.id !== id) {
+      await markDecided(db, root.id);
+      await setStatus(db, id, 'handled');
+    }
+    if (held && held.id !== root.id) await setStatus(db, held.id, 'handled');
     const blocker = owner?.approval === 'automatic' ? await admission(db, clanId, worker, proposal) : undefined;
-    if (blocker === null) await assignChatTask(db, actor, clanId, id, worker.id, proposal);
+    if (blocker === null) await assignChatTask(db, actor, clanId, root.id, worker.id, proposal);
     return { status: blocker === null ? 'handled' : 'approval', blocker: blocker ?? null };
   }
 
@@ -206,6 +238,8 @@ export async function decideChat(db: WorkspaceDb, actor: Actor, clanId: string, 
   if (body.action === 'clarify') {
     target = body.hold ?? held?.id ?? message.id;
     const work = target === message.id ? message : await getMessage(db, clanId, target);
+    if (work.workId !== message.workId) throw conflict('Only work from this inbox can be held');
+    if (work.workId && (work.taskId || work.proposal)) throw conflict('Use the follow-up message for clarification');
     if (work.taskId && work.status === 'handled') {
       const [task] = await db.select().from(tasks).where(eq(tasks.id, work.taskId)).for('update');
       if (task?.status !== 'open') throw conflict('Only unclaimed work can be held');
@@ -238,6 +272,7 @@ export async function decideChat(db: WorkspaceDb, actor: Actor, clanId: string, 
     text: body.text,
     status: 'handled',
     replyTo: target,
+    workId: message.workId,
   });
   return { status: target === id && body.action === 'clarify' ? 'clarification' : 'handled', blocker: null };
 }
@@ -298,6 +333,7 @@ export async function reportChat(db: WorkspaceDb, actor: Actor, clanId: string, 
       role: 'worker',
       status: 'handled',
       replyTo: row.message.id,
+      workId: row.message.workId,
     });
   }
   return chatAcknowledged;

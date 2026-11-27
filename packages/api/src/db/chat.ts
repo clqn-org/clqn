@@ -7,6 +7,7 @@ import {
   check,
   foreignKey,
   index,
+  integer,
   jsonb,
   pgTable,
   primaryKey,
@@ -95,6 +96,12 @@ export const chatMessages = pgTable(
     status: text('status').$type<ChatMessage['status']>().notNull(),
     force: boolean('force').notNull().default(false),
     replyTo: uuid('reply_to'),
+    // A work item starts with its own message. Later messages carry that root's ID.
+    workId: uuid('work_id'),
+    workTitle: text('work_title'),
+    workPosition: integer('work_position'),
+    // Assign a cursor when a member follow-up is routed, since routing may reorder messages.
+    workOrder: bigint('work_order', { mode: 'number' }),
     workerId: uuid('worker_id').references(() => agents.id),
     proposal: jsonb('proposal').$type<ChatProposal>(),
     taskId: uuid('task_id').references(() => tasks.id),
@@ -108,6 +115,10 @@ export const chatMessages = pgTable(
   (table) => [
     index('chat_messages_history_idx').on(table.clanId, table.sequence),
     index('chat_messages_queue_idx').on(table.clanId, table.status, table.force.desc(), table.sequence),
+    index('chat_messages_work_idx').on(table.clanId, table.workId, table.sequence),
+    index('chat_messages_work_order_idx')
+      .on(table.clanId, table.workId, table.workOrder)
+      .where(sql`${table.workOrder} is not null`),
     index('chat_messages_worker_idx').on(table.clanId, table.workerId).where(sql`${table.workerId} is not null`),
     uniqueIndex('chat_messages_task_idx').on(table.taskId).where(sql`${table.taskId} is not null`),
   ],

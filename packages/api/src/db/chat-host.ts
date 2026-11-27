@@ -136,9 +136,10 @@ export async function requireChatLease(
   clanId: string,
   tokenHash: string,
   leaseId: string | undefined,
+  required = false,
 ) {
   const { chat, agentId, leader, live } = await requireChatHost(db, actor, clanId, tokenHash);
-  if (!leaseId && leader && !live && !(await isChatBackup(db, clanId))) return;
+  if (!required && !leaseId && leader && !live && !(await isChatBackup(db, clanId))) return;
   if (!leaseId || !live || chat.leaseAgentId !== agentId || chat.leaseId !== leaseId)
     throw new ApiError(409, 'CHAT_LEASE_LOST', 'This orchestrator no longer holds the active chat lease');
 }

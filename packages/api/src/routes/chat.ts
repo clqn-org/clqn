@@ -6,6 +6,7 @@ import {
   chatDecisionRequestSchema,
   chatLeaseHeartbeatSchema,
   chatMetricsWindowSchema,
+  chatRouteRequestSchema,
   chatSettingsSchema,
   chatUsageSchema,
   sendChatSchema,
@@ -24,12 +25,11 @@ import {
   chatIdentity,
   chatInfo,
   chatMergeQueue,
-  chatQueue,
   chatUsage,
   forcePending,
   messageView,
-  pickNext,
 } from '../db/chat-read.js';
+import { chatWorkerFollowups, chatWorkInbox, chatWorkState, routeChatMessage } from '../db/chat-work.js';
 import { requireClan, requirePersonal, type WorkspaceDb } from '../lib/access.js';
 
 async function parse<T>(c: Context, schema: z.ZodType<T>) {
@@ -81,13 +81,15 @@ async function saveSettings(
 
 export function createChatRoutes(db: WorkspaceDb) {
   const app = new Hono<{ Variables: { user: Actor; tokenHash: string } }>();
-  app.use(
-    '*',
+  const requestLimit = (maxSize: number) =>
     bodyLimit({
-      maxSize: 32 * 1024,
+      maxSize,
       onError: (c) => c.json({ error: { code: 'INVALID_REQUEST', message: 'Request body is too large' } }, 413),
-    }),
-  );
+    });
+  const standardLimit = requestLimit(32 * 1024);
+  // Routing several work items may include a complete description for each one.
+  const routeLimit = requestLimit(208 * 1024);
+  app.use('*', (c, next) => (c.req.path.endsWith('/route') ? routeLimit : standardLimit)(c, next));
   app.get('/', async (c) => {
     const actor = c.get('user');
     const clanId = c.req.param('clanId')!;
@@ -129,13 +131,14 @@ export function createChatRoutes(db: WorkspaceDb) {
     requirePersonal(actor);
     const membership = await requireClan(db, actor, clanId);
     const member = await requireChatMember(db, clanId, actor.id);
-    const [identity, history, activity, usage, mergeQueue, priority] = await Promise.all([
+    const [identity, history, activity, usage, mergeQueue, priority, work] = await Promise.all([
       chatIdentity(db, clanId, actor.id),
       chatHistory(db, clanId),
       chatActivity(db, clanId, actor.id),
       chatUsage(db, clanId, actor.id),
       membership.role === 'leader' ? chatMergeQueue(db, clanId) : undefined,
       forcePending(db, clanId),
+      chatWorkState(db, clanId),
     ]);
     const safeNumber = (value: bigint) => Math.min(Number(value), Number.MAX_SAFE_INTEGER);
     return c.json({
@@ -149,6 +152,7 @@ export function createChatRoutes(db: WorkspaceDb) {
       ...history,
       ...activity,
       forcePending: priority,
+      work,
       ...(mergeQueue ? { mergeQueue } : {}),
       usage: { tokens: safeNumber(usage.tokens), reserved: safeNumber(usage.reserved), agents: usage.agents },
     });
@@ -207,18 +211,29 @@ export function createChatRoutes(db: WorkspaceDb) {
       );
     });
   }
-  // The orchestrator takes one message at a time; taking it marks it as processing for every member.
+  // The router and each sub-orchestrator take one message from their respective inbox.
   app.post('/inbox', async (c) => {
     const actor = c.get('user');
     const clanId = c.req.param('clanId')!;
     const leaseId = leaseQuery(c);
+    const workId = c.req.query('work');
     return c.json(
       await db.transaction(async (tx) => {
-        await requireChatLease(tx, actor, clanId, c.get('tokenHash'), leaseId);
-        const picked = await pickNext(tx, clanId);
-        const history = await chatHistory(tx, clanId, undefined, 20);
-        const held = await chatQueue(tx, clanId, 'clarification');
-        return { ...history, ...picked, held };
+        await requireChatLease(tx, actor, clanId, c.get('tokenHash'), leaseId, workId !== undefined);
+        return chatWorkInbox(tx, clanId, workId === undefined ? undefined : uuid(workId));
+      }),
+    );
+  });
+  app.post('/messages/:id/route', async (c) => {
+    const actor = c.get('user');
+    const clanId = c.req.param('clanId')!;
+    const id = uuid(c.req.param('id'));
+    const leaseId = leaseQuery(c);
+    const body = await parse(c, chatRouteRequestSchema);
+    return c.json(
+      await db.transaction(async (tx) => {
+        await requireChatLease(tx, actor, clanId, c.get('tokenHash'), leaseId, true);
+        return routeChatMessage(tx, actor, clanId, id, body);
       }),
     );
   });
@@ -231,7 +246,7 @@ export function createChatRoutes(db: WorkspaceDb) {
     return c.json(
       await db.transaction(async (tx) => {
         await requireChatLease(tx, actor, clanId, c.get('tokenHash'), leaseId);
-        return decideChat(tx, actor, clanId, id, body);
+        return decideChat(tx, actor, clanId, id, body, leaseId);
       }),
     );
   });
@@ -259,6 +274,23 @@ export function createChatRoutes(db: WorkspaceDb) {
         await requireClan(tx, actor, clanId, 'share');
         await requireChat(tx, clanId, true);
         return reportChat(tx, actor, clanId, taskId, body);
+      }),
+    );
+  });
+  app.get('/tasks/:taskId/followups', async (c) => {
+    const actor = c.get('user');
+    const clanId = c.req.param('clanId')!;
+    const taskId = uuid(c.req.param('taskId'));
+    const after = z.coerce
+      .number()
+      .int()
+      .nonnegative()
+      .safeParse(c.req.query('after') ?? 0);
+    if (!after.success) throw new ApiError(400, 'INVALID_REQUEST', 'Provide a valid follow-up cursor');
+    return c.json(
+      await db.transaction(async (tx) => {
+        await requireClan(tx, actor, clanId, 'share');
+        return chatWorkerFollowups(tx, actor, clanId, taskId, after.data);
       }),
     );
   });
