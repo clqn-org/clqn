@@ -45,6 +45,12 @@ const chatText = z
   .max(4000)
   .refine((text) => !text.includes('\0'));
 const tokenCount = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+const workTitle = z
+  .string()
+  .trim()
+  .min(1)
+  .max(100)
+  .refine((text) => !text.includes('\0'));
 export const sendChatSchema = z
   .object({ id: z.uuid(), text: chatText, replyTo: z.uuid().optional(), force: z.boolean().optional() })
   .strict();
@@ -55,12 +61,7 @@ export const chatDecisionSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('delegate'),
-      title: z
-        .string()
-        .trim()
-        .min(1)
-        .max(100)
-        .refine((text) => !text.includes('\0')),
+      title: workTitle,
       description: chatText,
       workerId: z.uuid(),
       estimatedTokens: tokenCount.min(1),
@@ -78,6 +79,27 @@ export const chatDecisionRequestSchema = z.discriminatedUnion('action', [
   delegateDecision.extend(pick),
 ]);
 export type ChatDecisionRequest = z.infer<typeof chatDecisionRequestSchema>;
+const startWork = z
+  .object({
+    action: z.literal('start'),
+    work: z.array(z.object({ title: workTitle, description: chatText }).strict()).min(1).max(8),
+  })
+  .strict();
+const followUp = z.object({ action: z.literal('followup'), workId: z.uuid() }).strict();
+const routeClarification = clarifyDecision.omit({ hold: true });
+export const chatRouteDecisionSchema = z.discriminatedUnion('action', [
+  replyDecision,
+  routeClarification,
+  startWork,
+  followUp,
+]);
+export const chatRouteRequestSchema = z.discriminatedUnion('action', [
+  replyDecision.extend({ pickId: z.uuid() }),
+  routeClarification.extend({ pickId: z.uuid() }),
+  startWork.extend({ pickId: z.uuid() }),
+  followUp.extend({ pickId: z.uuid() }),
+]);
+export type ChatRouteRequest = z.infer<typeof chatRouteRequestSchema>;
 export const chatApprovalSchema = z.object({ approve: z.boolean() }).strict();
 export const chatUsageSchema = z
   .object({ tokens: tokenCount, result: z.object({ id: z.uuid(), text: chatText }).strict().optional() })
@@ -143,6 +165,13 @@ export const chatHistorySchema = z.object({
   messages: z.array(chatMessageSchema),
   before: z.number().int().positive().nullable(),
 });
+const chatWorkSchema = z.object({
+  id: z.uuid(),
+  title: workTitle,
+  status: z.string(),
+  requestId: z.uuid().optional(),
+  position: z.number().int().positive().optional(),
+});
 export const chatStateSchema = chatHistorySchema.extend({
   session: chatSessionSchema,
   settings: chatSettingsSchema,
@@ -153,6 +182,7 @@ export const chatStateSchema = chatHistorySchema.extend({
   orchestration: chatOrchestrationSchema.optional(),
   queued: z.number().int().nonnegative(),
   forcePending: z.object({ id: z.uuid(), processing: z.boolean() }).nullable().optional(),
+  work: z.object({ pending: z.uuid().nullable(), ready: z.array(z.uuid()) }).optional(),
   running: z.number().int().nonnegative(),
   usage: z.object({ tokens: tokenCount, reserved: tokenCount, agents: z.number().int().nonnegative() }),
 });
@@ -162,6 +192,12 @@ export const chatInboxSchema = chatHistorySchema.extend({
   next: chatMessageSchema.nullable(),
   pickId: z.uuid().nullish(),
   held: z.array(chatMessageSchema),
+  work: z.array(chatWorkSchema).optional(),
+  workItem: chatWorkSchema.extend({ hasTask: z.boolean() }).optional(),
+});
+export const chatFollowupsSchema = z.object({
+  messages: z.array(z.object({ sequence: z.number().int().positive(), id: z.uuid(), text: chatText })),
+  next: z.number().int().nonnegative(),
 });
 
 // 24h uses hourly buckets; 7d uses 6-hour buckets. The last bucket holds the current hour.

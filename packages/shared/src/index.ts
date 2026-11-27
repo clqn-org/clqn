@@ -22,11 +22,13 @@ import { setAliasSchema } from './aliases.js';
 import {
   type ChatDecisionRequest,
   type ChatMetricsWindow,
+  type ChatRouteRequest,
   type ChatSettings,
   type ChatUsage,
   chatBackupsInputSchema,
   chatBackupsSchema,
   chatDecisionRequestSchema,
+  chatFollowupsSchema,
   chatHistorySchema,
   chatInboxSchema,
   chatInfoSchema,
@@ -36,6 +38,7 @@ import {
   chatMessageSchema,
   chatMessageStatusSchema,
   chatMetricsSchema,
+  chatRouteRequestSchema,
   chatSettingsSchema,
   chatStateSchema,
   chatUsageSchema,
@@ -281,16 +284,35 @@ export class ClqnClient {
     );
   }
   // Takes the next queued message for the orchestrator to handle.
-  chatInbox(clanId: string, leaseId?: string) {
-    const query = leaseId ? `?lease=${encodeURIComponent(leaseId)}` : '';
-    return this.request(`${this.chatPath(clanId)}/inbox${query}`, chatInboxSchema, {});
+  chatInbox(clanId: string, leaseId?: string, workId?: string, signal?: AbortSignal) {
+    const query = new URLSearchParams();
+    if (leaseId) query.set('lease', leaseId);
+    if (workId) query.set('work', workId);
+    return this.request(`${this.chatPath(clanId)}/inbox${query.size ? `?${query}` : ''}`, chatInboxSchema, {}, signal);
   }
-  decideChat(clanId: string, id: string, decision: ChatDecisionRequest, leaseId?: string) {
+  decideChat(clanId: string, id: string, decision: ChatDecisionRequest, leaseId?: string, signal?: AbortSignal) {
     const query = leaseId ? `?lease=${encodeURIComponent(leaseId)}` : '';
     return this.request(
       `${this.chatPath(clanId)}/messages/${encodeURIComponent(id)}/decision${query}`,
       z.object({ status: chatMessageStatusSchema, blocker: z.string().nullable() }),
       chatDecisionRequestSchema.parse(decision),
+      signal,
+    );
+  }
+  routeChat(clanId: string, id: string, decision: ChatRouteRequest, leaseId: string, signal?: AbortSignal) {
+    return this.request(
+      `${this.chatPath(clanId)}/messages/${encodeURIComponent(id)}/route?lease=${encodeURIComponent(leaseId)}`,
+      z.object({ ok: z.literal(true) }),
+      chatRouteRequestSchema.parse(decision),
+      signal,
+    );
+  }
+  chatFollowups(clanId: string, taskId: string, after: number, signal?: AbortSignal) {
+    return this.request(
+      `${this.chatPath(clanId)}/tasks/${encodeURIComponent(taskId)}/followups?after=${after}`,
+      chatFollowupsSchema,
+      undefined,
+      signal,
     );
   }
   chatMetrics(clanId: string, window: ChatMetricsWindow, signal?: AbortSignal) {
