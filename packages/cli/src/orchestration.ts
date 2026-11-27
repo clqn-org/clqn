@@ -30,14 +30,12 @@ const plannerMemoryAllowance = 256 * 1024 * 1024;
 const retryDelay = 10_000;
 const parseOutput = (output: string): unknown => JSON.parse(output.trim().replace(/^```(?:json)?\s*\n|\n```$/gi, ''));
 
-function readRoute(text: string, candidates: ChatInbox['work']) {
+function readRoute(text: string) {
   try {
-    const decision = chatRouteDecisionSchema.parse(parseOutput(text));
-    if (decision.action !== 'followup' || candidates?.some(({ id }) => id === decision.workId)) return decision;
+    return chatRouteDecisionSchema.parse(parseOutput(text));
   } catch {
-    // Keep the request available to answer while the host moves on to other messages.
+    throw new Error('The router returned an invalid decision');
   }
-  return { action: 'clarify' as const, text: 'Could you clarify which task this is for, or what work should start?' };
 }
 
 function compact({ id, text, replyTo, role, sequence }: ChatInbox['messages'][number], limit = 4000) {
@@ -112,7 +110,9 @@ export function createOrchestration(
       }),
       signal,
     );
-    const decision = readRoute(text, candidates);
+    const decision = readRoute(text);
+    if (decision.action === 'followup' && !candidates.some(({ id }) => id === decision.workId))
+      throw new Error('The router chose an unknown task');
     if (host.active())
       await host.api.routeChat(clanId, inbox.next.id, { ...decision, pickId: inbox.pickId }, host.leaseId, signal);
   }

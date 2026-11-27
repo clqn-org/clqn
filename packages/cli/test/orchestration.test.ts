@@ -125,6 +125,53 @@ test('more planning starts when the host has memory headroom', async () => {
   await Promise.all(tasks);
 });
 
+test('an invalid router decision is reported and retried without posting a clarification', async () => {
+  const clanId = randomUUID();
+  const next = message(randomUUID(), 'Fix the broken links');
+  const tasks: Promise<void>[] = [];
+  const submitted: ChatRouteRequest[] = [];
+  let now = 0;
+  const coordinator = createOrchestration(
+    clanId,
+    () => now,
+    () => {},
+    (task) => tasks.push(task),
+  );
+  const responses = [
+    '{',
+    JSON.stringify({ action: 'followup', workId: randomUUID() }),
+    JSON.stringify({ action: 'reply', text: 'Acknowledged' }),
+  ];
+  const host = {
+    api: {
+      chatInbox: async () => ({ next, pickId: randomUUID(), messages: [], work: [] }),
+      routeChat: async (_clan: string, _id: string, decision: ChatRouteRequest) => submitted.push(decision),
+    } as unknown as ClqnClient,
+    leaseId: randomUUID(),
+    active: () => true,
+    generate: async () => responses.shift()!,
+  };
+  const state = { pending: next.id, ready: [] };
+  coordinator.update(state, [], host, null);
+  await tasks[0];
+  assert.deepEqual(coordinator.status(), ['Orchestrator · The router returned an invalid decision']);
+  coordinator.update(state, [], host, null);
+  assert.equal(tasks.length, 1);
+  assert.equal(submitted.length, 0);
+
+  now += 10_000;
+  coordinator.update(state, [], host, null);
+  await tasks[1];
+  assert.deepEqual(coordinator.status(), ['Orchestrator · The router chose an unknown task']);
+  assert.equal(submitted.length, 0);
+
+  now += 10_000;
+  coordinator.update(state, [], host, null);
+  await tasks[2];
+  assert.equal(submitted[0]?.action, 'reply');
+  assert.deepEqual(coordinator.status(), []);
+});
+
 test('losing the host lease cancels all turns before they can submit decisions', async () => {
   const clanId = randomUUID();
   const first = message(randomUUID(), 'Implement a feature');

@@ -249,7 +249,7 @@ export function createChatRoutes(db: WorkspaceDb) {
     return c.json(
       await db.transaction(async (tx) => {
         await requireChatLease(tx, actor, clanId, c.get('tokenHash'), leaseId);
-        return decideChat(tx, actor, clanId, id, body, leaseId);
+        return decideChat(tx, actor, clanId, id, body, leaseId !== undefined);
       }),
     );
   });

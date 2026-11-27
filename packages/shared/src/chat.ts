@@ -99,11 +99,12 @@ export const chatRouteDecisionSchema = z.discriminatedUnion('action', [
   startWork,
   followUp,
 ]);
+const routePick = { pickId: z.uuid() };
 export const chatRouteRequestSchema = z.discriminatedUnion('action', [
-  replyDecision.extend({ pickId: z.uuid() }),
-  routeClarification.extend({ pickId: z.uuid() }),
-  startWork.extend({ pickId: z.uuid() }),
-  followUp.extend({ pickId: z.uuid() }),
+  replyDecision.extend(routePick),
+  routeClarification.extend(routePick),
+  startWork.extend(routePick),
+  followUp.extend(routePick),
 ]);
 export type ChatRouteRequest = z.infer<typeof chatRouteRequestSchema>;
 export const chatApprovalSchema = z.object({ approve: z.boolean() }).strict();
@@ -174,7 +175,7 @@ export const chatHistorySchema = z.object({
 const chatWorkSchema = z.object({
   id: z.uuid(),
   title: workTitle,
-  status: z.string(),
+  status: z.enum([...chatMessageStatusSchema.options, 'running', 'done', 'released', 'review']),
   requestId: z.uuid().optional(),
   position: z.number().int().positive().optional(),
 });

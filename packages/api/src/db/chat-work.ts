@@ -11,6 +11,7 @@ import {
   messageScope,
   messageView,
   nextQueued,
+  pendingContinuation,
   pickNext,
   runStatus,
   workScope,
@@ -46,22 +47,6 @@ const workRequest = alias(chatMessages, 'work_request');
 const currentDelegation = alias(chatMessages, 'current_delegation');
 const currentWorker = sql<string | null>`coalesce(${currentDelegation.workerId}, ${chatMessages.workerId})`;
 
-function pendingContinuation(db: WorkspaceDb) {
-  const pending = alias(chatMessages, 'pending_continuation');
-  return exists(
-    db
-      .select({ id: pending.id })
-      .from(pending)
-      .where(
-        and(
-          eq(pending.clanId, chatMessages.clanId),
-          eq(pending.status, 'approval'),
-          sql`${pending.proposal}->>'taskId' = ${tasks.id}::text`,
-        ),
-      ),
-  );
-}
-
 function queryWork(db: WorkspaceDb, clanId: string, workId?: string) {
   return db
     .select({
@@ -76,7 +61,7 @@ function queryWork(db: WorkspaceDb, clanId: string, workId?: string) {
       taskStatus: tasks.status,
       assigned: tasks.assignedAgentId,
       inReview: sql<boolean>`coalesce(${tasks.repository}->>'state' in ('open', 'pushed'), false)`,
-      pending: pendingContinuation(db),
+      pending: exists(pendingContinuation(db, clanId, tasks.id)),
     })
     .from(chatMessages)
     .leftJoin(
@@ -121,7 +106,7 @@ async function recentWork(db: WorkspaceDb, clanId: string) {
   const outstanding = or(
     inArray(chatMessages.status, ['approval', 'clarification', 'queued']),
     and(inArray(tasks.status, ['open', 'claimed']), eq(tasks.assignedAgentId, currentWorker)),
-    pendingContinuation(db),
+    exists(pendingContinuation(db, clanId, tasks.id)),
   );
   const rows = await queryWork(db, clanId)
     .orderBy(
@@ -167,7 +152,7 @@ export async function routeChatMessage(
     throw new ApiError(409, 'CHAT_CONFLICT', 'Take the next message from the router inbox before routing');
 
   if (body.action === 'reply' || body.action === 'clarify') {
-    await decideChat(db, actor, clanId, id, body);
+    await decideChat(db, actor, clanId, id, body, true);
     return chatAcknowledged;
   }
 

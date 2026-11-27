@@ -6,7 +6,22 @@ import {
   type ChatSettings,
   defaultChatSettings,
 } from '@clqn/shared';
-import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  ne,
+  or,
+  type SQLWrapper,
+  sql,
+} from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { WorkspaceDb } from '../lib/access.js';
 import { chatBackups, chatMembers, chatMessages, chats } from './chat.js';
@@ -19,6 +34,21 @@ export const workScope = (workId?: string | null) =>
   workId ? eq(chatMessages.workId, workId) : isNull(chatMessages.workId);
 export const memberScope = (clanId: string, userId: string) =>
   and(eq(chatMembers.clanId, clanId), eq(chatMembers.userId, userId));
+
+export function pendingContinuation(db: WorkspaceDb, clanId: string, taskId: string | SQLWrapper) {
+  const pending = alias(chatMessages, 'pending_continuation');
+  return db
+    .select({ id: pending.id })
+    .from(pending)
+    .where(
+      and(
+        eq(pending.clanId, clanId),
+        eq(pending.status, 'approval'),
+        sql`${pending.proposal}->>'taskId' = ${taskId}::text`,
+      ),
+    )
+    .limit(1);
+}
 
 // A picked message stops showing as processing after this long, for example when the leader closes the chat mid-turn.
 const processingFor = 5 * 60_000;

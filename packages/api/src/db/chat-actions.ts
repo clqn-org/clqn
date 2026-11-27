@@ -10,6 +10,7 @@ import {
   forcePending,
   memberScope,
   messageScope,
+  pendingContinuation,
   workerBusy,
   workScope,
 } from './chat-read.js';
@@ -261,10 +262,10 @@ export async function decideChat(
   clanId: string,
   id: string,
   body: ChatDecisionRequest,
-  leaseId?: string,
+  leased: boolean,
 ) {
   const message = await getMessage(db, clanId, id);
-  if (message.workId && !leaseId)
+  if (message.workId && !leased)
     throw new ApiError(409, 'CHAT_LEASE_LOST', 'This orchestrator no longer holds the active chat lease');
   if (message.status !== 'queued') throw conflict('This message has already been handled');
   if (
@@ -299,17 +300,7 @@ export async function decideChat(
       if (workId && current.message.workId !== workId) throw conflict('Continue the task from this work only');
       workId = current.message.workId;
       if (workId) {
-        const [pending] = await db
-          .select({ id: chatMessages.id })
-          .from(chatMessages)
-          .where(
-            and(
-              messageScope(clanId),
-              eq(chatMessages.status, 'approval'),
-              sql`${chatMessages.proposal}->>'taskId' = ${body.taskId}`,
-            ),
-          )
-          .limit(1);
+        const [pending] = await pendingContinuation(db, clanId, body.taskId);
         if (pending) throw conflict('This work already has a continuation awaiting approval');
       }
     }
