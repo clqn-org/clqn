@@ -55,7 +55,7 @@ const models = (text: string) => {
 const parallelPlanning = (text: string) => {
   if (!text || /^auto$/i.test(text)) return null;
   const parsed = chatPlannerLimitSchema.safeParse(/^\d+$/.test(text) ? Number(text) : undefined);
-  if (!parsed.success) throw new Error('Parallel planning must be a positive whole number or Auto');
+  if (!parsed.success) throw new Error('Planners must be a positive whole number or Auto');
   return parsed.data;
 };
 
@@ -413,10 +413,13 @@ export async function runChat(
           tokenLimit: numeric(tokenText),
           agentLimit: numeric(agentText),
           allowedModels: models(modelText),
-          ...(plannerLimit !== undefined && plannerLimit !== originalPlannerLimit ? { plannerLimit } : {}),
         },
         controller.signal,
       );
+      if (plannerLimit !== undefined && plannerLimit !== originalPlannerLimit) {
+        await api.setChatPlannerLimit(clanId, plannerLimit, controller.signal);
+        setup.originalPlannerLimit = plannerLimit;
+      }
       const chosen = setup.agents;
       if (chosen && agents && chosen.off.join() !== saved?.off.join()) {
         await agents.choose(chosen.off);

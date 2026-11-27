@@ -21,7 +21,6 @@ import {
 import { setAliasSchema } from './aliases.js';
 import {
   type ChatDecisionRequest,
-  type ChatJoinSettings,
   type ChatMetricsWindow,
   type ChatRouteRequest,
   type ChatSettings,
@@ -33,13 +32,13 @@ import {
   chatHistorySchema,
   chatInboxSchema,
   chatInfoSchema,
-  chatJoinSettingsSchema,
   chatLeaseHeartbeatSchema,
   chatLeaseInputSchema,
   chatLeaseSchema,
   chatMessageSchema,
   chatMessageStatusSchema,
   chatMetricsSchema,
+  chatPlannerLimitInputSchema,
   chatRouteRequestSchema,
   chatSettingsSchema,
   chatStateSchema,
@@ -242,11 +241,19 @@ export class ClqnClient {
   chatInfo(clanId: string, signal?: AbortSignal) {
     return this.request(this.chatPath(clanId), chatInfoSchema, undefined, signal);
   }
-  joinChat(clanId: string, settings: ChatJoinSettings, signal?: AbortSignal) {
+  joinChat(clanId: string, settings: ChatSettings, signal?: AbortSignal) {
     return this.request(
       `${this.chatPath(clanId)}/join`,
       chatSettingsSchema,
-      chatJoinSettingsSchema.parse(settings),
+      chatSettingsSchema.parse(settings),
+      signal,
+    );
+  }
+  setChatPlannerLimit(clanId: string, plannerLimit: number | null, signal?: AbortSignal) {
+    return this.request(
+      `${this.chatPath(clanId)}/planner-limit`,
+      chatPlannerLimitInputSchema,
+      chatPlannerLimitInputSchema.parse({ plannerLimit }),
       signal,
     );
   }

@@ -1,13 +1,12 @@
 import {
   type Actor,
   ApiError,
-  type ChatSettings,
   chatApprovalSchema,
   chatBackupsInputSchema,
   chatDecisionRequestSchema,
-  chatJoinSettingsSchema,
   chatLeaseHeartbeatSchema,
   chatMetricsWindowSchema,
+  chatPlannerLimitInputSchema,
   chatRouteRequestSchema,
   chatSettingsSchema,
   chatUsageSchema,
@@ -52,9 +51,9 @@ function leaseQuery(c: Context) {
 }
 
 // Older clients omit allowedModels; keep the saved models instead of removing them.
-async function parseSettings<T extends ChatSettings>(c: Context, schema: z.ZodType<T>) {
+async function parseSettings(c: Context) {
   const body = await c.req.json().catch(() => null);
-  const parsed = schema.safeParse(body);
+  const parsed = chatSettingsSchema.safeParse(body);
   if (!parsed.success) throw new ApiError(400, 'INVALID_REQUEST', 'Invalid chat request');
   return { settings: parsed.data, keepModels: !(body && typeof body === 'object' && 'allowedModels' in body) };
 }
@@ -64,7 +63,7 @@ async function saveSettings(
   db: WorkspaceDb,
   clanId: string,
   userId: string,
-  { settings, keepModels }: { settings: ChatSettings; keepModels: boolean },
+  { settings, keepModels }: Awaited<ReturnType<typeof parseSettings>>,
 ) {
   const [saved] = await db
     .insert(chatMembers)
@@ -104,7 +103,7 @@ export function createChatRoutes(db: WorkspaceDb) {
     const actor = c.get('user');
     const clanId = c.req.param('clanId')!;
     requirePersonal(actor);
-    const settings = await parseSettings(c, chatSettingsSchema);
+    const settings = await parseSettings(c);
     return c.json(
       await db.transaction(async (tx) => {
         await requireClan(tx, actor, clanId, 'share');
@@ -116,20 +115,34 @@ export function createChatRoutes(db: WorkspaceDb) {
     const actor = c.get('user');
     const clanId = c.req.param('clanId')!;
     requirePersonal(actor);
-    const {
-      settings: { plannerLimit, ...settings },
-      keepModels,
-    } = await parseSettings(c, chatJoinSettingsSchema);
+    const settings = await parseSettings(c);
     return c.json(
       await db.transaction(async (tx) => {
         const membership = await requireClan(tx, actor, clanId, 'share');
-        if (plannerLimit !== undefined && membership.role !== 'leader')
-          throw new ApiError(403, 'FORBIDDEN', 'Only the clan leader can set the planner limit');
         if (membership.role === 'leader')
           await tx.insert(chats).values({ clanId, hostId: actor.id }).onConflictDoNothing();
         await requireChat(tx, clanId, true);
-        if (plannerLimit !== undefined) await tx.update(chats).set({ plannerLimit }).where(eq(chats.clanId, clanId));
-        return saveSettings(tx, clanId, actor.id, { settings, keepModels });
+        return saveSettings(tx, clanId, actor.id, settings);
+      }),
+    );
+  });
+  app.post('/planner-limit', async (c) => {
+    const actor = c.get('user');
+    const clanId = c.req.param('clanId')!;
+    requirePersonal(actor);
+    const { plannerLimit } = await parse(c, chatPlannerLimitInputSchema);
+    return c.json(
+      await db.transaction(async (tx) => {
+        const membership = await requireClan(tx, actor, clanId, 'share');
+        if (membership.role !== 'leader')
+          throw new ApiError(403, 'FORBIDDEN', 'Only the clan leader can set the planner limit');
+        const [saved] = await tx
+          .update(chats)
+          .set({ plannerLimit })
+          .where(eq(chats.clanId, clanId))
+          .returning({ plannerLimit: chats.plannerLimit });
+        if (!saved) throw new ApiError(404, 'NOT_FOUND', 'Session not found');
+        return saved;
       }),
     );
   });

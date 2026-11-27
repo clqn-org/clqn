@@ -162,7 +162,7 @@ test('PostgreSQL: multiple chat backups share one lease and recover queued work'
   assert.equal((await inbox(standby.token)).status, 200);
 });
 
-test('PostgreSQL: only leaders change the clan planner limit, and join saves both settings together', {
+test('PostgreSQL: only the leader changes the clan planner limit independently of personal settings', {
   skip,
 }, async (t) => {
   const { connection, sql, user } = await database(t);
@@ -176,48 +176,59 @@ test('PostgreSQL: only leaders change the clan planner limit, and join saves bot
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}),
     });
-  const join = (token: string, plannerLimit?: number | null) =>
-    request(token, '/join', { ...defaultChatSettings, plannerLimit });
+  const setLimit = (token: string, plannerLimit: number | null) => request(token, '/planner-limit', { plannerLimit });
   async function state(token = leader.token) {
     const response = await request(token, '/state');
     assert.equal(response.status, 200, await response.clone().text());
     return chatStateSchema.parse(await response.json());
   }
-  for (const { token } of [leader, backup, member]) assert.equal((await join(token)).status, 200);
+  assert.equal((await setLimit(leader.token, 2)).status, 404);
+  for (const { token } of [leader, backup, member])
+    assert.equal((await request(token, '/join', defaultChatSettings)).status, 200);
   assert.equal((await request(leader.token, '/host/backups', { userIds: [backup.user.id] })).status, 200);
   assert.equal((await state()).orchestration?.plannerLimit, null);
 
   const limit = 2_147_483_647;
-  const saved = await join(leader.token, limit);
+  const saved = await setLimit(leader.token, limit);
   assert.equal(saved.status, 200);
-  assert.deepEqual(await saved.json(), defaultChatSettings);
+  assert.deepEqual(await saved.json(), { plannerLimit: limit });
   assert.equal((await state(backup.token)).orchestration?.backup, true);
   assert.equal((await state(backup.token)).orchestration?.plannerLimit, limit);
   assert.equal((await state(member.token)).orchestration?.plannerLimit, limit);
 
-  assert.equal((await join(member.token, 2)).status, 403);
-  assert.equal((await join(backup.token, null)).status, 403);
-  assert.equal((await join(host.token, 2)).status, 403);
-  assert.equal((await join(leader.token, 0)).status, 400);
-  assert.equal((await join(leader.token, limit + 1)).status, 400);
-  assert.equal((await request(leader.token, '/settings', { ...defaultChatSettings, plannerLimit: null })).status, 400);
-  assert.equal((await join(member.token)).status, 200);
-  assert.equal((await join(leader.token)).status, 200);
+  assert.equal((await setLimit(member.token, 2)).status, 403);
+  assert.equal((await setLimit(backup.token, null)).status, 403);
+  assert.equal((await setLimit(host.token, 2)).status, 403);
+  assert.equal((await setLimit(leader.token, 0)).status, 400);
+  assert.equal((await setLimit(leader.token, limit + 1)).status, 400);
+  assert.equal((await request(leader.token, '/planner-limit', {})).status, 400);
+  for (const path of ['/settings', '/join'])
+    assert.equal((await request(leader.token, path, { ...defaultChatSettings, plannerLimit: null })).status, 400);
+
+  const custom = { ...defaultChatSettings, tokenLimit: 35, allowedModels: ['test-model'] };
+  assert.equal((await request(leader.token, '/settings', custom)).status, 200);
+  const { allowedModels: _omitted, ...olderClient } = custom;
+  const rejoined = await request(leader.token, '/join', olderClient);
+  assert.equal(rejoined.status, 200);
+  assert.deepEqual(await rejoined.json(), custom);
   assert.equal((await state()).orchestration?.plannerLimit, limit);
 
-  const edits = [
-    { ...defaultChatSettings, plannerLimit: 1, tokenLimit: 20 },
-    { ...defaultChatSettings, plannerLimit: 6, tokenLimit: 35 },
-  ];
-  const editsSaved = await Promise.all(edits.map((edit) => request(leader.token, '/join', edit)));
-  assert.deepEqual(
-    editsSaved.map(({ status }) => status),
-    [200, 200],
-  );
+  const updatedSettings = { ...custom, agentLimit: 4 };
+  const [first, second, personal] = await Promise.all([
+    setLimit(leader.token, 1),
+    setLimit(leader.token, 6),
+    request(leader.token, '/settings', updatedSettings),
+  ]);
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  assert.equal(personal.status, 200);
+  assert.deepEqual(await first.json(), { plannerLimit: 1 });
+  assert.deepEqual(await second.json(), { plannerLimit: 6 });
   const edited = await state();
-  const winner = edits.find(({ plannerLimit }) => plannerLimit === edited.orchestration?.plannerLimit);
-  assert.ok(winner);
-  assert.deepEqual({ ...edited.settings, plannerLimit: edited.orchestration?.plannerLimit }, winner);
-  assert.equal((await join(leader.token, null)).status, 200);
+  assert.ok(edited.orchestration?.plannerLimit === 1 || edited.orchestration?.plannerLimit === 6);
+  assert.deepEqual(edited.settings, updatedSettings);
+  const cleared = await setLimit(leader.token, null);
+  assert.equal(cleared.status, 200);
+  assert.deepEqual(await cleared.json(), { plannerLimit: null });
   assert.equal((await state(backup.token)).orchestration?.plannerLimit, null);
 });

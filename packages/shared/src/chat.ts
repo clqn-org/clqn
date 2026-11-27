@@ -29,9 +29,9 @@ export const chatSettingsSchema = z
   })
   .strict();
 export type ChatSettings = z.infer<typeof chatSettingsSchema>;
+export const defaultPlannerLimit = 5;
 export const chatPlannerLimitSchema = z.number().int().min(1).max(2_147_483_647).nullable();
-export const chatJoinSettingsSchema = chatSettingsSchema.extend({ plannerLimit: chatPlannerLimitSchema.optional() });
-export type ChatJoinSettings = z.infer<typeof chatJoinSettingsSchema>;
+export const chatPlannerLimitInputSchema = z.object({ plannerLimit: chatPlannerLimitSchema }).strict();
 // Full access: no token, agent, or model limits. Each delegation still needs the member's approval.
 export const defaultChatSettings: ChatSettings = {
   approval: 'manual',
@@ -102,6 +102,7 @@ export const chatRouteDecisionSchema = z.discriminatedUnion('action', [
   startWork,
   followUp,
 ]);
+export type ChatRouteDecision = z.infer<typeof chatRouteDecisionSchema>;
 const routePick = { pickId: z.uuid() };
 export const chatRouteRequestSchema = z.discriminatedUnion('action', [
   replyDecision.extend(routePick),
@@ -206,14 +207,13 @@ export const chatInboxSchema = chatHistorySchema.extend({
   // Recent delegations for hosts that route and decide in a single turn.
   runs: z.array(chatRunSchema).optional(),
   work: z.array(chatWorkSchema).optional(),
-  workItem: chatWorkSchema
-    .extend({ hasTask: z.boolean(), taskId: z.uuid().optional(), workerId: z.uuid().optional() })
-    .optional(),
+  workItem: chatWorkSchema.extend({ taskId: z.uuid().optional(), workerId: z.uuid().optional() }).optional(),
 });
 export const chatFollowupsSchema = z.object({
   messages: z.array(z.object({ sequence: z.number().int().positive(), id: z.uuid(), text: chatText })),
   next: z.number().int().nonnegative(),
 });
+export type ChatFollowups = z.infer<typeof chatFollowupsSchema>;
 
 // 24h uses hourly buckets; 7d uses 6-hour buckets. The last bucket holds the current hour.
 export const chatMetricsWindows = {

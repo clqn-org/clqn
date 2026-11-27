@@ -43,7 +43,7 @@ test('the router forwards a follow-up while more than five independent sub-orche
         next,
         pickId: randomUUID(),
         messages: [next],
-        ...(item ? { workItem: { ...item, hasTask: false } } : { work }),
+        ...(item ? { workItem: item } : { work }),
       };
     },
     routeChat: async (_clan: string, _id: string, decision: ChatRouteRequest) => routes.push(decision),
@@ -71,9 +71,14 @@ test('the router forwards a follow-up while more than five independent sub-orche
   const ready = work.map(({ id }) => id);
   coordinator.update({ pending: null, ready }, [], host, null);
   await new Promise((done) => setImmediate(done));
+  assert.equal(models.size, 5);
+
+  const raised = { ...host, plannerLimit: 8 };
+  coordinator.update({ pending: null, ready }, [], raised, null);
+  await new Promise((done) => setImmediate(done));
   assert.equal(models.size, titles.length);
 
-  coordinator.update({ pending: followup.id, ready }, [], host, null);
+  coordinator.update({ pending: followup.id, ready }, [], raised, null);
   await tasks.at(-1);
   assert.equal(routes[1]?.action, 'followup');
   assert.equal(routes[1].workId, target!.id);
@@ -102,7 +107,7 @@ test('planning responds to host memory and the leader’s ceiling', async () => 
         next: message(id, 'Plan the task'),
         pickId: randomUUID(),
         messages: [],
-        workItem: { id, title: 'Task', status: 'queued', hasTask: false },
+        workItem: { id, title: 'Task', status: 'queued' },
       }),
       listAgents: async () => ({ agents: [] }),
       decideChat: async () => ({}),
@@ -132,11 +137,12 @@ test('planning responds to host memory and the leader’s ceiling', async () => 
   await Promise.all(tasks);
 });
 
-test('an invalid router decision is reported and retried without posting a clarification', async () => {
+test('two invalid router decisions prompt one clarification and release the next message', async () => {
   const clanId = randomUUID();
   const next = message(randomUUID(), 'Fix the broken links');
+  const following = message(randomUUID(), 'Update the docs');
   const tasks: Promise<void>[] = [];
-  const submitted: ChatRouteRequest[] = [];
+  const submitted: { id: string; decision: ChatRouteRequest }[] = [];
   let now = 0;
   const coordinator = createOrchestration(
     clanId,
@@ -151,8 +157,13 @@ test('an invalid router decision is reported and retried without posting a clari
   ];
   const host = {
     api: {
-      chatInbox: async () => ({ next, pickId: randomUUID(), messages: [], work: [] }),
-      routeChat: async (_clan: string, _id: string, decision: ChatRouteRequest) => submitted.push(decision),
+      chatInbox: async () => ({
+        next: submitted.length ? following : next,
+        pickId: randomUUID(),
+        messages: [],
+        work: [],
+      }),
+      routeChat: async (_clan: string, id: string, decision: ChatRouteRequest) => submitted.push({ id, decision }),
     } as unknown as ClqnClient,
     leaseId: randomUUID(),
     active: () => true,
@@ -169,13 +180,13 @@ test('an invalid router decision is reported and retried without posting a clari
   now += 10_000;
   coordinator.update(state, [], host, null);
   await tasks[1];
-  assert.deepEqual(coordinator.status(), ['Orchestrator · The router chose an unknown task']);
-  assert.equal(submitted.length, 0);
+  assert.equal(submitted[0]?.id, next.id);
+  assert.equal(submitted[0]?.decision.action, 'clarify');
 
-  now += 10_000;
-  coordinator.update(state, [], host, null);
+  coordinator.update({ ...state, pending: following.id }, [], host, null);
   await tasks[2];
-  assert.equal(submitted[0]?.action, 'reply');
+  assert.equal(submitted[1]?.id, following.id);
+  assert.equal(submitted[1]?.decision.action, 'reply');
   assert.deepEqual(coordinator.status(), []);
 });
 
@@ -224,9 +235,10 @@ test('a continuation keeps the task and previous worker', async () => {
   const next = message(randomUUID(), 'Continue the stopped feature');
   const tasks: Promise<void>[] = [];
   const submitted: ChatDecisionRequest[] = [];
+  let now = 0;
   const coordinator = createOrchestration(
     clanId,
-    () => 0,
+    () => now,
     () => {},
     (task) => tasks.push(task),
   );
@@ -235,7 +247,7 @@ test('a continuation keeps the task and previous worker', async () => {
       next,
       pickId: randomUUID(),
       messages: [],
-      workItem: { id: workId, title: 'Feature', taskId, workerId, status: 'released', hasTask: true },
+      workItem: { id: workId, title: 'Feature', taskId, workerId, status: 'released' },
     }),
     listAgents: async () => ({
       agents: [
@@ -245,33 +257,37 @@ test('a continuation keeps the task and previous worker', async () => {
     }),
     decideChat: async (_clan: string, _id: string, decision: ChatDecisionRequest) => submitted.push(decision),
   } as unknown as ClqnClient;
-  coordinator.update(
-    { pending: null, ready: [workId] },
-    [],
-    {
-      api,
-      leaseId: randomUUID(),
-      active: () => true,
-      generate: async (_name, _rules, prompt) => {
-        const modelInput = JSON.parse(prompt);
-        assert.deepEqual(modelInput.continuation, { taskId, workerId });
-        assert.deepEqual(
-          modelInput.workers.map(({ id }: { id: string }) => id),
-          [workerId],
-        );
-        return JSON.stringify({
-          action: 'delegate',
-          taskId,
-          workerId,
-          title: 'Feature',
-          description: next.text,
-          estimatedTokens: 5000,
-        });
-      },
+  const state = { pending: null, ready: [workId] };
+  const host = {
+    api,
+    leaseId: randomUUID(),
+    active: () => true,
+    generate: async (_name: string, _rules: string, prompt: string) => {
+      if (!now) return '{}';
+      const modelInput = JSON.parse(prompt);
+      assert.deepEqual(modelInput.continuation, { taskId, workerId });
+      assert.deepEqual(
+        modelInput.workers.map(({ id }: { id: string }) => id),
+        [workerId],
+      );
+      return JSON.stringify({
+        action: 'delegate',
+        taskId,
+        workerId,
+        title: 'Feature',
+        description: next.text,
+        estimatedTokens: 5000,
+      });
     },
-    null,
-  );
-  await Promise.all(tasks);
+  };
+  coordinator.update(state, [], host, null);
+  await tasks[0];
+  assert.deepEqual(coordinator.status(), ['Orchestrator · The sub-orchestrator returned an invalid decision']);
+  assert.equal(submitted.length, 0);
+
+  now += 10_000;
+  coordinator.update(state, [], host, null);
+  await tasks[1];
   assert.equal(submitted[0]?.action, 'delegate');
   assert.equal(submitted[0]?.taskId, taskId);
   assert.equal(submitted[0]?.workerId, workerId);

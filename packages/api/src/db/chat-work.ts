@@ -130,7 +130,6 @@ export async function chatWorkInbox(db: WorkspaceDb, clanId: string, workId?: st
     ? {
         workItem: {
           ...workView(root),
-          hasTask: root.workerId !== null,
           ...(root.taskId ? { taskId: root.taskId } : {}),
           ...(root.workerId ? { workerId: root.workerId } : {}),
         },

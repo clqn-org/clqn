@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatSettings, ChatState } from '@clqn/shared';
+import { type ChatMessage, type ChatSettings, type ChatState, defaultPlannerLimit } from '@clqn/shared';
 
 import { type Runtime, runtimeNames } from './agent-session.js';
 import { markdownLines } from './markdown.js';
@@ -259,7 +259,7 @@ export function settingsLines(settings: SettingsView, columns: number, paint: Pa
         : settings.field === backupHostingField
           ? 'Press Enter to allow or stop backup hosting on this device.'
           : settings.field === plannerLimitField
-            ? 'Enter a maximum for the clan, or leave blank to use available memory.'
+            ? `Enter a maximum for the clan. Auto allows up to ${defaultPlannerLimit}, depending on available memory.`
             : 'Enter a whole number or none for unlimited; models comma-separated, blank for any.';
   const hintLines = wrap(hint, columns).map((line) => paint(line, 'muted'));
   // In the smallest terminals, show the rows around the selected one when they do not all fit.
@@ -291,7 +291,7 @@ export function settingsLines(settings: SettingsView, columns: number, paint: Pa
           : field === deleteClanField
             ? `Delete clan      ${plain(settings.deleteText ?? '') || 'Type the clan name'}`
             : field === plannerLimitField
-              ? `Parallel planning ${plain(settings.plannerText ?? '') || 'Auto'}`
+              ? `Planners         ${plain(settings.plannerText ?? '') || 'Auto'}`
               : labels[field]!;
       const line = clip(`${field === settings.field ? '›' : ' '} ${label}`, columns);
       return field === settings.field ? paint(line, 'accent') : line;

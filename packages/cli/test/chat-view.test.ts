@@ -51,14 +51,14 @@ test('parallel planning is editable above Save settings and displays Auto for a 
     action: 'Save settings',
   };
   assert.deepEqual(settingsFields(true, false, true, true).slice(-4), [plannerLimitField, 7, 10, 8]);
-  assert.doesNotMatch(settingsLines(settings, 60, painter(false), 12, '').join('\n'), /Parallel planning/);
+  assert.doesNotMatch(settingsLines(settings, 60, painter(false), 12, '').join('\n'), /Planners/);
   for (const [input, label] of [
     ['', 'Auto'],
     ['7', '7'],
   ] as const) {
     const lines = settingsLines({ ...settings, plannerText: input }, 60, painter(false), 10, '');
     assert.ok(lines.length <= 10);
-    assert.ok(lines.includes(`› Parallel planning ${label}`));
+    assert.ok(lines.includes(`› Planners         ${label}`));
   }
 });
 

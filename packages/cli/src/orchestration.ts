@@ -1,4 +1,11 @@
-import { type ChatState, type ClqnClient, chatDecisionSchema, chatRouteDecisionSchema } from '@clqn/shared';
+import {
+  type ChatRouteDecision,
+  type ChatState,
+  type ClqnClient,
+  chatDecisionSchema,
+  chatRouteDecisionSchema,
+  defaultPlannerLimit,
+} from '@clqn/shared';
 
 type WorkState = NonNullable<ChatState['work']>;
 type ChatInbox = Awaited<ReturnType<ClqnClient['chatInbox']>>;
@@ -29,13 +36,17 @@ If the member asks to continue and a continuation is available, delegate with th
 const hostMemoryReserve = 512 * 1024 * 1024;
 const plannerMemoryAllowance = 256 * 1024 * 1024;
 const retryDelay = 10_000;
-const parseOutput = (output: string): unknown => JSON.parse(output.trim().replace(/^```(?:json)?\s*\n|\n```$/gi, ''));
+const maxRouteAttempts = 2;
+const routeClarification = {
+  action: 'clarify',
+  text: 'I couldn’t route this request. Which task should it update, or what new work should start?',
+} satisfies ChatRouteDecision;
 
-function readRoute(text: string) {
+function parseDecision<T>(schema: { parse(value: unknown): T }, text: string, role: 'router' | 'sub-orchestrator'): T {
   try {
-    return chatRouteDecisionSchema.parse(parseOutput(text));
+    return schema.parse(JSON.parse(text.trim().replace(/^```(?:json)?\s*\n|\n```$/gi, '')));
   } catch {
-    throw new Error('The router returned an invalid decision');
+    throw new Error(`The ${role} returned an invalid decision`);
   }
 }
 
@@ -60,6 +71,7 @@ export function createOrchestration(
 ) {
   const turns = new Map<string, AbortController>();
   const failures = new Map<string, { retry: number; message: string }>();
+  const routeAttempts = new Map<string, number>();
   let routing: { key: string; controller: AbortController } | undefined;
   let cachedWorkers: { until: number; value: Promise<Workers> } | undefined;
 
@@ -89,33 +101,57 @@ export function createOrchestration(
     return controller;
   }
 
-  async function route(host: Host, signal: AbortSignal) {
-    const inbox = await host.api.chatInbox(clanId, host.leaseId, undefined, signal);
-    if (!inbox.next || !inbox.pickId) return;
-    const history = inbox.messages.filter(({ id }) => id !== inbox.next?.id).slice(-4);
-    const textMatch = inbox.next.text.toLowerCase();
+  async function routeDecision(
+    host: Host,
+    inbox: ChatInbox,
+    next: NonNullable<ChatInbox['next']>,
+    signal: AbortSignal,
+  ) {
+    const attempts = routeAttempts.get(next.id) ?? 0;
+    if (attempts >= maxRouteAttempts) return routeClarification;
+    const history = inbox.messages.filter(({ id }) => id !== next.id).slice(-4);
+    const textMatch = next.text.toLowerCase();
     const candidates = [...(inbox.work ?? [])]
       .sort(
         (left, right) =>
           Number(textMatch.includes(right.title.toLowerCase())) - Number(textMatch.includes(left.title.toLowerCase())),
       )
       .slice(0, 24);
-    const text = await host.generate(
-      'router',
-      routerInstructions,
-      JSON.stringify({
-        message: compact(inbox.next),
-        clarification: clarification(inbox),
-        context: history.map((message) => compact(message, 320)),
-        work: candidates,
-      }),
-      signal,
-    );
-    const decision = readRoute(text);
-    if (decision.action === 'followup' && !candidates.some(({ id }) => id === decision.workId))
-      throw new Error('The router chose an unknown task');
-    if (host.active())
-      await host.api.routeChat(clanId, inbox.next.id, { ...decision, pickId: inbox.pickId }, host.leaseId, signal);
+    try {
+      const text = await host.generate(
+        'router',
+        routerInstructions,
+        JSON.stringify({
+          message: compact(next),
+          clarification: clarification(inbox),
+          context: history.map((message) => compact(message, 320)),
+          work: candidates,
+        }),
+        signal,
+      );
+      signal.throwIfAborted();
+      const decision = parseDecision(chatRouteDecisionSchema, text, 'router');
+      if (decision.action === 'followup' && !candidates.some(({ id }) => id === decision.workId))
+        throw new Error('The router chose an unknown task');
+      return decision;
+    } catch (error) {
+      // A forced message or host handoff can cancel a turn without the model failing.
+      if (!host.active() || (signal.aborted && signal.reason?.name !== 'TimeoutError')) throw error;
+      routeAttempts.set(next.id, attempts + 1);
+      if (signal.aborted || attempts + 1 < maxRouteAttempts) throw error;
+      return routeClarification;
+    }
+  }
+
+  async function route(host: Host, signal: AbortSignal) {
+    const inbox = await host.api.chatInbox(clanId, host.leaseId, undefined, signal);
+    const { next, pickId } = inbox;
+    if (!next || !pickId) return;
+    const decision = await routeDecision(host, inbox, next, signal);
+    if (!host.active()) return;
+    signal.throwIfAborted();
+    await host.api.routeChat(clanId, next.id, { ...decision, pickId }, host.leaseId, signal);
+    routeAttempts.delete(next.id);
   }
 
   function getWorkers(api: Host['api']) {
@@ -133,8 +169,8 @@ export function createOrchestration(
     if (!inbox.next || !inbox.pickId || !inbox.workItem) return;
     const root = inbox.messages.find((message) => message.id === id);
     const recent = inbox.messages.filter((message) => message.id !== id && message.id !== inbox.next?.id).slice(-5);
-    const { hasTask, taskId, workerId, status } = inbox.workItem;
-    const canDelegate = !hasTask && !['approval', 'declined'].includes(status);
+    const { taskId, workerId, status } = inbox.workItem;
+    const canDelegate = !workerId && !['approval', 'declined'].includes(status);
     const continuation =
       taskId && workerId && ['released', 'review'].includes(status) ? { taskId, workerId } : undefined;
     const available =
@@ -164,7 +200,7 @@ export function createOrchestration(
       }),
       signal,
     );
-    const decision = chatDecisionSchema.parse(parseOutput(text));
+    const decision = parseDecision(chatDecisionSchema, text, 'sub-orchestrator');
     if (
       decision.action === 'delegate' &&
       ((!canDelegate && !continuation) ||
@@ -196,7 +232,7 @@ export function createOrchestration(
       // Reserve memory for planner turns whose child processes may still be starting. Keep one slot for progress
       // on small hosts or when the platform cannot report available memory.
       const memorySlots = Math.max(1, Math.floor((availableMemory() - hostMemoryReserve) / plannerMemoryAllowance));
-      const slots = Math.min(memorySlots, host.plannerLimit ?? Infinity);
+      const slots = Math.min(memorySlots, host.plannerLimit ?? defaultPlannerLimit);
       let capacity = slots - turns.size + Number(Boolean(routing));
       for (const id of state.ready) {
         if (capacity <= 0) break;
@@ -218,6 +254,7 @@ export function createOrchestration(
       for (const controller of turns.values()) controller.abort();
       turns.clear();
       failures.clear();
+      routeAttempts.clear();
       routing = undefined;
       cachedWorkers = undefined;
     },
