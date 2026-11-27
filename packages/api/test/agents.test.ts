@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createApp } from '../src/app.js';
-import type { WorkspaceStore } from '../src/db/store.js';
+import { hashToken, type WorkspaceStore } from '../src/db/store.js';
 
 const alice = { id: '65fd2b48-b47f-4862-a85d-af491cdb8a3c', email: 'alice@example.com' };
 const clanId = 'e6faf7c5-0b04-45de-8eba-c1fda2a17a89';
@@ -64,4 +64,36 @@ test('agent registration uses the authenticated owner, validates the name, and e
   assert.equal((await app.request('/v1/agent', { headers })).status, 404);
   const list = await app.request(`/v1/clans/${clanId}/agents`, { headers });
   assert.deepEqual(await list.json(), { agents: [{ ...agent, active: true, allowedModels: null }] });
+});
+
+test('worker model reports pass the credential hash and validate a bounded catalog', async () => {
+  const actor = { ...alice, clanId, agentId };
+  const app = createApp(
+    stub({
+      authenticate: async () => actor,
+      reportWorkerModels: async (who, tokenHash, models) => {
+        assert.deepEqual(who, actor);
+        assert.equal(tokenHash, hashToken(token));
+        return { models };
+      },
+    }),
+  );
+  const post = (body: object) =>
+    app.request('/v1/agent/models', { method: 'POST', headers, body: JSON.stringify(body) });
+  const models = [{ id: 'model-v2', label: 'Model v2', description: 'Handles code.' }];
+  for (const payload of [{ models }, { models: null }]) {
+    const response = await post(payload);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), payload);
+  }
+  for (const invalid of [
+    {},
+    { models: [] },
+    { models: [models[0], models[0]] },
+    { models: Array.from({ length: 61 }, (_, index) => ({ id: `model-${index}` })) },
+    { models: [{ id: 'bad model' }] },
+    { models, agentId },
+  ]) {
+    assert.equal((await post(invalid)).status, 400);
+  }
 });

@@ -171,6 +171,7 @@ export function createChatRoutes(db: WorkspaceDb) {
         plannerLimit: identity.plannerLimit,
       },
       settings: member.settings,
+      workerModelDiscovery: true,
       ...history,
       ...activity,
       forcePending: priority,

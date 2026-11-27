@@ -1,4 +1,4 @@
-import { type Actor, ApiError, registerAgentSchema, setAliasSchema } from '@clqn/shared';
+import { type Actor, ApiError, registerAgentSchema, setAliasSchema, workerModelReportSchema } from '@clqn/shared';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
@@ -6,7 +6,7 @@ import type { WorkspaceStore } from '../db/store.js';
 import { pageResponse, parsePage } from '../lib/pagination.js';
 
 export function createAgentRoutes(store: WorkspaceStore) {
-  const app = new Hono<{ Variables: { user: Actor } }>();
+  const app = new Hono<{ Variables: { user: Actor; tokenHash: string } }>();
   const smallBody = bodyLimit({
     maxSize: 4096,
     onError: (c) => c.json({ error: { code: 'INVALID_REQUEST', message: 'Request body is too large' } }, 413),
@@ -60,6 +60,15 @@ export function createAgentRoutes(store: WorkspaceStore) {
     const agent = await store.agentStatus(c.get('user'));
     if (!agent) return c.json({ error: { code: 'NOT_FOUND', message: 'Agent registration not found' } }, 404);
     return c.json(agent);
+  });
+  const modelsBody = bodyLimit({
+    maxSize: 128 * 1024,
+    onError: (c) => c.json({ error: { code: 'INVALID_REQUEST', message: 'Request body is too large' } }, 413),
+  });
+  app.post('/agent/models', modelsBody, async (c) => {
+    const parsed = workerModelReportSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) throw new ApiError(400, 'INVALID_REQUEST', 'Provide a valid worker model catalog or null');
+    return c.json(await store.reportWorkerModels(c.get('user'), c.get('tokenHash'), parsed.data.models));
   });
   return app;
 }

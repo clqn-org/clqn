@@ -162,6 +162,13 @@
       "when": 1795747887264,
       "tag": "0022_chat_planner_limit",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1795753539740,
+      "tag": "0023_worker_model_catalog",
+      "breakpoints": true
     }
   ]
 }

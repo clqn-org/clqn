@@ -1,6 +1,14 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { type Actor, type Agent, ApiError, type Clan, type PageQuery, type PendingInvitation } from '@clqn/shared';
-import { and, count, desc, eq, gt, inArray, isNull, sql as query } from 'drizzle-orm';
+import {
+  type Actor,
+  type Agent,
+  ApiError,
+  type Clan,
+  type PageQuery,
+  type PendingInvitation,
+  type WorkerModel,
+} from '@clqn/shared';
+import { and, count, desc, eq, gt, inArray, isNull, sql as query, type SQL } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { appendEvent, lockClan, requireClan, requirePersonal } from '../lib/access.js';
@@ -36,12 +44,17 @@ export interface WorkspaceStore {
     reference: string,
     reissue: boolean,
   ): Promise<{ agent: Agent; token?: string }>;
+  reportWorkerModels(
+    actor: Actor,
+    tokenHash: string,
+    models: WorkerModel[] | null,
+  ): Promise<{ models: WorkerModel[] | null }>;
   revokeToken(tokenHash: string): Promise<boolean>;
   listAgents(
     actor: Actor,
     clanId: string,
     page?: PageQuery,
-  ): Promise<(Agent & { active: boolean; allowedModels: string[] | null })[]>;
+  ): Promise<(Agent & { active: boolean; allowedModels: string[] | null; availableModels?: WorkerModel[] | null })[]>;
   agentStatus(actor: Actor): Promise<Agent | undefined>;
   authenticate(tokenHash: string): Promise<Actor | undefined>;
   createClan(userId: string, name: string): Promise<Clan>;
@@ -66,10 +79,44 @@ export function createStore(url: string, poolSize = 10) {
     ...clan,
     createdAt: clan.createdAt.toISOString(),
   });
-  const agentView = (agent: typeof schema.agents.$inferSelect): Agent => ({
+  const agentView = ({ availableModels: _availableModels, ...agent }: typeof schema.agents.$inferSelect): Agent => ({
     ...agent,
     createdAt: agent.createdAt.toISOString(),
   });
+  async function revokeCredential(filter: SQL) {
+    return db.transaction(async (tx) => {
+      const [target] = await tx
+        .select({
+          agentId: schema.credentials.agentId,
+          userId: schema.credentials.userId,
+          clanId: schema.agents.clanId,
+        })
+        .from(schema.credentials)
+        .leftJoin(schema.agents, eq(schema.agents.id, schema.credentials.agentId))
+        .where(filter);
+      if (!target) return false;
+      if (target.agentId && target.clanId) {
+        // Match model reports and member removal: membership, agent, then credential.
+        await tx
+          .select({ userId: schema.memberships.userId })
+          .from(schema.memberships)
+          .where(and(eq(schema.memberships.clanId, target.clanId), eq(schema.memberships.userId, target.userId)))
+          .for('share');
+        await tx
+          .select({ id: schema.agents.id })
+          .from(schema.agents)
+          .where(eq(schema.agents.id, target.agentId))
+          .for('update');
+      }
+      const [revoked] = await tx
+        .delete(schema.credentials)
+        .where(filter)
+        .returning({ agentId: schema.credentials.agentId });
+      if (revoked?.agentId)
+        await tx.update(schema.agents).set({ availableModels: null }).where(eq(schema.agents.id, revoked.agentId));
+      return !!revoked;
+    });
+  }
   const store: WorkspaceStore = {
     async authenticate(tokenHash) {
       const [result] = await db
@@ -172,6 +219,8 @@ export function createStore(url: string, poolSize = 10) {
         if (agent.ownerId !== actor.id && (reissue || membership.role !== 'leader'))
           throw new ApiError(403, 'FORBIDDEN', 'Only the registered owner or the clan leader can revoke an agent');
         await tx.delete(schema.credentials).where(eq(schema.credentials.agentId, agent.id));
+        if (agent.availableModels)
+          await tx.update(schema.agents).set({ availableModels: null }).where(eq(schema.agents.id, agent.id));
         const token = reissue ? `clqn_${randomBytes(32).toString('base64url')}` : undefined;
         if (token)
           await tx
@@ -186,12 +235,43 @@ export function createStore(url: string, poolSize = 10) {
         return token ? { agent: agentView(agent), token } : { agent: agentView(agent) };
       });
     },
+    async reportWorkerModels(actor, tokenHash, models) {
+      const { agentId, clanId } = actor;
+      const forbidden = () => new ApiError(403, 'FORBIDDEN', 'An active worker credential is required');
+      if (!agentId || !clanId) throw forbidden();
+      return db.transaction(async (tx) => {
+        await requireClan(tx, actor, clanId, 'share');
+        const [agent] = await tx
+          .select({ id: schema.agents.id })
+          .from(schema.agents)
+          .where(
+            and(
+              eq(schema.agents.id, agentId),
+              eq(schema.agents.clanId, clanId),
+              eq(schema.agents.ownerId, actor.id),
+              eq(schema.agents.role, 'worker'),
+            ),
+          )
+          .for('update');
+        if (!agent) throw forbidden();
+        const [credential] = await tx
+          .select({ id: schema.credentials.id })
+          .from(schema.credentials)
+          .where(
+            and(
+              eq(schema.credentials.agentId, agentId),
+              eq(schema.credentials.userId, actor.id),
+              eq(schema.credentials.tokenHash, tokenHash),
+            ),
+          )
+          .for('share');
+        if (!credential) throw forbidden();
+        await tx.update(schema.agents).set({ availableModels: models }).where(eq(schema.agents.id, agentId));
+        return { models };
+      });
+    },
     async revokeToken(tokenHash) {
-      const rows = await db
-        .delete(schema.credentials)
-        .where(eq(schema.credentials.tokenHash, tokenHash))
-        .returning({ id: schema.credentials.id });
-      return rows.length > 0;
+      return revokeCredential(eq(schema.credentials.tokenHash, tokenHash));
     },
     async listAgents(actor, clanId, page) {
       await requireClan(db, actor, clanId);
@@ -220,6 +300,7 @@ export function createStore(url: string, poolSize = 10) {
         ...agentView(agent),
         active,
         allowedModels: allowedModels ?? null,
+        availableModels: agent.availableModels,
       }));
     },
     async agentStatus(actor) {
@@ -387,11 +468,18 @@ export function createStore(url: string, poolSize = 10) {
             .where(and(eq(schema.invitations.clanId, clanId), pendingFor(user.email)));
         }
         // Delete agent tokens too, so a later invitation cannot revive them.
-        const owned = tx
-          .select({ id: schema.agents.id })
-          .from(schema.agents)
-          .where(and(eq(schema.agents.clanId, clanId), eq(schema.agents.ownerId, userId)));
-        await tx.delete(schema.credentials).where(inArray(schema.credentials.agentId, owned));
+        const owned = await tx
+          .update(schema.agents)
+          .set({ availableModels: null })
+          .where(and(eq(schema.agents.clanId, clanId), eq(schema.agents.ownerId, userId)))
+          .returning({ id: schema.agents.id });
+        if (owned.length)
+          await tx.delete(schema.credentials).where(
+            inArray(
+              schema.credentials.agentId,
+              owned.map(({ id }) => id),
+            ),
+          );
         await tx
           .delete(schema.memberships)
           .where(and(eq(schema.memberships.clanId, clanId), eq(schema.memberships.userId, userId)));
@@ -520,11 +608,7 @@ export function createStore(url: string, poolSize = 10) {
       return { ...result, token };
     },
     async revokeCredential(id: string) {
-      const rows = await db
-        .delete(schema.credentials)
-        .where(eq(schema.credentials.id, id))
-        .returning({ id: schema.credentials.id });
-      return rows.length > 0;
+      return revokeCredential(eq(schema.credentials.id, id));
     },
     close: () => sql.end(),
   };

@@ -17,6 +17,8 @@ import {
   logoutSchema,
   registerAgentSchema,
   revokedAgentSchema,
+  type WorkerModel,
+  workerModelReportSchema,
 } from './agents.js';
 import { setAliasSchema } from './aliases.js';
 import {
@@ -455,6 +457,9 @@ export class ClqnClient {
   }
   agentStatus() {
     return this.request('/v1/agent', agentSchema);
+  }
+  reportWorkerModels(models: WorkerModel[] | null, signal?: AbortSignal) {
+    return this.request('/v1/agent/models', workerModelReportSchema, workerModelReportSchema.parse({ models }), signal);
   }
   linkRepository(clanId: string, slug: string) {
     return this.request(
