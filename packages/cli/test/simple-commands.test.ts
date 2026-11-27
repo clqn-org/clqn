@@ -204,7 +204,12 @@ test('agent add rejects a blank name before HTTP access', async (t) => {
 
 test('unknown commands and flags fail before API or Git access', async (t) => {
   const f = await fixture(t);
-  for (const args of [['sync'], ['task', 'start', taskId], ['agent', 'add', '--name', 'Legacy']])
+  for (const args of [
+    ['sync'],
+    ['task', 'start', taskId],
+    ['agent', 'add', '--name', 'Legacy'],
+    ['mcp', '--lease', taskId],
+  ])
     await assert.rejects(f.call(args), (thrown) => {
       const error = thrown as ExecError;
       assert.equal(error.code, 1);
